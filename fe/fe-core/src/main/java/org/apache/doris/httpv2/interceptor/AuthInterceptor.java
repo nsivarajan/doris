@@ -26,6 +26,11 @@ import org.springframework.web.bind.annotation.RequestMethod;
 import org.springframework.web.servlet.HandlerInterceptor;
 import org.springframework.web.servlet.ModelAndView;
 
+import org.apache.doris.common.Config;
+import org.apache.doris.analysis.UserIdentity;
+import org.apache.doris.catalog.Env;
+import org.apache.doris.qe.ConnectContext;
+import java.security.cert.X509Certificate;
 import javax.servlet.http.HttpServletRequest;
 import javax.servlet.http.HttpServletResponse;
 
@@ -38,16 +43,62 @@ public class AuthInterceptor extends BaseController implements HandlerIntercepto
         if (LOG.isDebugEnabled()) {
             LOG.debug("get prehandle. thread: {}", Thread.currentThread().getId());
         }
-        // String sessionId = getCookieValue(request, BaseController.PALO_SESSION_ID, response);
-        // SessionValue sessionValue = HttpAuthManager.getInstance().getSessionValue(sessionId);
         String method = request.getMethod();
         if (method.equalsIgnoreCase(RequestMethod.OPTIONS.toString())) {
             response.setStatus(HttpStatus.NO_CONTENT.value());
             return true;
         }
-
-        checkAuthWithCookie(request, response);
-        return true;
+        // mTLS mode: extract UID from client certificate
+        if ("mtls".equalsIgnoreCase(Config.authentication_type)) {
+            X509Certificate[] certs = (X509Certificate[]) request.getAttribute("javax.servlet.request.X509Certificate");
+            if (certs == null || certs.length == 0) {
+                LOG.warn("No client certificate presented for mTLS HTTP authentication");
+                response.sendError(HttpStatus.UNAUTHORIZED.value(), "Client certificate required");
+                return false;
+            }
+            X509Certificate clientCert = certs[0];
+            String uid = null;
+            try {
+                String dn = clientCert.getSubjectX500Principal().getName();
+                String[] dnParts = dn.split(",");
+                for (String part : dnParts) {
+                    part = part.trim();
+                    if (part.startsWith("UID=")) {
+                        uid = part.substring(4);
+                        break;
+                    }
+                }
+            } catch (Exception e) {
+                LOG.warn("Failed to parse UID from client certificate", e);
+            }
+            if (uid == null || uid.isEmpty()) {
+                LOG.warn("No UID found in client certificate subject: {}", clientCert.getSubjectX500Principal());
+                response.sendError(HttpStatus.UNAUTHORIZED.value(), "UID not found in client certificate");
+                return false;
+            }
+            // Check if user exists
+            UserIdentity userIdentity = UserIdentity.createAnalyzedUserIdentWithIp(uid, "%");
+            if (!Env.getCurrentEnv().getAuth().doesUserExist(userIdentity)) {
+                LOG.warn("No Doris user found for UID: {}", uid);
+                response.sendError(HttpStatus.UNAUTHORIZED.value(), "User not found for UID");
+                return false;
+            }
+            // Set up ConnectContext for this user
+            ConnectContext ctx = new ConnectContext();
+            ctx.setQualifiedUser(uid);
+            ctx.setRemoteIP(request.getRemoteAddr());
+            ctx.setCurrentUserIdentity(userIdentity);
+            ctx.setEnv(Env.getCurrentEnv());
+            ctx.setThreadLocalInfo();
+            if (LOG.isDebugEnabled()) {
+                LOG.debug("mTLS HTTP authentication succeeded for UID: {}", uid);
+            }
+            return true;
+        } else {
+            // Default/LDAP: use existing logic
+            checkAuthWithCookie(request, response);
+            return true;
+        }
     }
 
     @Override

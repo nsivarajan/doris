@@ -2604,7 +2604,7 @@ public class Config extends ConfigBase {
     /**
      * To prevent different types (V1, V2, V3) of behavioral inconsistencies,
      * we may delete the DecimalV2 and DateV1 types in the future.
-     * At this stage, we use ‘disable_decimalv2’ and ‘disable_datev1’
+     * At this stage, we use 'disable_decimalv2' and 'disable_datev1'
      * to determine whether these two types take effect.
      */
     @ConfField(mutable = true)
@@ -3606,4 +3606,13 @@ public class Config extends ConfigBase {
     @ConfField(mutable = true, description = {"Prometheus 输出表维度指标的个数限制",
             "Prometheus output table dimension metric count limit"})
     public static int prom_output_table_metrics_limit = 10000;
+
+    @ConfField(description = {"The trust store path for verifying client certificates"})
+    public static String trust_store_path = "";
+
+    @ConfField(description = {"The trust store password for verifying client certificates"})
+    public static String trust_store_password = "";
+
+    @ConfField(description = {"The trust store type for verifying client certificates"})
+    public static String trust_store_type = "JKS";
 }

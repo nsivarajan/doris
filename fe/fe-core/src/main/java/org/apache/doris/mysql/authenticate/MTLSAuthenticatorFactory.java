@@ -17,35 +17,16 @@
 
 package org.apache.doris.mysql.authenticate;
 
-import org.apache.doris.mysql.authenticate.password.Password;
-import org.apache.doris.mysql.MysqlChannel;
+import java.util.Properties;
 
-public class AuthenticateRequest {
-    private String userName;
-    private Password password;
-    private String remoteIp;
-    private MysqlChannel channel;
-
-    public AuthenticateRequest(String userName, Password password, String remoteIp, MysqlChannel channel) {
-        this.userName = userName;
-        this.password = password;
-        this.remoteIp = remoteIp;
-        this.channel = channel;
+public class MTLSAuthenticatorFactory implements AuthenticatorFactory {
+    @Override
+    public MTLSAuthenticator create(Properties initProps) {
+        return new MTLSAuthenticator();
     }
 
-    public String getUserName() {
-        return userName;
+    @Override
+    public String factoryIdentifier() {
+        return "mtls";
     }
-
-    public Password getPassword() {
-        return password;
-    }
-
-    public String getRemoteIp() {
-        return remoteIp;
-    }
-
-    public MysqlChannel getChannel() {
-        return channel;
-    }
-}
+} 
