@@ -53,12 +53,12 @@ public class WebServerFactoryCustomizerConfig implements WebServerFactoryCustomi
                                     if (connector instanceof org.eclipse.jetty.server.ServerConnector) {
                                         // 'sc' is managed by Jetty; no need to close. This is not a resource leak.
                                         org.eclipse.jetty.server.ServerConnector sc =
-                                            (org.eclipse.jetty.server.ServerConnector) connector;
+                                                (org.eclipse.jetty.server.ServerConnector) connector;
                                         for (org.eclipse.jetty.server.ConnectionFactory cf : sc.getConnectionFactories()) {
                                             if (cf instanceof org.eclipse.jetty.server.SslConnectionFactory) {
                                                 SslContextFactory.Server sslContextFactory =
-                                                    (SslContextFactory.Server) ((org.eclipse.jetty.server.SslConnectionFactory) cf)
-                                                        .getSslContextFactory();
+                                                        (SslContextFactory.Server) ((org.eclipse.jetty.server.SslConnectionFactory) cf)
+                                                                .getSslContextFactory();
                                                 // Set truststore if configured
                                                 if (Config.trust_store_path != null && !Config.trust_store_path.isEmpty()) {
                                                     sslContextFactory.setTrustStorePath(Config.trust_store_path);

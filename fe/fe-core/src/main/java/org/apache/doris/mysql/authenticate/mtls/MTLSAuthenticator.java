@@ -19,7 +19,6 @@ package org.apache.doris.mysql.authenticate.mtls;
 
 import java.io.IOException;
 import java.security.cert.X509Certificate;
-
 import javax.naming.ldap.LdapName;
 import javax.naming.ldap.Rdn;
 import javax.net.ssl.SSLEngine;

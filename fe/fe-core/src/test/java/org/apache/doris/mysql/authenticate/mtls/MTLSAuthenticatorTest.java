@@ -18,16 +18,14 @@
 package org.apache.doris.mysql.authenticate.mtls;
 
 import java.security.cert.X509Certificate;
-
 import javax.net.ssl.SSLEngine;
 import javax.net.ssl.SSLSession;
 
+import mockit.Expectations;
+import mockit.Mocked;
 import org.junit.Assert;
 import org.junit.Before;
 import org.junit.Test;
-
-import mockit.Expectations;
-import mockit.Mocked;
 
 import org.apache.doris.analysis.UserIdentity;
 import org.apache.doris.catalog.Env;

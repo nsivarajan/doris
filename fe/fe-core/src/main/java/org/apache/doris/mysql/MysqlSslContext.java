@@ -28,7 +28,6 @@ import java.security.KeyStoreException;
 import java.security.NoSuchAlgorithmException;
 import java.security.UnrecoverableKeyException;
 import java.security.cert.CertificateException;
-
 import javax.net.ssl.KeyManagerFactory;
 import javax.net.ssl.SSLContext;
 import javax.net.ssl.SSLEngine;
@@ -70,14 +69,14 @@ public class MysqlSslContext {
     private void initSslContext() {
         try {
             String effectiveTrustStorePath = (Config.trust_store_path != null && !Config.trust_store_path.isEmpty())
-                ? Config.trust_store_path
-                : trustStoreFile;
+                    ? Config.trust_store_path
+                    : trustStoreFile;
             String effectiveTrustStorePassword = (Config.trust_store_password != null && !Config.trust_store_password.isEmpty())
-                ? Config.trust_store_password
-                : caCertificatePassword;
+                    ? Config.trust_store_password
+                    : caCertificatePassword;
             String effectiveTrustStoreType = (Config.trust_store_type != null && !Config.trust_store_type.isEmpty())
-                ? Config.trust_store_type
-                : trustStoreType;
+                    ? Config.trust_store_type
+                    : trustStoreType;
 
             KeyStore ks = KeyStore.getInstance(trustStoreType);
             KeyStore ts = KeyStore.getInstance(effectiveTrustStoreType);

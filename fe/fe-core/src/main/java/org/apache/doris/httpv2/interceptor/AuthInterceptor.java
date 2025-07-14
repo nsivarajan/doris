@@ -18,7 +18,6 @@
 package org.apache.doris.httpv2.interceptor;
 
 import java.security.cert.X509Certificate;
-
 import javax.servlet.http.HttpServletRequest;
 import javax.servlet.http.HttpServletResponse;
 
