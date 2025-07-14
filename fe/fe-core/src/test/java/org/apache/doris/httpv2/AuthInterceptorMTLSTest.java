@@ -17,11 +17,6 @@
 
 package org.apache.doris.httpv2;
 
-import java.security.cert.X509Certificate;
-import javax.security.auth.x500.X500Principal;
-import javax.servlet.http.HttpServletRequest;
-import javax.servlet.http.HttpServletResponse;
-
 import org.apache.doris.analysis.UserIdentity;
 import org.apache.doris.catalog.Env;
 import org.apache.doris.common.Config;
@@ -32,6 +27,11 @@ import org.junit.Assert;
 import org.junit.Before;
 import org.junit.Test;
 import org.mockito.Mockito;
+
+import java.security.cert.X509Certificate;
+import javax.security.auth.x500.X500Principal;
+import javax.servlet.http.HttpServletRequest;
+import javax.servlet.http.HttpServletResponse;
 
 public class AuthInterceptorMTLSTest {
     private AuthInterceptor interceptor;

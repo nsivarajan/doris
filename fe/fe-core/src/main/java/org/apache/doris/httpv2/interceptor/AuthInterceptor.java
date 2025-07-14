@@ -17,10 +17,6 @@
 
 package org.apache.doris.httpv2.interceptor;
 
-import java.security.cert.X509Certificate;
-import javax.servlet.http.HttpServletRequest;
-import javax.servlet.http.HttpServletResponse;
-
 import org.apache.doris.analysis.UserIdentity;
 import org.apache.doris.catalog.Env;
 import org.apache.doris.common.Config;
@@ -33,6 +29,10 @@ import org.springframework.http.HttpStatus;
 import org.springframework.web.bind.annotation.RequestMethod;
 import org.springframework.web.servlet.HandlerInterceptor;
 import org.springframework.web.servlet.ModelAndView;
+
+import java.security.cert.X509Certificate;
+import javax.servlet.http.HttpServletRequest;
+import javax.servlet.http.HttpServletResponse;
 
 public class AuthInterceptor extends BaseController implements HandlerInterceptor {
     private static final Logger LOG = LogManager.getLogger(AuthInterceptor.class);

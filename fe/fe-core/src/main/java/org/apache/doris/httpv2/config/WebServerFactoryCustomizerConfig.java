@@ -17,8 +17,6 @@
 
 package org.apache.doris.httpv2.config;
 
-import java.util.Collections;
-
 import org.apache.doris.common.Config;
 
 import org.eclipse.jetty.server.HttpConfiguration;
@@ -30,6 +28,8 @@ import org.springframework.boot.web.embedded.jetty.ConfigurableJettyWebServerFac
 import org.springframework.boot.web.embedded.jetty.JettyServletWebServerFactory;
 import org.springframework.boot.web.server.WebServerFactoryCustomizer;
 import org.springframework.context.annotation.Configuration;
+
+import java.util.Collections;
 
 @Configuration
 public class WebServerFactoryCustomizerConfig implements WebServerFactoryCustomizer<ConfigurableJettyWebServerFactory> {

@@ -17,9 +17,9 @@
 
 package org.apache.doris.mysql.authenticate.mtls;
 
-import java.util.Properties;
-
 import org.apache.doris.mysql.authenticate.AuthenticatorFactory;
+
+import java.util.Properties;
 
 public class MTLSAuthenticatorFactory implements AuthenticatorFactory {
     @Override
