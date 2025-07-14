@@ -61,8 +61,8 @@ public class WebServerFactoryCustomizerConfig implements WebServerFactoryCustomi
                                                         (SslContextFactory.Server)
                                                         ((org.eclipse.jetty.server.SslConnectionFactory) cf)
                                                         .getSslContextFactory();
-                                                // Set truststore using mysql_ssl_default_ca_certificate
-                                                sslContextFactory.setTrustStorePath(Config.mysql_ssl_default_ca_certificate);
+                                                sslContextFactory.setTrustStorePath(
+                                                        Config.mysql_ssl_default_ca_certificate);
                                                 sslContextFactory.setTrustStorePassword(
                                                         Config.mysql_ssl_default_ca_certificate_password);
                                                 sslContextFactory.setTrustStoreType(Config.ssl_trust_store_type);
