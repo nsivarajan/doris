@@ -52,7 +52,6 @@ public class MysqlSslContext {
     private static final String trustStoreFile = Config.mysql_ssl_default_ca_certificate;
     private static final String caCertificatePassword = Config.mysql_ssl_default_ca_certificate_password;
     private static final String serverCertificatePassword = Config.mysql_ssl_default_server_certificate_password;
-    private static final String trustStoreType = Config.ssl_trust_store_type;
     private ByteBuffer serverNetData;
     private ByteBuffer clientAppData;
     private ByteBuffer clientNetData;
@@ -75,12 +74,9 @@ public class MysqlSslContext {
                     (Config.trust_store_password != null && !Config.trust_store_password.isEmpty())
                     ? Config.trust_store_password
                     : caCertificatePassword;
-            String effectiveTrustStoreType = (Config.trust_store_type != null && !Config.trust_store_type.isEmpty())
-                    ? Config.trust_store_type
-                    : trustStoreType;
-
-            KeyStore ks = KeyStore.getInstance(trustStoreType);
-            KeyStore ts = KeyStore.getInstance(effectiveTrustStoreType);
+            
+            KeyStore ks = KeyStore.getInstance(Config.ssl_trust_store_type);
+            KeyStore ts = KeyStore.getInstance(Config.ssl_trust_store_type);
 
             char[] serverPassword = serverCertificatePassword.toCharArray();
             char[] caPassword = effectiveTrustStorePassword.toCharArray();
@@ -111,7 +107,8 @@ public class MysqlSslContext {
         sslEngine.setUseClientMode(false);
         sslEngine.setEnabledCipherSuites(sslEngine.getSupportedCipherSuites());
         sslEngine.setWantClientAuth(true);
-        if (Config.ssl_force_client_auth) {
+        // Automatically require client certificates when MTLS authentication is enabled
+        if (Config.ssl_force_client_auth || "mtls".equalsIgnoreCase(Config.authentication_type)) {
             sslEngine.setNeedClientAuth(true);
         }
     }

@@ -67,7 +67,7 @@ public class WebServerFactoryCustomizerConfig implements WebServerFactoryCustomi
                                                     sslContextFactory.setTrustStorePath(Config.trust_store_path);
                                                     sslContextFactory.setTrustStorePassword(
                                                             Config.trust_store_password);
-                                                    sslContextFactory.setTrustStoreType(Config.trust_store_type);
+                                                    sslContextFactory.setTrustStoreType(Config.ssl_trust_store_type);
                                                 }
                                                 if ("mtls".equalsIgnoreCase(Config.authentication_type)) {
                                                     sslContextFactory.setNeedClientAuth(true);

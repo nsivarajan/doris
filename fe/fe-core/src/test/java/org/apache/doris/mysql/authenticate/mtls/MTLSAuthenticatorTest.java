@@ -122,9 +122,9 @@ public class MTLSAuthenticatorTest {
         // Set custom truststore config
         org.apache.doris.common.Config.trust_store_path = "/tmp/fake-truststore-mysql.jks";
         org.apache.doris.common.Config.trust_store_password = "mysqlpass";
-        org.apache.doris.common.Config.trust_store_type = "JKS";
+        org.apache.doris.common.Config.ssl_trust_store_type = "PKCS12";
         Assert.assertEquals("/tmp/fake-truststore-mysql.jks", org.apache.doris.common.Config.trust_store_path);
         Assert.assertEquals("mysqlpass", org.apache.doris.common.Config.trust_store_password);
-        Assert.assertEquals("JKS", org.apache.doris.common.Config.trust_store_type);
+        Assert.assertEquals("PKCS12", org.apache.doris.common.Config.ssl_trust_store_type);
     }
 }

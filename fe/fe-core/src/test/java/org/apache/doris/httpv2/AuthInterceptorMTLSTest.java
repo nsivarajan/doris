@@ -116,10 +116,9 @@ public class AuthInterceptorMTLSTest {
     public void testTrustStoreConfigForHttp() {
         org.apache.doris.common.Config.trust_store_path = "/tmp/fake-truststore-http.jks";
         org.apache.doris.common.Config.trust_store_password = "httppass";
-        org.apache.doris.common.Config.trust_store_type = "JKS";
+        org.apache.doris.common.Config.ssl_trust_store_type = "PKCS12";
         Assert.assertEquals("/tmp/fake-truststore-http.jks", org.apache.doris.common.Config.trust_store_path);
         Assert.assertEquals("httppass", org.apache.doris.common.Config.trust_store_password);
-        Assert.assertEquals("JKS", org.apache.doris.common.Config.trust_store_type);
-        // This ensures the config is set and would be used by Jetty SSL context.
+        Assert.assertEquals("PKCS12", org.apache.doris.common.Config.ssl_trust_store_type);
     }
 }

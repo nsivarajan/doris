@@ -2489,13 +2489,15 @@ public class Config extends ConfigBase {
     public static int max_error_tablet_of_broker_load = 3;
 
     /**
-     * If set to ture, doris will establish an encrypted channel based on the SSL protocol with mysql.
+     * If set to true, doris will establish an encrypted channel based on the SSL protocol with mysql.
+     * When authentication_type is set to "mtls", this is automatically enabled.
      */
     @ConfField(mutable = false, masterOnly = false, varType = VariableAnnotation.EXPERIMENTAL)
     public static boolean enable_ssl = false;
 
     /**
-     * If set to ture, ssl connection needs to authenticate client's certificate.
+     * If set to true, ssl connection needs to authenticate client's certificate.
+     * When authentication_type is set to "mtls", this is automatically enabled.
      */
     @ConfField(mutable = false, masterOnly = false)
     public static boolean ssl_force_client_auth = false;
@@ -3612,7 +3614,4 @@ public class Config extends ConfigBase {
 
     @ConfField(description = {"The trust store password for verifying client certificates"})
     public static String trust_store_password = "";
-
-    @ConfField(description = {"The trust store type for verifying client certificates"})
-    public static String trust_store_type = "JKS";
 }
