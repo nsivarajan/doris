@@ -119,12 +119,12 @@ public class MTLSAuthenticatorTest {
 
     @Test
     public void testTrustStoreConfigUsed() throws Exception {
-        // Set custom truststore config
-        org.apache.doris.common.Config.trust_store_path = "/tmp/fake-truststore-mysql.jks";
-        org.apache.doris.common.Config.trust_store_password = "mysqlpass";
+        // Set custom CA certificate config
+        org.apache.doris.common.Config.mysql_ssl_default_ca_certificate = "/tmp/fake-truststore-mysql.jks";
+        org.apache.doris.common.Config.mysql_ssl_default_ca_certificate_password = "mysqlpass";
         org.apache.doris.common.Config.ssl_trust_store_type = "PKCS12";
-        Assert.assertEquals("/tmp/fake-truststore-mysql.jks", org.apache.doris.common.Config.trust_store_path);
-        Assert.assertEquals("mysqlpass", org.apache.doris.common.Config.trust_store_password);
+        Assert.assertEquals("/tmp/fake-truststore-mysql.jks", org.apache.doris.common.Config.mysql_ssl_default_ca_certificate);
+        Assert.assertEquals("mysqlpass", org.apache.doris.common.Config.mysql_ssl_default_ca_certificate_password);
         Assert.assertEquals("PKCS12", org.apache.doris.common.Config.ssl_trust_store_type);
     }
 }

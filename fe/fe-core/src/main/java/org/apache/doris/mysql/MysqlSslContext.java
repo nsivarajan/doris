@@ -67,24 +67,16 @@ public class MysqlSslContext {
 
     private void initSslContext() {
         try {
-            String effectiveTrustStorePath = (Config.trust_store_path != null && !Config.trust_store_path.isEmpty())
-                    ? Config.trust_store_path
-                    : trustStoreFile;
-            String effectiveTrustStorePassword =
-                    (Config.trust_store_password != null && !Config.trust_store_password.isEmpty())
-                    ? Config.trust_store_password
-                    : caCertificatePassword;
-            
             KeyStore ks = KeyStore.getInstance(Config.ssl_trust_store_type);
             KeyStore ts = KeyStore.getInstance(Config.ssl_trust_store_type);
 
             char[] serverPassword = serverCertificatePassword.toCharArray();
-            char[] caPassword = effectiveTrustStorePassword.toCharArray();
+            char[] caPassword = caCertificatePassword.toCharArray();
 
             try (InputStream stream = Files.newInputStream(Paths.get(keyStoreFile))) {
                 ks.load(stream, serverPassword);
             }
-            try (InputStream stream = Files.newInputStream(Paths.get(effectiveTrustStorePath))) {
+            try (InputStream stream = Files.newInputStream(Paths.get(trustStoreFile))) {
                 ts.load(stream, caPassword);
             }
 

@@ -3609,9 +3609,4 @@ public class Config extends ConfigBase {
             "Prometheus output table dimension metric count limit"})
     public static int prom_output_table_metrics_limit = 10000;
 
-    @ConfField(description = {"The trust store path for verifying client certificates"})
-    public static String trust_store_path = "";
-
-    @ConfField(description = {"The trust store password for verifying client certificates"})
-    public static String trust_store_password = "";
 }
