@@ -19,6 +19,8 @@ package org.apache.doris.httpv2.config;
 
 import java.util.Collections;
 
+import org.apache.doris.common.Config;
+
 import org.eclipse.jetty.server.HttpConfiguration;
 import org.eclipse.jetty.server.HttpConnectionFactory;
 import org.eclipse.jetty.server.ServerConnector;
@@ -28,8 +30,6 @@ import org.springframework.boot.web.embedded.jetty.ConfigurableJettyWebServerFac
 import org.springframework.boot.web.embedded.jetty.JettyServletWebServerFactory;
 import org.springframework.boot.web.server.WebServerFactoryCustomizer;
 import org.springframework.context.annotation.Configuration;
-
-import org.apache.doris.common.Config;
 
 @Configuration
 public class WebServerFactoryCustomizerConfig implements WebServerFactoryCustomizer<ConfigurableJettyWebServerFactory> {
@@ -57,8 +57,9 @@ public class WebServerFactoryCustomizerConfig implements WebServerFactoryCustomi
                                         for (org.eclipse.jetty.server.ConnectionFactory cf : sc.getConnectionFactories()) {
                                             if (cf instanceof org.eclipse.jetty.server.SslConnectionFactory) {
                                                 SslContextFactory.Server sslContextFactory =
-                                                        (SslContextFactory.Server) ((org.eclipse.jetty.server.SslConnectionFactory) cf)
-                                                                .getSslContextFactory();
+                                                        (SslContextFactory.Server)
+                                                        ((org.eclipse.jetty.server.SslConnectionFactory) cf)
+                                                        .getSslContextFactory();
                                                 // Set truststore if configured
                                                 if (Config.trust_store_path != null && !Config.trust_store_path.isEmpty()) {
                                                     sslContextFactory.setTrustStorePath(Config.trust_store_path);
@@ -76,16 +77,20 @@ public class WebServerFactoryCustomizerConfig implements WebServerFactoryCustomi
                                 }
                             }
                             @Override
-                            public void lifeCycleStarted(LifeCycle event) {}
+                            public void lifeCycleStarted(LifeCycle event) {
+                            }
 
                             @Override
-                            public void lifeCycleFailure(LifeCycle event, Throwable cause) {}
+                            public void lifeCycleFailure(LifeCycle event, Throwable cause) {
+                            }
 
                             @Override
-                            public void lifeCycleStopping(LifeCycle event) {}
+                            public void lifeCycleStopping(LifeCycle event) {
+                            }
 
                             @Override
-                            public void lifeCycleStopped(LifeCycle event) {}
+                            public void lifeCycleStopped(LifeCycle event) {
+                            }
                         });
 
                         ServerConnector connector = new ServerConnector(server);

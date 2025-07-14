@@ -36,10 +36,10 @@ import javax.net.ssl.SSLEngineResult.HandshakeStatus;
 import javax.net.ssl.SSLException;
 import javax.net.ssl.TrustManagerFactory;
 
+import org.apache.doris.common.Config;
+
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
-
-import org.apache.doris.common.Config;
 
 public class MysqlSslContext {
 
@@ -71,7 +71,8 @@ public class MysqlSslContext {
             String effectiveTrustStorePath = (Config.trust_store_path != null && !Config.trust_store_path.isEmpty())
                     ? Config.trust_store_path
                     : trustStoreFile;
-            String effectiveTrustStorePassword = (Config.trust_store_password != null && !Config.trust_store_password.isEmpty())
+            String effectiveTrustStorePassword =
+                    (Config.trust_store_password != null && !Config.trust_store_password.isEmpty())
                     ? Config.trust_store_password
                     : caCertificatePassword;
             String effectiveTrustStoreType = (Config.trust_store_type != null && !Config.trust_store_type.isEmpty())
