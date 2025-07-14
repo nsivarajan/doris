@@ -17,8 +17,8 @@
 
 package org.apache.doris.mysql.authenticate;
 
-import org.apache.doris.mysql.authenticate.password.Password;
 import org.apache.doris.mysql.MysqlChannel;
+import org.apache.doris.mysql.authenticate.password.Password;
 
 public class AuthenticateRequest {
     private String userName;

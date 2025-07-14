@@ -54,16 +54,19 @@ public class WebServerFactoryCustomizerConfig implements WebServerFactoryCustomi
                                         // 'sc' is managed by Jetty; no need to close. This is not a resource leak.
                                         org.eclipse.jetty.server.ServerConnector sc =
                                                 (org.eclipse.jetty.server.ServerConnector) connector;
-                                        for (org.eclipse.jetty.server.ConnectionFactory cf : sc.getConnectionFactories()) {
+                                        for (org.eclipse.jetty.server.ConnectionFactory cf :
+                                                sc.getConnectionFactories()) {
                                             if (cf instanceof org.eclipse.jetty.server.SslConnectionFactory) {
                                                 SslContextFactory.Server sslContextFactory =
                                                         (SslContextFactory.Server)
                                                         ((org.eclipse.jetty.server.SslConnectionFactory) cf)
                                                         .getSslContextFactory();
                                                 // Set truststore if configured
-                                                if (Config.trust_store_path != null && !Config.trust_store_path.isEmpty()) {
+                                                if (Config.trust_store_path != null
+                                                        && !Config.trust_store_path.isEmpty()) {
                                                     sslContextFactory.setTrustStorePath(Config.trust_store_path);
-                                                    sslContextFactory.setTrustStorePassword(Config.trust_store_password);
+                                                    sslContextFactory.setTrustStorePassword(
+                                                            Config.trust_store_password);
                                                     sslContextFactory.setTrustStoreType(Config.trust_store_type);
                                                 }
                                                 if ("mtls".equalsIgnoreCase(Config.authentication_type)) {
@@ -76,6 +79,7 @@ public class WebServerFactoryCustomizerConfig implements WebServerFactoryCustomi
                                     }
                                 }
                             }
+
                             @Override
                             public void lifeCycleStarted(LifeCycle event) {
                             }
