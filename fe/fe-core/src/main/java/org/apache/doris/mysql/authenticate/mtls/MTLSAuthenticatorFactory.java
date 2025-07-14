@@ -15,9 +15,11 @@
 // specific language governing permissions and limitations
 // under the License.
 
-package org.apache.doris.mysql.authenticate;
+package org.apache.doris.mysql.authenticate.mtls;
 
 import java.util.Properties;
+
+import org.apache.doris.mysql.authenticate.AuthenticatorFactory;
 
 public class MTLSAuthenticatorFactory implements AuthenticatorFactory {
     @Override
@@ -29,4 +31,4 @@ public class MTLSAuthenticatorFactory implements AuthenticatorFactory {
     public String factoryIdentifier() {
         return "mtls";
     }
-} 
+}

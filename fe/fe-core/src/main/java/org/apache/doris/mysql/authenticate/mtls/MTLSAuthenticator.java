@@ -15,23 +15,27 @@
 // specific language governing permissions and limitations
 // under the License.
 
-package org.apache.doris.mysql.authenticate;
+package org.apache.doris.mysql.authenticate.mtls;
 
-import org.apache.doris.analysis.UserIdentity;
-import org.apache.doris.catalog.Env;
-import org.apache.doris.mysql.MysqlChannel;
-import org.apache.doris.mysql.authenticate.password.PasswordResolver;
-import org.apache.doris.mysql.authenticate.password.NativePasswordResolver;
+import java.io.IOException;
+import java.security.cert.X509Certificate;
+
+import javax.naming.ldap.LdapName;
+import javax.naming.ldap.Rdn;
+import javax.net.ssl.SSLEngine;
+import javax.net.ssl.SSLSession;
 
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 
-import javax.net.ssl.SSLEngine;
-import javax.net.ssl.SSLSession;
-import java.io.IOException;
-import java.security.cert.X509Certificate;
-import javax.naming.ldap.LdapName;
-import javax.naming.ldap.Rdn;
+import org.apache.doris.analysis.UserIdentity;
+import org.apache.doris.catalog.Env;
+import org.apache.doris.mysql.MysqlChannel;
+import org.apache.doris.mysql.authenticate.Authenticator;
+import org.apache.doris.mysql.authenticate.AuthenticateRequest;
+import org.apache.doris.mysql.authenticate.AuthenticateResponse;
+import org.apache.doris.mysql.authenticate.password.NativePasswordResolver;
+import org.apache.doris.mysql.authenticate.password.PasswordResolver;
 
 public class MTLSAuthenticator implements Authenticator {
     private static final Logger LOG = LogManager.getLogger(MTLSAuthenticator.class);
@@ -93,4 +97,4 @@ public class MTLSAuthenticator implements Authenticator {
     public PasswordResolver getPasswordResolver() {
         return passwordResolver;
     }
-} 
+}

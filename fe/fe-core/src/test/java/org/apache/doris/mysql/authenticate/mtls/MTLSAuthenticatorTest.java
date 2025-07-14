@@ -15,21 +15,26 @@
 // specific language governing permissions and limitations
 // under the License.
 
-package org.apache.doris.mysql.authenticate;
+package org.apache.doris.mysql.authenticate.mtls;
+
+import java.security.cert.X509Certificate;
+
+import javax.net.ssl.SSLEngine;
+import javax.net.ssl.SSLSession;
+
+import org.junit.Assert;
+import org.junit.Before;
+import org.junit.Test;
+
+import mockit.Expectations;
+import mockit.Mocked;
 
 import org.apache.doris.analysis.UserIdentity;
 import org.apache.doris.catalog.Env;
 import org.apache.doris.mysql.MysqlChannel;
+import org.apache.doris.mysql.authenticate.AuthenticateRequest;
+import org.apache.doris.mysql.authenticate.AuthenticateResponse;
 import org.apache.doris.mysql.privilege.Auth;
-import org.junit.Assert;
-import org.junit.Before;
-import org.junit.Test;
-import mockit.Expectations;
-import mockit.Mocked;
-
-import javax.net.ssl.SSLEngine;
-import javax.net.ssl.SSLSession;
-import java.security.cert.X509Certificate;
 
 public class MTLSAuthenticatorTest {
     private static final String UID = "testuser123";
@@ -52,23 +57,36 @@ public class MTLSAuthenticatorTest {
 
     @Before
     public void setUp() throws Exception {
-        new Expectations(Env.class) {{
-            Env.getCurrentEnv(); result = env;
-            env.getAuth(); result = auth;
-        }};
-        new Expectations() {{
-            channel.getSslEngine(); result = sslEngine;
-            sslEngine.getSession(); result = sslSession;
-            sslSession.getPeerCertificates(); result = new X509Certificate[] { certificate };
-            certificate.getSubjectX500Principal().getName(); result = SUBJECT_DN;
-        }};
+        new Expectations(Env.class) {
+            {
+                Env.getCurrentEnv();
+                result = env;
+                env.getAuth();
+                result = auth;
+            }
+        };
+        new Expectations() {
+            {
+                channel.getSslEngine();
+                result = sslEngine;
+                sslEngine.getSession();
+                result = sslSession;
+                sslSession.getPeerCertificates();
+                result = new X509Certificate[] { certificate };
+                certificate.getSubjectX500Principal().getName();
+                result = SUBJECT_DN;
+            }
+        };
     }
 
     @Test
     public void testAuthenticateSuccess() throws Exception {
-        new Expectations() {{
-            auth.doesUserExist((UserIdentity) any); result = true;
-        }};
+        new Expectations() {
+            {
+                auth.doesUserExist((UserIdentity) any);
+                result = true;
+            }
+        };
         AuthenticateRequest request = new AuthenticateRequest(null, null, null, channel);
         AuthenticateResponse response = authenticator.authenticate(request);
         Assert.assertTrue(response.isSuccess());
@@ -77,9 +95,12 @@ public class MTLSAuthenticatorTest {
 
     @Test
     public void testAuthenticateFailNoUser() throws Exception {
-        new Expectations() {{
-            auth.doesUserExist((UserIdentity) any); result = false;
-        }};
+        new Expectations() {
+            {
+                auth.doesUserExist((UserIdentity) any);
+                result = false;
+            }
+        };
         AuthenticateRequest request = new AuthenticateRequest(null, null, null, channel);
         AuthenticateResponse response = authenticator.authenticate(request);
         Assert.assertFalse(response.isSuccess());
@@ -87,9 +108,12 @@ public class MTLSAuthenticatorTest {
 
     @Test
     public void testAuthenticateFailNoUID() throws Exception {
-        new Expectations() {{
-            certificate.getSubjectX500Principal().getName(); result = "CN=Test, O=Example, C=US";
-        }};
+        new Expectations() {
+            {
+                certificate.getSubjectX500Principal().getName();
+                result = "CN=Test, O=Example, C=US";
+            }
+        };
         AuthenticateRequest request = new AuthenticateRequest(null, null, null, channel);
         AuthenticateResponse response = authenticator.authenticate(request);
         Assert.assertFalse(response.isSuccess());
@@ -105,4 +129,4 @@ public class MTLSAuthenticatorTest {
         Assert.assertEquals("mysqlpass", org.apache.doris.common.Config.trust_store_password);
         Assert.assertEquals("JKS", org.apache.doris.common.Config.trust_store_type);
     }
-} 
+}

@@ -17,20 +17,22 @@
 
 package org.apache.doris.httpv2;
 
-import org.apache.doris.common.Config;
-import org.apache.doris.analysis.UserIdentity;
-import org.apache.doris.catalog.Env;
-import org.apache.doris.httpv2.interceptor.AuthInterceptor;
-import org.apache.doris.mysql.privilege.Auth;
+import java.security.cert.X509Certificate;
+
+import javax.security.auth.x500.X500Principal;
+import javax.servlet.http.HttpServletRequest;
+import javax.servlet.http.HttpServletResponse;
+
 import org.junit.Assert;
 import org.junit.Before;
 import org.junit.Test;
 import org.mockito.Mockito;
 
-import javax.servlet.http.HttpServletRequest;
-import javax.servlet.http.HttpServletResponse;
-import java.security.cert.X509Certificate;
-import javax.security.auth.x500.X500Principal;
+import org.apache.doris.analysis.UserIdentity;
+import org.apache.doris.catalog.Env;
+import org.apache.doris.common.Config;
+import org.apache.doris.httpv2.interceptor.AuthInterceptor;
+import org.apache.doris.mysql.privilege.Auth;
 
 public class AuthInterceptorMTLSTest {
     private AuthInterceptor interceptor;
@@ -121,4 +123,4 @@ public class AuthInterceptorMTLSTest {
         Assert.assertEquals("JKS", org.apache.doris.common.Config.trust_store_type);
         // This ensures the config is set and would be used by Jetty SSL context.
     }
-} 
+}

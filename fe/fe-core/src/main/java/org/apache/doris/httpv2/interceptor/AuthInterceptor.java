@@ -17,7 +17,10 @@
 
 package org.apache.doris.httpv2.interceptor;
 
-import org.apache.doris.httpv2.controller.BaseController;
+import java.security.cert.X509Certificate;
+
+import javax.servlet.http.HttpServletRequest;
+import javax.servlet.http.HttpServletResponse;
 
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
@@ -26,13 +29,11 @@ import org.springframework.web.bind.annotation.RequestMethod;
 import org.springframework.web.servlet.HandlerInterceptor;
 import org.springframework.web.servlet.ModelAndView;
 
-import org.apache.doris.common.Config;
 import org.apache.doris.analysis.UserIdentity;
 import org.apache.doris.catalog.Env;
+import org.apache.doris.common.Config;
+import org.apache.doris.httpv2.controller.BaseController;
 import org.apache.doris.qe.ConnectContext;
-import java.security.cert.X509Certificate;
-import javax.servlet.http.HttpServletRequest;
-import javax.servlet.http.HttpServletResponse;
 
 public class AuthInterceptor extends BaseController implements HandlerInterceptor {
     private static final Logger LOG = LogManager.getLogger(AuthInterceptor.class);

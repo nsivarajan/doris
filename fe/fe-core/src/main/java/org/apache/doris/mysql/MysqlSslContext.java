@@ -17,11 +17,6 @@
 
 package org.apache.doris.mysql;
 
-import org.apache.doris.common.Config;
-
-import org.apache.logging.log4j.LogManager;
-import org.apache.logging.log4j.Logger;
-
 import java.io.IOException;
 import java.io.InputStream;
 import java.nio.ByteBuffer;
@@ -33,6 +28,7 @@ import java.security.KeyStoreException;
 import java.security.NoSuchAlgorithmException;
 import java.security.UnrecoverableKeyException;
 import java.security.cert.CertificateException;
+
 import javax.net.ssl.KeyManagerFactory;
 import javax.net.ssl.SSLContext;
 import javax.net.ssl.SSLEngine;
@@ -40,6 +36,11 @@ import javax.net.ssl.SSLEngineResult;
 import javax.net.ssl.SSLEngineResult.HandshakeStatus;
 import javax.net.ssl.SSLException;
 import javax.net.ssl.TrustManagerFactory;
+
+import org.apache.logging.log4j.LogManager;
+import org.apache.logging.log4j.Logger;
+
+import org.apache.doris.common.Config;
 
 public class MysqlSslContext {
 
@@ -68,9 +69,15 @@ public class MysqlSslContext {
 
     private void initSslContext() {
         try {
-            String effectiveTrustStorePath = (Config.trust_store_path != null && !Config.trust_store_path.isEmpty()) ? Config.trust_store_path : trustStoreFile;
-            String effectiveTrustStorePassword = (Config.trust_store_password != null && !Config.trust_store_password.isEmpty()) ? Config.trust_store_password : caCertificatePassword;
-            String effectiveTrustStoreType = (Config.trust_store_type != null && !Config.trust_store_type.isEmpty()) ? Config.trust_store_type : trustStoreType;
+            String effectiveTrustStorePath = (Config.trust_store_path != null && !Config.trust_store_path.isEmpty())
+                ? Config.trust_store_path
+                : trustStoreFile;
+            String effectiveTrustStorePassword = (Config.trust_store_password != null && !Config.trust_store_password.isEmpty())
+                ? Config.trust_store_password
+                : caCertificatePassword;
+            String effectiveTrustStoreType = (Config.trust_store_type != null && !Config.trust_store_type.isEmpty())
+                ? Config.trust_store_type
+                : trustStoreType;
 
             KeyStore ks = KeyStore.getInstance(trustStoreType);
             KeyStore ts = KeyStore.getInstance(effectiveTrustStoreType);
