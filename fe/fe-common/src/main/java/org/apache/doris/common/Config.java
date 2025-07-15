@@ -3079,7 +3079,7 @@ public class Config extends ConfigBase {
 
     @ConfField(description = {"指定 mysql登录身份认证类型",
             "Specifies the authentication type"},
-            options = {"default", "ldap"})
+            options = {"default", "ldap", "mtls"})
     public static String authentication_type = "default";
 
     @ConfField(mutable = true, masterOnly = false, description = {"指定 trino-connector catalog 的插件默认加载路径",
