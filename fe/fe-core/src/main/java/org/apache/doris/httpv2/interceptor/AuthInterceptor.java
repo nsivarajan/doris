@@ -88,7 +88,8 @@ public class AuthInterceptor extends BaseController implements HandlerIntercepto
                 return true;
             } catch (AnalysisException e) {
                 LOG.error("Failed to authenticate with mTLS: {}", e.getMessage());
-                response.sendError(HttpStatus.UNAUTHORIZED.value(), "Certificate authentication failed: " + e.getMessage());
+                response.sendError(HttpStatus.UNAUTHORIZED.value(),
+                        "Certificate authentication failed: " + e.getMessage());
                 return false;
             } catch (Exception e) {
                 LOG.error("Exception during mTLS authentication", e);

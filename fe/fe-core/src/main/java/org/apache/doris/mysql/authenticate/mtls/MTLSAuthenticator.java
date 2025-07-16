@@ -26,7 +26,6 @@ import org.apache.doris.mysql.authenticate.AuthenticateResponse;
 import org.apache.doris.mysql.authenticate.Authenticator;
 import org.apache.doris.mysql.authenticate.password.NativePasswordResolver;
 import org.apache.doris.mysql.authenticate.password.PasswordResolver;
-import org.apache.doris.mysql.authenticate.mtls.MTLSUtils;
 
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
