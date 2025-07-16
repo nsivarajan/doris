@@ -19,20 +19,20 @@ package org.apache.doris.mysql.authenticate.mtls;
 
 import org.apache.doris.analysis.UserIdentity;
 import org.apache.doris.catalog.Env;
+import org.apache.doris.common.AnalysisException;
 import org.apache.doris.mysql.MysqlChannel;
 import org.apache.doris.mysql.authenticate.AuthenticateRequest;
 import org.apache.doris.mysql.authenticate.AuthenticateResponse;
 import org.apache.doris.mysql.authenticate.Authenticator;
 import org.apache.doris.mysql.authenticate.password.NativePasswordResolver;
 import org.apache.doris.mysql.authenticate.password.PasswordResolver;
+import org.apache.doris.mysql.authenticate.mtls.MTLSUtils;
 
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 
 import java.io.IOException;
 import java.security.cert.X509Certificate;
-import javax.naming.ldap.LdapName;
-import javax.naming.ldap.Rdn;
 import javax.net.ssl.SSLEngine;
 import javax.net.ssl.SSLSession;
 
@@ -61,28 +61,25 @@ public class MTLSAuthenticator implements Authenticator {
             SSLSession session = sslEngine.getSession();
             X509Certificate[] certs = (X509Certificate[]) session.getPeerCertificates();
             X509Certificate clientCert = certs[0];
-            String subjectDN = clientCert.getSubjectX500Principal().getName();
-            String uid = null;
-            LdapName ldapDN = new LdapName(subjectDN);
-            for (Rdn rdn : ldapDN.getRdns()) {
-                if ("UID".equalsIgnoreCase(rdn.getType())) {
-                    uid = (String) rdn.getValue();
-                    break;
-                }
-            }
-            if (uid == null) {
-                LOG.warn("No UID found in client certificate subject: {}", subjectDN);
-                return AuthenticateResponse.failedResponse;
-            }
-            // Look up Doris user by UID
-            UserIdentity userIdentity = UserIdentity.createAnalyzedUserIdentWithIp(uid, "%");
+            
+            // Generate username from certificate serial number
+            String username = MTLSUtils.getUsernameFromCertificate(clientCert);
+            String serialNumber = MTLSUtils.getSerialNumberHex(clientCert);
+            
+            LOG.info("Generated username '{}' for certificate with serial number '{}'", username, serialNumber);
+            
+            // Look up Doris user by generated username
+            UserIdentity userIdentity = UserIdentity.createAnalyzedUserIdentWithIp(username, "%");
             if (!Env.getCurrentEnv().getAuth().doesUserExist(userIdentity)) {
-                LOG.warn("No Doris user found for UID: {}", uid);
+                LOG.warn("No Doris user found for username: {} (certificate serial: {})", username, serialNumber);
                 return AuthenticateResponse.failedResponse;
             }
             return new AuthenticateResponse(true, userIdentity);
+        } catch (AnalysisException e) {
+            LOG.error("Failed to authenticate with mTLS: {}", e.getMessage());
+            return AuthenticateResponse.failedResponse;
         } catch (Exception e) {
-            LOG.warn("Exception during mTLS authentication", e);
+            LOG.error("Exception during mTLS authentication", e);
             return AuthenticateResponse.failedResponse;
         }
     }

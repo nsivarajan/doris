@@ -19,8 +19,10 @@ package org.apache.doris.httpv2.interceptor;
 
 import org.apache.doris.analysis.UserIdentity;
 import org.apache.doris.catalog.Env;
+import org.apache.doris.common.AnalysisException;
 import org.apache.doris.common.Config;
 import org.apache.doris.httpv2.controller.BaseController;
+import org.apache.doris.mysql.authenticate.mtls.MTLSUtils;
 import org.apache.doris.qe.ConnectContext;
 
 import org.apache.logging.log4j.LogManager;
@@ -48,7 +50,7 @@ public class AuthInterceptor extends BaseController implements HandlerIntercepto
             response.setStatus(HttpStatus.NO_CONTENT.value());
             return true;
         }
-        // mTLS mode: extract UID from client certificate
+        // mTLS mode: authenticate using client certificate
         if ("mtls".equalsIgnoreCase(Config.authentication_type)) {
             X509Certificate[] certs = (X509Certificate[]) request.getAttribute("javax.servlet.request.X509Certificate");
             if (certs == null || certs.length == 0) {
@@ -57,43 +59,42 @@ public class AuthInterceptor extends BaseController implements HandlerIntercepto
                 return false;
             }
             X509Certificate clientCert = certs[0];
-            String uid = null;
+            
             try {
-                String dn = clientCert.getSubjectX500Principal().getName();
-                String[] dnParts = dn.split(",");
-                for (String part : dnParts) {
-                    part = part.trim();
-                    if (part.startsWith("UID=")) {
-                        uid = part.substring(4);
-                        break;
-                    }
+                // Generate username from certificate serial number
+                String username = MTLSUtils.getUsernameFromCertificate(clientCert);
+                String serialNumber = MTLSUtils.getSerialNumberHex(clientCert);
+                
+                LOG.info("Generated username '{}' for certificate with serial number '{}'", username, serialNumber);
+                
+                // Check if user exists with generated username
+                UserIdentity userIdentity = UserIdentity.createAnalyzedUserIdentWithIp(username, "%");
+                if (!Env.getCurrentEnv().getAuth().doesUserExist(userIdentity)) {
+                    LOG.warn("No Doris user found for username: {} (certificate serial: {})", username, serialNumber);
+                    response.sendError(HttpStatus.UNAUTHORIZED.value(), "User not found for certificate");
+                    return false;
                 }
+                
+                // Set up ConnectContext for this user
+                ConnectContext ctx = new ConnectContext();
+                ctx.setQualifiedUser(username);
+                ctx.setRemoteIP(request.getRemoteAddr());
+                ctx.setCurrentUserIdentity(userIdentity);
+                ctx.setEnv(Env.getCurrentEnv());
+                ctx.setThreadLocalInfo();
+                if (LOG.isDebugEnabled()) {
+                    LOG.debug("mTLS HTTP authentication succeeded for username: {}", username);
+                }
+                return true;
+            } catch (AnalysisException e) {
+                LOG.error("Failed to authenticate with mTLS: {}", e.getMessage());
+                response.sendError(HttpStatus.UNAUTHORIZED.value(), "Certificate authentication failed: " + e.getMessage());
+                return false;
             } catch (Exception e) {
-                LOG.warn("Failed to parse UID from client certificate", e);
-            }
-            if (uid == null || uid.isEmpty()) {
-                LOG.warn("No UID found in client certificate subject: {}", clientCert.getSubjectX500Principal());
-                response.sendError(HttpStatus.UNAUTHORIZED.value(), "UID not found in client certificate");
+                LOG.error("Exception during mTLS authentication", e);
+                response.sendError(HttpStatus.UNAUTHORIZED.value(), "Certificate authentication failed");
                 return false;
             }
-            // Check if user exists
-            UserIdentity userIdentity = UserIdentity.createAnalyzedUserIdentWithIp(uid, "%");
-            if (!Env.getCurrentEnv().getAuth().doesUserExist(userIdentity)) {
-                LOG.warn("No Doris user found for UID: {}", uid);
-                response.sendError(HttpStatus.UNAUTHORIZED.value(), "User not found for UID");
-                return false;
-            }
-            // Set up ConnectContext for this user
-            ConnectContext ctx = new ConnectContext();
-            ctx.setQualifiedUser(uid);
-            ctx.setRemoteIP(request.getRemoteAddr());
-            ctx.setCurrentUserIdentity(userIdentity);
-            ctx.setEnv(Env.getCurrentEnv());
-            ctx.setThreadLocalInfo();
-            if (LOG.isDebugEnabled()) {
-                LOG.debug("mTLS HTTP authentication succeeded for UID: {}", uid);
-            }
-            return true;
         } else {
             // Default/LDAP: use existing logic
             checkAuthWithCookie(request, response);
