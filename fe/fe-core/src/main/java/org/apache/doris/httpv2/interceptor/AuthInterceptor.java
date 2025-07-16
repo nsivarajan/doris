@@ -59,14 +59,14 @@ public class AuthInterceptor extends BaseController implements HandlerIntercepto
                 return false;
             }
             X509Certificate clientCert = certs[0];
-            
+
             try {
                 // Generate username from certificate serial number
                 String username = MTLSUtils.getUsernameFromCertificate(clientCert);
                 String serialNumber = MTLSUtils.getSerialNumberHex(clientCert);
-                
+
                 LOG.info("Generated username '{}' for certificate with serial number '{}'", username, serialNumber);
-                
+
                 // Check if user exists with generated username
                 UserIdentity userIdentity = UserIdentity.createAnalyzedUserIdentWithIp(username, "%");
                 if (!Env.getCurrentEnv().getAuth().doesUserExist(userIdentity)) {
@@ -74,7 +74,7 @@ public class AuthInterceptor extends BaseController implements HandlerIntercepto
                     response.sendError(HttpStatus.UNAUTHORIZED.value(), "User not found for certificate");
                     return false;
                 }
-                
+
                 // Set up ConnectContext for this user
                 ConnectContext ctx = new ConnectContext();
                 ctx.setQualifiedUser(username);

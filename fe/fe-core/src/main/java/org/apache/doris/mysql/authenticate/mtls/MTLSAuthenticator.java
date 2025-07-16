@@ -60,13 +60,13 @@ public class MTLSAuthenticator implements Authenticator {
             SSLSession session = sslEngine.getSession();
             X509Certificate[] certs = (X509Certificate[]) session.getPeerCertificates();
             X509Certificate clientCert = certs[0];
-            
+
             // Generate username from certificate serial number
             String username = MTLSUtils.getUsernameFromCertificate(clientCert);
             String serialNumber = MTLSUtils.getSerialNumberHex(clientCert);
-            
+
             LOG.info("Generated username '{}' for certificate with serial number '{}'", username, serialNumber);
-            
+
             // Look up Doris user by generated username
             UserIdentity userIdentity = UserIdentity.createAnalyzedUserIdentWithIp(username, "%");
             if (!Env.getCurrentEnv().getAuth().doesUserExist(userIdentity)) {
