@@ -58,11 +58,6 @@ public class MTLSUtils {
             username.append(serialHex.length() <= maxSerialLength
                     ? serialHex : serialHex.substring(0, maxSerialLength));
 
-            // Ensure it starts with a letter (after the mtls_ prefix)
-            if (username.length() > 5 && !Character.isLetter(username.charAt(5))) {
-                username.insert(5, 's');
-            }
-
             LOG.debug("Generated username '{}' from certificate serial number {}",
                     username.toString(), serialNumber);
 
