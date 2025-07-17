@@ -33,17 +33,17 @@ import java.util.Map;
  */
 public class MTLSUtils {
     private static final Logger LOG = LogManager.getLogger(MTLSUtils.class);
-    
+
     // Certificate serial number to username mapping
     // Format: serialNumber1:username1;serialNumber2:username2
     // Example: "1a2b3c:root;4d5e6f:admin"
     private static Map<String, String> certSerialToUserMap = new HashMap<>();
-    
+
     // Initialize the certificate mapping from Config
     static {
         initCertMapping();
     }
-    
+
     /**
      * Initialize the certificate-to-user mapping from configuration
      */
@@ -51,9 +51,9 @@ public class MTLSUtils {
         // Read from Config.mtls_cert_user_mapping in fe.conf
         // Format: serialNumber1:username1;serialNumber2:username2
         // Example: 1a2b3c:root;4d5e6f:admin
-        
+
         String mappingStr = Config.mtls_cert_user_mapping;
-        
+
         if (mappingStr != null && !mappingStr.isEmpty()) {
             String[] mappings = mappingStr.split(";");
             for (String mapping : mappings) {
@@ -89,7 +89,7 @@ public class MTLSUtils {
             // Get certificate serial number (guaranteed to be unique per CA)
             BigInteger serialNumber = certificate.getSerialNumber();
             String serialHex = serialNumber.toString(16).toLowerCase();
-            
+
             // Check if we have a mapping for this certificate
             if (certSerialToUserMap.containsKey(serialHex)) {
                 String mappedUser = certSerialToUserMap.get(serialHex);
@@ -97,7 +97,7 @@ public class MTLSUtils {
                         mappedUser, serialHex);
                 return mappedUser;
             }
-            
+
             // Fall back to default behavior - generate username from serial number
             // Start with prefix
             StringBuilder username = new StringBuilder("mtls_");
