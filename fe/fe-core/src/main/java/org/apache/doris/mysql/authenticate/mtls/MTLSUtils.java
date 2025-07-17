@@ -18,22 +18,63 @@
 package org.apache.doris.mysql.authenticate.mtls;
 
 import org.apache.doris.common.AnalysisException;
+import org.apache.doris.common.Config;
 
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 
 import java.math.BigInteger;
 import java.security.cert.X509Certificate;
+import java.util.HashMap;
+import java.util.Map;
 
 /**
  * Utility class for MTLS authentication
  */
 public class MTLSUtils {
     private static final Logger LOG = LogManager.getLogger(MTLSUtils.class);
+    
+    // Certificate serial number to username mapping
+    // Format: serialNumber1:username1;serialNumber2:username2
+    // Example: "1a2b3c:root;4d5e6f:admin"
+    private static Map<String, String> certSerialToUserMap = new HashMap<>();
+    
+    // Initialize the certificate mapping from Config
+    static {
+        initCertMapping();
+    }
+    
+    /**
+     * Initialize the certificate-to-user mapping from configuration
+     */
+    public static void initCertMapping() {
+        // Read from Config.mtls_cert_user_mapping in fe.conf
+        // Format: serialNumber1:username1;serialNumber2:username2
+        // Example: 1a2b3c:root;4d5e6f:admin
+        
+        String mappingStr = Config.mtls_cert_user_mapping;
+        
+        if (mappingStr != null && !mappingStr.isEmpty()) {
+            String[] mappings = mappingStr.split(";");
+            for (String mapping : mappings) {
+                String[] parts = mapping.split(":");
+                if (parts.length == 2) {
+                    certSerialToUserMap.put(parts[0].toLowerCase(), parts[1]);
+                    LOG.info("Added certificate mapping: {} -> {}", parts[0], parts[1]);
+                } else {
+                    LOG.warn("Invalid certificate mapping format: {}. Expected format: serialNumber:username", mapping);
+                }
+            }
+            LOG.info("Loaded {} certificate-to-user mappings from configuration", certSerialToUserMap.size());
+        } else {
+            LOG.info("No certificate-to-user mappings configured");
+        }
+    }
 
     /**
      * Generate a username from a certificate for MTLS authentication
-     * This method uses the certificate's serial number as the primary identifier
+     * This method first checks if there's a mapping for the certificate's serial number
+     * If not, it falls back to using the certificate's serial number with "mtls_" prefix
      *
      * @param certificate The client certificate
      * @return A username valid for Doris that can be determined in advance
@@ -48,7 +89,16 @@ public class MTLSUtils {
             // Get certificate serial number (guaranteed to be unique per CA)
             BigInteger serialNumber = certificate.getSerialNumber();
             String serialHex = serialNumber.toString(16).toLowerCase();
-
+            
+            // Check if we have a mapping for this certificate
+            if (certSerialToUserMap.containsKey(serialHex)) {
+                String mappedUser = certSerialToUserMap.get(serialHex);
+                LOG.info("Using mapped username '{}' for certificate serial number {}",
+                        mappedUser, serialHex);
+                return mappedUser;
+            }
+            
+            // Fall back to default behavior - generate username from serial number
             // Start with prefix
             StringBuilder username = new StringBuilder("mtls_");
 

@@ -3082,6 +3082,10 @@ public class Config extends ConfigBase {
             options = {"default", "ldap", "mtls"})
     public static String authentication_type = "default";
 
+    @ConfField(mutable = true, description = {"mTLS 认证中证书序列号到用户的映射关系，格式为：'serial_number1:username1;serial_number2:username2'",
+            "Certificate serial number to username mapping in mTLS authentication, format: 'serial_number1:username1;serial_number2:username2'"})
+    public static String mtls_cert_user_mapping = "";
+
     @ConfField(mutable = true, masterOnly = false, description = {"指定 trino-connector catalog 的插件默认加载路径",
             "Specify the default plugins loading path for the trino-connector catalog"})
     public static String trino_connector_plugin_dir = EnvUtils.getDorisHome() + "/plugins/connectors";
