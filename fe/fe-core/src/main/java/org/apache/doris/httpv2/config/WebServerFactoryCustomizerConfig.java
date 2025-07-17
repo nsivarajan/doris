@@ -36,24 +36,24 @@ public class WebServerFactoryCustomizerConfig implements WebServerFactoryCustomi
     public void customize(ConfigurableJettyWebServerFactory factory) {
         if (Config.enable_https) {
             JettyServletWebServerFactory jettyFactory = (JettyServletWebServerFactory) factory;
-            
+
             jettyFactory.setConfigurations(Collections.singleton(new HttpToHttpsJettyConfig()));
-            
+
             jettyFactory.addServerCustomizers(server -> {
                 SslContextFactory.Server sslContextFactory = new SslContextFactory.Server();
-                
+
                 sslContextFactory.setKeyStorePath(Config.key_store_path);
                 sslContextFactory.setKeyStorePassword(Config.key_store_password);
                 sslContextFactory.setKeyStoreType("JKS"); // Use Config value if available
-                
+
                 if (Config.key_store_alias != null && !Config.key_store_alias.isEmpty()) {
                     sslContextFactory.setCertAlias(Config.key_store_alias);
                 }
-                
+
                 sslContextFactory.setTrustStorePath(Config.mysql_ssl_default_ca_certificate);
                 sslContextFactory.setTrustStorePassword(Config.mysql_ssl_default_ca_certificate_password);
                 sslContextFactory.setTrustStoreType(Config.ssl_trust_store_type);
-                
+
                 if ("mtls".equalsIgnoreCase(Config.authentication_type)) {
                     sslContextFactory.setWantClientAuth(true);
                     sslContextFactory.setNeedClientAuth(true);
@@ -61,21 +61,21 @@ public class WebServerFactoryCustomizerConfig implements WebServerFactoryCustomi
                     sslContextFactory.setWantClientAuth(false);
                     sslContextFactory.setNeedClientAuth(false);
                 }
-                
+
                 HttpConfiguration httpsConfig = new HttpConfiguration();
                 httpsConfig.setSecureScheme("https");
                 httpsConfig.setSecurePort(Config.https_port);
-                
+
                 ServerConnector httpsConnector = new ServerConnector(server,
                         new org.eclipse.jetty.server.SslConnectionFactory(
                                 sslContextFactory, "http/1.1"),
                         new HttpConnectionFactory(httpsConfig));
                 httpsConnector.setPort(Config.https_port);
-                
+
                 HttpConfiguration httpConfig = new HttpConfiguration();
                 ServerConnector httpConnector = new ServerConnector(server, new HttpConnectionFactory(httpConfig));
                 httpConnector.setPort(Config.http_port);
-                
+
                 server.setConnectors(new ServerConnector[] { httpConnector, httpsConnector });
             });
         }
