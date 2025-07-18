@@ -45,7 +45,7 @@ public class LoginController extends BaseController {
     @RequestMapping(path = "/login", method = RequestMethod.POST)
     public Object login(HttpServletRequest request, HttpServletResponse response) {
         Map<String, Object> msg = new HashMap<>();
-        
+
         // Check if we're in MTLS mode
         if ("mtls".equalsIgnoreCase(Config.authentication_type)) {
             try {
@@ -74,7 +74,7 @@ public class LoginController extends BaseController {
             return msg;
         }
     }
-    
+
     /**
      * Handle MTLS authentication by checking client certificate
      *
@@ -88,23 +88,23 @@ public class LoginController extends BaseController {
             LOG.warn("No client certificate presented for mTLS HTTP authentication");
             return false;
         }
-        
+
         X509Certificate clientCert = certs[0];
-        
+
         try {
             // Generate username from certificate serial number
             String username = MTLSUtils.getUsernameFromCertificate(clientCert);
             String serialNumber = MTLSUtils.getSerialNumberHex(clientCert);
-            
+
             LOG.info("Login: Generated username '{}' for certificate with serial number '{}'", username, serialNumber);
-            
+
             // Check if user exists with generated username
             UserIdentity userIdentity = UserIdentity.createAnalyzedUserIdentWithIp(username, "%");
             if (!Env.getCurrentEnv().getAuth().doesUserExist(userIdentity)) {
-                LOG.warn("Login: No Doris user found for username: {} (certificate serial: {})", username, serialNumber);
+                LOG.warn("Login: No Doris user found for username: {} (serial: {})", username, serialNumber);
                 return false;
             }
-            
+
             // Set up ConnectContext for this user
             ConnectContext ctx = new ConnectContext();
             ctx.setQualifiedUser(username);
@@ -112,13 +112,13 @@ public class LoginController extends BaseController {
             ctx.setCurrentUserIdentity(userIdentity);
             ctx.setEnv(Env.getCurrentEnv());
             ctx.setThreadLocalInfo();
-            
+
             // Create a session for this user
             HttpAuthManager.SessionValue value = new HttpAuthManager.SessionValue();
             value.currentUser = userIdentity;
             value.password = ""; // No password for MTLS
             addSession(request, response, value);
-            
+
             LOG.info("MTLS HTTP authentication succeeded for username: {}", username);
             return true;
         } catch (AnalysisException e) {
