@@ -38,10 +38,11 @@ public class WebConfigurer implements WebMvcConfigurer {
     @Override
     public void addInterceptors(InterceptorRegistry registry) {
         if ("mtls".equalsIgnoreCase(Config.authentication_type)) {
-            // When using mTLS, include login/logout in the authentication flow
+            // When using mTLS, exclude login/logout from authentication to prevent redirect loops
             registry.addInterceptor(new AuthInterceptor())
                     .addPathPatterns("/rest/v1/**")
-                    .excludePathPatterns("/", "/api/**", "/static/**", "/metrics")
+                    .excludePathPatterns("/", "/api/**", "/rest/v1/login", "/rest/v1/logout")
+                    .excludePathPatterns("/static/**", "/metrics")
                     .excludePathPatterns("/image", "/info", "/version", "/put")
                     .excludePathPatterns("/journal_id", "/role", "/check", "/dump");
         } else {
