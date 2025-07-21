@@ -17,7 +17,10 @@
 
 package org.apache.doris.httpv2.controller;
 
+import org.apache.doris.analysis.UserIdentity;
+import org.apache.doris.catalog.Env;
 import org.apache.doris.common.Config;
+import org.apache.doris.httpv2.HttpAuthManager.SessionValue;
 
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
@@ -67,18 +70,41 @@ public class LoginController extends BaseController {
                     try {
                         username = org.apache.doris.mysql.authenticate.mtls.MTLSUtils
                                 .getUsernameFromCertificate(certs[0]);
+                        
+                        // Check if user exists with generated username
+                        UserIdentity userIdentity = UserIdentity.createAnalyzedUserIdentWithIp(username, "%");
+                        if (!Env.getCurrentEnv().getAuth().doesUserExist(userIdentity)) {
+                            LOG.warn("No Doris user found for username: {}", username);
+                            response.setStatus(HttpServletResponse.SC_UNAUTHORIZED);
+                            msg.put("msg", "User not found for certificate");
+                            msg.put("code", -1);
+                            return msg;
+                        }
+                        
+                        // Create a session for this user
+                        SessionValue value = new SessionValue();
+                        value.currentUser = userIdentity;
+                        value.password = ""; // No password for MTLS
+                        addSession(request, response, value);
+                        
+                        if (LOG.isDebugEnabled()) {
+                            LOG.debug("MTLS login successful for username: {}", username);
+                        }
+                        
+                        // Return success with username
+                        msg.put("msg", "success");
+                        msg.put("code", 0);
+                        msg.put("data", username); // Return actual username from certificate
+                        msg.put("count", 0);
+                        
+                        return msg;
                     } catch (Exception e) {
                         LOG.warn("Failed to extract username from certificate", e);
+                        response.setStatus(HttpServletResponse.SC_UNAUTHORIZED);
+                        msg.put("msg", "Failed to extract username from certificate: " + e.getMessage());
+                        msg.put("code", -1);
+                        return msg;
                     }
-
-                    // In MTLS mode with valid certificate, always return success
-                    // and include the actual authenticated username
-                    msg.put("msg", "success");
-                    msg.put("code", 0);
-                    msg.put("data", username); // Return actual username from certificate
-                    msg.put("count", 0);
-
-                    return msg;
                 } else {
                     response.setStatus(HttpServletResponse.SC_UNAUTHORIZED);
                     msg.put("msg", "Client certificate required");
