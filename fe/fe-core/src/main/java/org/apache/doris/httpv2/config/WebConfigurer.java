@@ -37,23 +37,10 @@ public class WebConfigurer implements WebMvcConfigurer {
 
     @Override
     public void addInterceptors(InterceptorRegistry registry) {
-        if ("mtls".equalsIgnoreCase(Config.authentication_type)) {
-            // When using mTLS, exclude only essential paths from authentication to prevent redirect loops
-            // while maintaining security for other endpoints
-            registry.addInterceptor(new AuthInterceptor())
-                    .addPathPatterns("/rest/v1/**")
-                    .excludePathPatterns("/", "/login", "/logout", "/index.html")
-                    .excludePathPatterns("/api/**", "/rest/v1/login", "/rest/v1/logout")
-                    .excludePathPatterns("/static/**", "/metrics", "/js/**", "/css/**", "/img/**")
-                    .excludePathPatterns("/image", "/info", "/version", "/put", "/favicon.ico")
-                    .excludePathPatterns("/journal_id", "/role", "/check", "/dump");
-        } else {
-            registry.addInterceptor(new AuthInterceptor())
-                    .addPathPatterns("/rest/v1/**")
-                    .excludePathPatterns("/", "/api/**", "/rest/v1/login", "/rest/v1/logout")
-                    .excludePathPatterns("/static/**", "/metrics", "/image", "/info")
-                    .excludePathPatterns("/version", "/put", "/journal_id", "/role", "/check", "/dump");
-        }
+        registry.addInterceptor(new AuthInterceptor())
+                .addPathPatterns("/rest/v1/**")
+                .excludePathPatterns("/", "/api/**", "/rest/v1/login", "/rest/v1/logout", "/static/**", "/metrics")
+                .excludePathPatterns("/image", "/info", "/version", "/put", "/journal_id", "/role", "/check", "/dump");
     }
 
     @Override

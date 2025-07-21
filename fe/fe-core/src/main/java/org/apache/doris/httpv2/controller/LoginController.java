@@ -17,18 +17,10 @@
 
 package org.apache.doris.httpv2.controller;
 
-import org.apache.doris.analysis.UserIdentity;
-import org.apache.doris.catalog.Env;
-import org.apache.doris.common.Config;
-import org.apache.doris.httpv2.HttpAuthManager.SessionValue;
-
-import org.apache.logging.log4j.LogManager;
-import org.apache.logging.log4j.Logger;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestMethod;
 import org.springframework.web.bind.annotation.RestController;
 
-import java.security.cert.X509Certificate;
 import java.util.HashMap;
 import java.util.Map;
 import javax.servlet.http.HttpServletRequest;
@@ -37,104 +29,13 @@ import javax.servlet.http.HttpServletResponse;
 @RestController
 @RequestMapping("/rest/v1")
 public class LoginController extends BaseController {
-    private static final Logger LOG = LogManager.getLogger(LoginController.class);
 
-    @RequestMapping(path = "/login", method = {RequestMethod.POST, RequestMethod.GET})
+    @RequestMapping(path = "/login", method = RequestMethod.POST)
     public Object login(HttpServletRequest request, HttpServletResponse response) {
+        checkAuthWithCookie(request, response);
         Map<String, Object> msg = new HashMap<>();
-
-        try {
-            // Don't log Authorization header (security best practice)
-            if (LOG.isDebugEnabled()) {
-                LOG.debug("Login request received: method={}, uri={}, remoteAddr={}",
-                        request.getMethod(), request.getRequestURI(), request.getRemoteAddr());
-            }
-
-            // Set no-cache headers to prevent caching issues
-            response.setHeader("Cache-Control", "no-cache, no-store, must-revalidate");
-            response.setHeader("Pragma", "no-cache");
-            response.setHeader("Expires", "0");
-
-            // Check if we're in MTLS mode
-            if ("mtls".equalsIgnoreCase(Config.authentication_type)) {
-                if (LOG.isDebugEnabled()) {
-                    LOG.debug("MTLS authentication mode active for login request");
-                }
-
-                // For MTLS, check if client certificate is present
-                X509Certificate[] certs = (X509Certificate[]) request.getAttribute(
-                        "javax.servlet.request.X509Certificate");
-                if (certs != null && certs.length > 0) {
-                    // Generate username from certificate
-                    String username = "";
-                    try {
-                        username = org.apache.doris.mysql.authenticate.mtls.MTLSUtils
-                                .getUsernameFromCertificate(certs[0]);
-
-                        // Check if user exists with generated username
-                        UserIdentity userIdentity = UserIdentity.createAnalyzedUserIdentWithIp(username, "%");
-                        if (!Env.getCurrentEnv().getAuth().doesUserExist(userIdentity)) {
-                            LOG.warn("No Doris user found for username: {}", username);
-                            response.setStatus(HttpServletResponse.SC_UNAUTHORIZED);
-                            msg.put("msg", "User not found for certificate");
-                            msg.put("code", -1);
-                            return msg;
-                        }
-
-                        // Create a session for this user
-                        SessionValue value = new SessionValue();
-                        value.currentUser = userIdentity;
-                        value.password = ""; // No password for MTLS
-                        addSession(request, response, value);
-
-                        if (LOG.isDebugEnabled()) {
-                            LOG.debug("MTLS login successful for username: {}", username);
-                        }
-
-                        // Return success with username
-                        msg.put("msg", "success");
-                        msg.put("code", 0);
-                        msg.put("data", username); // Return actual username from certificate
-                        msg.put("count", 0);
-
-                        return msg;
-                    } catch (Exception e) {
-                        LOG.warn("Failed to extract username from certificate", e);
-                        response.setStatus(HttpServletResponse.SC_UNAUTHORIZED);
-                        msg.put("msg", "Failed to extract username from certificate: " + e.getMessage());
-                        msg.put("code", -1);
-                        return msg;
-                    }
-                } else {
-                    response.setStatus(HttpServletResponse.SC_UNAUTHORIZED);
-                    msg.put("msg", "Client certificate required");
-                    msg.put("code", -1);
-                    return msg;
-                }
-            } else {
-                // For non-MTLS mode, use standard cookie check
-                try {
-                    checkAuthWithCookie(request, response);
-                    // Return standard format expected by frontend
-                    msg.put("msg", "success");
-                    msg.put("code", 0);
-                    msg.put("data", "");
-                    msg.put("count", 0);
-                    return msg;
-                } catch (Exception e) {
-                    LOG.error("Authentication failed: {}", e.getMessage());
-                    response.setStatus(HttpServletResponse.SC_UNAUTHORIZED);
-                    msg.put("msg", "Authentication failed: " + e.getMessage());
-                    msg.put("code", -1);
-                    return msg;
-                }
-            }
-        } catch (Exception e) {
-            LOG.error("Error during authentication", e);
-            response.setStatus(HttpServletResponse.SC_INTERNAL_SERVER_ERROR);
-            msg.put("msg", "Authentication failed: " + e.getMessage());
-            msg.put("code", -1);
-            return msg;
-        }
+        msg.put("code", 200);
+        msg.put("msg", "Login success!");
+        return msg;
     }
 }

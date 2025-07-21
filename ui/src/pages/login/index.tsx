@@ -47,13 +47,10 @@ function Login(){
     }
     const onFinish = values => {
         login(values).then(res=>{
-            if(res.code===200 || res.code===0){
-                // If we're in MTLS mode, the backend will return the actual username from the certificate
-                // Otherwise, use the username entered in the form
-                const actualUsername = res.data && res.data !== "" ? res.data : username;
-                localStorage.setItem('username', actualUsername);
+            if(res.code===200){
                 history.push('/home');
-            }
+                localStorage.setItem('username', username)
+            } 
         });
     };
 

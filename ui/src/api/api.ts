@@ -24,10 +24,6 @@ export function login<T>(data: any): Promise<Result<T>> {
     return request('/rest/v1/login', {
         method: 'POST',
         headers: {Authorization: data.password ? `Basic ${btoa(data.username + ':' + data.password)}` : `Basic ${btoa(data.username + ':')}`},
-    }).then(response => {
-        // Log the response for debugging
-        console.log('Login response:', response);
-        return response;
     });
 }
 
