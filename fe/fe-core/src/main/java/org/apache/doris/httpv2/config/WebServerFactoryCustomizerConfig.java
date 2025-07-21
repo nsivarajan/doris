@@ -22,7 +22,6 @@ import org.apache.doris.common.Config;
 import org.eclipse.jetty.server.HttpConfiguration;
 import org.eclipse.jetty.server.HttpConnectionFactory;
 import org.eclipse.jetty.server.ServerConnector;
-import org.eclipse.jetty.util.ssl.SslContextFactory;
 import org.springframework.boot.web.embedded.jetty.ConfigurableJettyWebServerFactory;
 import org.springframework.boot.web.embedded.jetty.JettyServletWebServerFactory;
 import org.springframework.boot.web.server.WebServerFactoryCustomizer;
@@ -35,49 +34,23 @@ public class WebServerFactoryCustomizerConfig implements WebServerFactoryCustomi
     @Override
     public void customize(ConfigurableJettyWebServerFactory factory) {
         if (Config.enable_https) {
-            JettyServletWebServerFactory jettyFactory = (JettyServletWebServerFactory) factory;
+            ((JettyServletWebServerFactory) factory).setConfigurations(
+                    Collections.singleton(new HttpToHttpsJettyConfig())
+            );
 
-            jettyFactory.setConfigurations(Collections.singleton(new HttpToHttpsJettyConfig()));
+            factory.addServerCustomizers(
+                    server -> {
+                        HttpConfiguration httpConfiguration = new HttpConfiguration();
+                        httpConfiguration.setSecurePort(Config.https_port);
+                        httpConfiguration.setSecureScheme("https");
 
-            jettyFactory.addServerCustomizers(server -> {
-                SslContextFactory.Server sslContextFactory = new SslContextFactory.Server();
+                        ServerConnector connector = new ServerConnector(server);
+                        connector.addConnectionFactory(new HttpConnectionFactory(httpConfiguration));
+                        connector.setPort(Config.http_port);
 
-                sslContextFactory.setKeyStorePath(Config.key_store_path);
-                sslContextFactory.setKeyStorePassword(Config.key_store_password);
-                sslContextFactory.setKeyStoreType("JKS"); // Use Config value if available
-
-                if (Config.key_store_alias != null && !Config.key_store_alias.isEmpty()) {
-                    sslContextFactory.setCertAlias(Config.key_store_alias);
-                }
-
-                sslContextFactory.setTrustStorePath(Config.mysql_ssl_default_ca_certificate);
-                sslContextFactory.setTrustStorePassword(Config.mysql_ssl_default_ca_certificate_password);
-                sslContextFactory.setTrustStoreType(Config.ssl_trust_store_type);
-
-                if ("mtls".equalsIgnoreCase(Config.authentication_type)) {
-                    sslContextFactory.setWantClientAuth(true);
-                    sslContextFactory.setNeedClientAuth(true);
-                } else {
-                    sslContextFactory.setWantClientAuth(false);
-                    sslContextFactory.setNeedClientAuth(false);
-                }
-
-                HttpConfiguration httpsConfig = new HttpConfiguration();
-                httpsConfig.setSecureScheme("https");
-                httpsConfig.setSecurePort(Config.https_port);
-
-                ServerConnector httpsConnector = new ServerConnector(server,
-                        new org.eclipse.jetty.server.SslConnectionFactory(
-                                sslContextFactory, "http/1.1"),
-                        new HttpConnectionFactory(httpsConfig));
-                httpsConnector.setPort(Config.https_port);
-
-                HttpConfiguration httpConfig = new HttpConfiguration();
-                ServerConnector httpConnector = new ServerConnector(server, new HttpConnectionFactory(httpConfig));
-                httpConnector.setPort(Config.http_port);
-
-                server.setConnectors(new ServerConnector[] { httpConnector, httpsConnector });
-            });
+                        server.addConnector(connector);
+                    }
+            );
         }
     }
 }
