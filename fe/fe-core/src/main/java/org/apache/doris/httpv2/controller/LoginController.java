@@ -43,27 +43,28 @@ public class LoginController extends BaseController {
         try {
             LOG.info("Login request received: method={}, uri={}, auth={}",
                     request.getMethod(), request.getRequestURI(), request.getHeader("Authorization"));
-            
+
             // Check if we're in MTLS mode
             if ("mtls".equalsIgnoreCase(Config.authentication_type)) {
                 LOG.info("MTLS mode detected");
-                
+
                 // For MTLS, check if client certificate is present
-                X509Certificate[] certs = (X509Certificate[]) request.getAttribute("javax.servlet.request.X509Certificate");
+                X509Certificate[] certs = (X509Certificate[]) request.getAttribute(
+                        "javax.servlet.request.X509Certificate");
                 if (certs != null && certs.length > 0) {
                     LOG.info("MTLS certificate detected in login request");
-                    
+
                     // Set no-cache headers to prevent caching issues
                     response.setHeader("Cache-Control", "no-cache, no-store, must-revalidate");
                     response.setHeader("Pragma", "no-cache");
                     response.setHeader("Expires", "0");
-                    
+
                     // Return standard format expected by frontend
                     msg.put("msg", "success");
                     msg.put("code", 0);
                     msg.put("data", "");
                     msg.put("count", 0);
-                    
+
                     LOG.info("Returning success response for MTLS login");
                     return msg;
                 } else {
@@ -77,7 +78,7 @@ public class LoginController extends BaseController {
                 LOG.info("Standard authentication mode");
                 // For non-MTLS mode, use standard cookie check
                 checkAuthWithCookie(request, response);
-                
+
                 // Return standard format expected by frontend
                 msg.put("msg", "success");
                 msg.put("code", 0);

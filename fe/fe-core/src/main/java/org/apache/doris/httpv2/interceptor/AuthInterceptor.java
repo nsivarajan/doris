@@ -45,17 +45,17 @@ public class AuthInterceptor extends BaseController implements HandlerIntercepto
                              HttpServletResponse response, Object handler) throws Exception {
         LOG.info("AuthInterceptor preHandle: method={}, uri={}, thread={}",
                 request.getMethod(), request.getRequestURI(), Thread.currentThread().getId());
-        
+
         String method = request.getMethod();
         if (method.equalsIgnoreCase(RequestMethod.OPTIONS.toString())) {
             response.setStatus(HttpStatus.NO_CONTENT.value());
             return true;
         }
-        
+
         // mTLS mode: authenticate using client certificate
         if ("mtls".equalsIgnoreCase(Config.authentication_type)) {
             LOG.info("MTLS authentication mode for request: {}", request.getRequestURI());
-            
+
             X509Certificate[] certs = (X509Certificate[]) request.getAttribute("javax.servlet.request.X509Certificate");
             if (certs == null || certs.length == 0) {
                 LOG.warn("No client certificate presented for mTLS HTTP authentication");
@@ -89,16 +89,16 @@ public class AuthInterceptor extends BaseController implements HandlerIntercepto
                 ctx.setEnv(Env.getCurrentEnv());
                 ctx.setThreadLocalInfo();
                 LOG.info("ConnectContext set up for user: {}", username);
-                
+
                 // Create a session for this user
                 SessionValue value = new SessionValue();
                 value.currentUser = userIdentity;
                 value.password = ""; // No password for MTLS
                 addSession(request, response, value);
-                
+
                 // Log session creation
                 LOG.info("Session created for user: {}", username);
-                
+
                 LOG.info("mTLS HTTP authentication succeeded for username: {}", username);
                 return true;
             } catch (AnalysisException e) {
