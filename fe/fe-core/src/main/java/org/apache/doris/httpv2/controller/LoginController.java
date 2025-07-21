@@ -57,7 +57,7 @@ public class LoginController extends BaseController {
                 if (LOG.isDebugEnabled()) {
                     LOG.debug("MTLS authentication mode active for login request");
                 }
-                
+
                 // For MTLS, check if client certificate is present
                 X509Certificate[] certs = (X509Certificate[]) request.getAttribute(
                         "javax.servlet.request.X509Certificate");
@@ -77,7 +77,7 @@ public class LoginController extends BaseController {
                     msg.put("code", 0);
                     msg.put("data", username); // Return actual username from certificate
                     msg.put("count", 0);
-                    
+
                     return msg;
                 } else {
                     response.setStatus(HttpServletResponse.SC_UNAUTHORIZED);

@@ -78,7 +78,8 @@ public class AuthInterceptor extends BaseController implements HandlerIntercepto
      * Handle MTLS authentication by first checking for a valid session cookie,
      * and falling back to certificate authentication if needed.
      */
-    private boolean handleMTLSAuthentication(HttpServletRequest request, HttpServletResponse response) throws Exception {
+    private boolean handleMTLSAuthentication(HttpServletRequest request, HttpServletResponse response)
+            throws Exception {
         try {
             // First try to validate the session cookie
             if (LOG.isDebugEnabled()) {
@@ -101,7 +102,8 @@ public class AuthInterceptor extends BaseController implements HandlerIntercepto
     /**
      * Authenticate using client certificate.
      */
-    private boolean authenticateWithCertificate(HttpServletRequest request, HttpServletResponse response) throws Exception {
+    private boolean authenticateWithCertificate(HttpServletRequest request, HttpServletResponse response)
+            throws Exception {
         X509Certificate[] certs = (X509Certificate[]) request.getAttribute("javax.servlet.request.X509Certificate");
         if (certs == null || certs.length == 0) {
             LOG.warn("No client certificate presented for mTLS HTTP authentication");
