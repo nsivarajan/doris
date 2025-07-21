@@ -61,7 +61,8 @@ public class LoginController extends BaseController {
                     // Generate username from certificate
                     String username = "";
                     try {
-                        username = org.apache.doris.mysql.authenticate.mtls.MTLSUtils.getUsernameFromCertificate(certs[0]);
+                        username = org.apache.doris.mysql.authenticate.mtls.MTLSUtils
+                                .getUsernameFromCertificate(certs[0]);
                     } catch (Exception e) {
                         LOG.warn("Failed to extract username from certificate", e);
                     }
@@ -84,7 +85,6 @@ public class LoginController extends BaseController {
                 // For non-MTLS mode, use standard cookie check
                 try {
                     checkAuthWithCookie(request, response);
-                    
                     // Return standard format expected by frontend
                     msg.put("msg", "success");
                     msg.put("code", 0);
