@@ -70,7 +70,7 @@ public class LoginController extends BaseController {
                     try {
                         username = org.apache.doris.mysql.authenticate.mtls.MTLSUtils
                                 .getUsernameFromCertificate(certs[0]);
-                        
+
                         // Check if user exists with generated username
                         UserIdentity userIdentity = UserIdentity.createAnalyzedUserIdentWithIp(username, "%");
                         if (!Env.getCurrentEnv().getAuth().doesUserExist(userIdentity)) {
@@ -80,23 +80,23 @@ public class LoginController extends BaseController {
                             msg.put("code", -1);
                             return msg;
                         }
-                        
+
                         // Create a session for this user
                         SessionValue value = new SessionValue();
                         value.currentUser = userIdentity;
                         value.password = ""; // No password for MTLS
                         addSession(request, response, value);
-                        
+
                         if (LOG.isDebugEnabled()) {
                             LOG.debug("MTLS login successful for username: {}", username);
                         }
-                        
+
                         // Return success with username
                         msg.put("msg", "success");
                         msg.put("code", 0);
                         msg.put("data", username); // Return actual username from certificate
                         msg.put("count", 0);
-                        
+
                         return msg;
                     } catch (Exception e) {
                         LOG.warn("Failed to extract username from certificate", e);
