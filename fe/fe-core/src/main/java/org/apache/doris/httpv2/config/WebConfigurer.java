@@ -42,9 +42,10 @@ public class WebConfigurer implements WebMvcConfigurer {
             // while maintaining security for other endpoints
             registry.addInterceptor(new AuthInterceptor())
                     .addPathPatterns("/rest/v1/**")
-                    .excludePathPatterns("/", "/api/**", "/rest/v1/login", "/rest/v1/logout")
-                    .excludePathPatterns("/static/**", "/metrics")
-                    .excludePathPatterns("/image", "/info", "/version", "/put")
+                    .excludePathPatterns("/", "/login", "/logout", "/index.html")
+                    .excludePathPatterns("/api/**", "/rest/v1/login", "/rest/v1/logout")
+                    .excludePathPatterns("/static/**", "/metrics", "/js/**", "/css/**", "/img/**")
+                    .excludePathPatterns("/image", "/info", "/version", "/put", "/favicon.ico")
                     .excludePathPatterns("/journal_id", "/role", "/check", "/dump");
         } else {
             registry.addInterceptor(new AuthInterceptor())

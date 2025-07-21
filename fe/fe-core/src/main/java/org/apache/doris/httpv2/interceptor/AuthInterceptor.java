@@ -43,8 +43,16 @@ public class AuthInterceptor extends BaseController implements HandlerIntercepto
     @Override
     public boolean preHandle(HttpServletRequest request,
                              HttpServletResponse response, Object handler) throws Exception {
-        LOG.info("AuthInterceptor preHandle: method={}, uri={}, thread={}",
-                request.getMethod(), request.getRequestURI(), Thread.currentThread().getId());
+        if (LOG.isDebugEnabled()) {
+            LOG.debug("AuthInterceptor preHandle: method={}, uri={}, remoteAddr={}",
+                    request.getMethod(), request.getRequestURI(), request.getRemoteAddr());
+        }
+
+        // Check if this is a login/logout path that should be excluded
+        String uri = request.getRequestURI();
+        if (uri.equals("/rest/v1/login") || uri.equals("/rest/v1/logout")) {
+            return true;
+        }
 
         String method = request.getMethod();
         if (method.equalsIgnoreCase(RequestMethod.OPTIONS.toString())) {
@@ -54,8 +62,6 @@ public class AuthInterceptor extends BaseController implements HandlerIntercepto
 
         // mTLS mode: authenticate using client certificate
         if ("mtls".equalsIgnoreCase(Config.authentication_type)) {
-            LOG.info("MTLS authentication mode for request: {}", request.getRequestURI());
-
             X509Certificate[] certs = (X509Certificate[]) request.getAttribute("javax.servlet.request.X509Certificate");
             if (certs == null || certs.length == 0) {
                 LOG.warn("No client certificate presented for mTLS HTTP authentication");
@@ -63,14 +69,11 @@ public class AuthInterceptor extends BaseController implements HandlerIntercepto
                 return false;
             }
             X509Certificate clientCert = certs[0];
-            LOG.info("Client certificate found: subject={}", clientCert.getSubjectX500Principal().getName());
 
             try {
                 // Generate username from certificate serial number
                 String username = MTLSUtils.getUsernameFromCertificate(clientCert);
                 String serialNumber = MTLSUtils.getSerialNumberHex(clientCert);
-
-                LOG.info("Generated username '{}' for certificate with serial number '{}'", username, serialNumber);
 
                 // Check if user exists with generated username
                 UserIdentity userIdentity = UserIdentity.createAnalyzedUserIdentWithIp(username, "%");
@@ -79,7 +82,6 @@ public class AuthInterceptor extends BaseController implements HandlerIntercepto
                     response.sendError(HttpStatus.UNAUTHORIZED.value(), "User not found for certificate");
                     return false;
                 }
-                LOG.info("User exists in Doris: {}", username);
 
                 // Set up ConnectContext for this user
                 ConnectContext ctx = new ConnectContext();
@@ -88,7 +90,6 @@ public class AuthInterceptor extends BaseController implements HandlerIntercepto
                 ctx.setCurrentUserIdentity(userIdentity);
                 ctx.setEnv(Env.getCurrentEnv());
                 ctx.setThreadLocalInfo();
-                LOG.info("ConnectContext set up for user: {}", username);
 
                 // Create a session for this user
                 SessionValue value = new SessionValue();
@@ -96,10 +97,9 @@ public class AuthInterceptor extends BaseController implements HandlerIntercepto
                 value.password = ""; // No password for MTLS
                 addSession(request, response, value);
 
-                // Log session creation
-                LOG.info("Session created for user: {}", username);
-
-                LOG.info("mTLS HTTP authentication succeeded for username: {}", username);
+                if (LOG.isDebugEnabled()) {
+                    LOG.debug("mTLS authentication succeeded for username: {}", username);
+                }
                 return true;
             } catch (AnalysisException e) {
                 LOG.error("Failed to authenticate with mTLS: {}", e.getMessage());
@@ -112,7 +112,6 @@ public class AuthInterceptor extends BaseController implements HandlerIntercepto
                 return false;
             }
         } else {
-            LOG.info("Standard authentication mode for request: {}", request.getRequestURI());
             // Default/LDAP: use existing logic
             checkAuthWithCookie(request, response);
             return true;
