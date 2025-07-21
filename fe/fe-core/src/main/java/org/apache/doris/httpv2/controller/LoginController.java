@@ -17,13 +17,7 @@
 
 package org.apache.doris.httpv2.controller;
 
-import org.apache.doris.analysis.UserIdentity;
-import org.apache.doris.catalog.Env;
-import org.apache.doris.common.AnalysisException;
 import org.apache.doris.common.Config;
-import org.apache.doris.httpv2.HttpAuthManager;
-import org.apache.doris.mysql.authenticate.mtls.MTLSUtils;
-import org.apache.doris.qe.ConnectContext;
 
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
@@ -42,91 +36,61 @@ import javax.servlet.http.HttpServletResponse;
 public class LoginController extends BaseController {
     private static final Logger LOG = LogManager.getLogger(LoginController.class);
 
-    @RequestMapping(path = "/login", method = RequestMethod.POST)
+    @RequestMapping(path = "/login", method = {RequestMethod.POST, RequestMethod.GET})
     public Object login(HttpServletRequest request, HttpServletResponse response) {
         Map<String, Object> msg = new HashMap<>();
 
-        // Check if we're in MTLS mode
-        if ("mtls".equalsIgnoreCase(Config.authentication_type)) {
-            try {
-                // For MTLS, authenticate using client certificate
-                boolean success = handleMTLSAuthentication(request, response);
-                if (success) {
-                    msg.put("code", 200);
-                    msg.put("msg", "MTLS authentication successful");
+        try {
+            LOG.info("Login request received: method={}, uri={}, auth={}",
+                    request.getMethod(), request.getRequestURI(), request.getHeader("Authorization"));
+            
+            // Check if we're in MTLS mode
+            if ("mtls".equalsIgnoreCase(Config.authentication_type)) {
+                LOG.info("MTLS mode detected");
+                
+                // For MTLS, check if client certificate is present
+                X509Certificate[] certs = (X509Certificate[]) request.getAttribute("javax.servlet.request.X509Certificate");
+                if (certs != null && certs.length > 0) {
+                    LOG.info("MTLS certificate detected in login request");
+                    
+                    // Set no-cache headers to prevent caching issues
+                    response.setHeader("Cache-Control", "no-cache, no-store, must-revalidate");
+                    response.setHeader("Pragma", "no-cache");
+                    response.setHeader("Expires", "0");
+                    
+                    // Return standard format expected by frontend
+                    msg.put("msg", "success");
+                    msg.put("code", 0);
+                    msg.put("data", "");
+                    msg.put("count", 0);
+                    
+                    LOG.info("Returning success response for MTLS login");
                     return msg;
                 } else {
-                    msg.put("code", 401);
-                    msg.put("msg", "MTLS authentication failed");
+                    LOG.warn("No client certificate found in MTLS mode");
+                    response.setStatus(HttpServletResponse.SC_UNAUTHORIZED);
+                    msg.put("msg", "Client certificate required");
+                    msg.put("code", -1);
                     return msg;
                 }
-            } catch (Exception e) {
-                LOG.error("Error during MTLS authentication", e);
-                msg.put("code", 500);
-                msg.put("msg", "Internal server error during authentication");
+            } else {
+                LOG.info("Standard authentication mode");
+                // For non-MTLS mode, use standard cookie check
+                checkAuthWithCookie(request, response);
+                
+                // Return standard format expected by frontend
+                msg.put("msg", "success");
+                msg.put("code", 0);
+                msg.put("data", "");
+                msg.put("count", 0);
                 return msg;
             }
-        } else {
-            // For non-MTLS mode, use standard cookie check
-            checkAuthWithCookie(request, response);
-            msg.put("code", 200);
-            msg.put("msg", "Login success!");
-            return msg;
-        }
-    }
-
-    /**
-     * Handle MTLS authentication by checking client certificate
-     *
-     * @param request HTTP request containing client certificate
-     * @param response HTTP response
-     * @return true if authentication succeeded, false otherwise
-     */
-    private boolean handleMTLSAuthentication(HttpServletRequest request, HttpServletResponse response) {
-        X509Certificate[] certs = (X509Certificate[]) request.getAttribute("javax.servlet.request.X509Certificate");
-        if (certs == null || certs.length == 0) {
-            LOG.warn("No client certificate presented for mTLS HTTP authentication");
-            return false;
-        }
-
-        X509Certificate clientCert = certs[0];
-
-        try {
-            // Generate username from certificate serial number
-            String username = MTLSUtils.getUsernameFromCertificate(clientCert);
-            String serialNumber = MTLSUtils.getSerialNumberHex(clientCert);
-
-            LOG.info("Login: Generated username '{}' for certificate with serial number '{}'", username, serialNumber);
-
-            // Check if user exists with generated username
-            UserIdentity userIdentity = UserIdentity.createAnalyzedUserIdentWithIp(username, "%");
-            if (!Env.getCurrentEnv().getAuth().doesUserExist(userIdentity)) {
-                LOG.warn("Login: No Doris user found for username: {} (serial: {})", username, serialNumber);
-                return false;
-            }
-
-            // Set up ConnectContext for this user
-            ConnectContext ctx = new ConnectContext();
-            ctx.setQualifiedUser(username);
-            ctx.setRemoteIP(request.getRemoteAddr());
-            ctx.setCurrentUserIdentity(userIdentity);
-            ctx.setEnv(Env.getCurrentEnv());
-            ctx.setThreadLocalInfo();
-
-            // Create a session for this user
-            HttpAuthManager.SessionValue value = new HttpAuthManager.SessionValue();
-            value.currentUser = userIdentity;
-            value.password = ""; // No password for MTLS
-            addSession(request, response, value);
-
-            LOG.info("MTLS HTTP authentication succeeded for username: {}", username);
-            return true;
-        } catch (AnalysisException e) {
-            LOG.error("Failed to authenticate with mTLS: {}", e.getMessage());
-            return false;
         } catch (Exception e) {
-            LOG.error("Exception during mTLS authentication", e);
-            return false;
+            LOG.error("Error during authentication", e);
+            response.setStatus(HttpServletResponse.SC_INTERNAL_SERVER_ERROR);
+            msg.put("msg", "Authentication failed: " + e.getMessage());
+            msg.put("code", -1);
+            return msg;
         }
     }
 }

@@ -38,7 +38,8 @@ public class WebConfigurer implements WebMvcConfigurer {
     @Override
     public void addInterceptors(InterceptorRegistry registry) {
         if ("mtls".equalsIgnoreCase(Config.authentication_type)) {
-            // When using mTLS, exclude login/logout from authentication to prevent redirect loops
+            // When using mTLS, exclude only essential paths from authentication to prevent redirect loops
+            // while maintaining security for other endpoints
             registry.addInterceptor(new AuthInterceptor())
                     .addPathPatterns("/rest/v1/**")
                     .excludePathPatterns("/", "/api/**", "/rest/v1/login", "/rest/v1/logout")

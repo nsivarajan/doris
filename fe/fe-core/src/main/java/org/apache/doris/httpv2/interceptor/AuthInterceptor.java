@@ -21,6 +21,7 @@ import org.apache.doris.analysis.UserIdentity;
 import org.apache.doris.catalog.Env;
 import org.apache.doris.common.AnalysisException;
 import org.apache.doris.common.Config;
+import org.apache.doris.httpv2.HttpAuthManager.SessionValue;
 import org.apache.doris.httpv2.controller.BaseController;
 import org.apache.doris.mysql.authenticate.mtls.MTLSUtils;
 import org.apache.doris.qe.ConnectContext;
@@ -42,16 +43,19 @@ public class AuthInterceptor extends BaseController implements HandlerIntercepto
     @Override
     public boolean preHandle(HttpServletRequest request,
                              HttpServletResponse response, Object handler) throws Exception {
-        if (LOG.isDebugEnabled()) {
-            LOG.debug("get prehandle. thread: {}", Thread.currentThread().getId());
-        }
+        LOG.info("AuthInterceptor preHandle: method={}, uri={}, thread={}",
+                request.getMethod(), request.getRequestURI(), Thread.currentThread().getId());
+        
         String method = request.getMethod();
         if (method.equalsIgnoreCase(RequestMethod.OPTIONS.toString())) {
             response.setStatus(HttpStatus.NO_CONTENT.value());
             return true;
         }
+        
         // mTLS mode: authenticate using client certificate
         if ("mtls".equalsIgnoreCase(Config.authentication_type)) {
+            LOG.info("MTLS authentication mode for request: {}", request.getRequestURI());
+            
             X509Certificate[] certs = (X509Certificate[]) request.getAttribute("javax.servlet.request.X509Certificate");
             if (certs == null || certs.length == 0) {
                 LOG.warn("No client certificate presented for mTLS HTTP authentication");
@@ -59,6 +63,7 @@ public class AuthInterceptor extends BaseController implements HandlerIntercepto
                 return false;
             }
             X509Certificate clientCert = certs[0];
+            LOG.info("Client certificate found: subject={}", clientCert.getSubjectX500Principal().getName());
 
             try {
                 // Generate username from certificate serial number
@@ -74,6 +79,7 @@ public class AuthInterceptor extends BaseController implements HandlerIntercepto
                     response.sendError(HttpStatus.UNAUTHORIZED.value(), "User not found for certificate");
                     return false;
                 }
+                LOG.info("User exists in Doris: {}", username);
 
                 // Set up ConnectContext for this user
                 ConnectContext ctx = new ConnectContext();
@@ -82,9 +88,18 @@ public class AuthInterceptor extends BaseController implements HandlerIntercepto
                 ctx.setCurrentUserIdentity(userIdentity);
                 ctx.setEnv(Env.getCurrentEnv());
                 ctx.setThreadLocalInfo();
-                if (LOG.isDebugEnabled()) {
-                    LOG.debug("mTLS HTTP authentication succeeded for username: {}", username);
-                }
+                LOG.info("ConnectContext set up for user: {}", username);
+                
+                // Create a session for this user
+                SessionValue value = new SessionValue();
+                value.currentUser = userIdentity;
+                value.password = ""; // No password for MTLS
+                addSession(request, response, value);
+                
+                // Log session creation
+                LOG.info("Session created for user: {}", username);
+                
+                LOG.info("mTLS HTTP authentication succeeded for username: {}", username);
                 return true;
             } catch (AnalysisException e) {
                 LOG.error("Failed to authenticate with mTLS: {}", e.getMessage());
@@ -97,6 +112,7 @@ public class AuthInterceptor extends BaseController implements HandlerIntercepto
                 return false;
             }
         } else {
+            LOG.info("Standard authentication mode for request: {}", request.getRequestURI());
             // Default/LDAP: use existing logic
             checkAuthWithCookie(request, response);
             return true;
