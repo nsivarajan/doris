@@ -23,6 +23,7 @@ import org.apache.doris.common.AnalysisException;
 import org.apache.doris.common.Config;
 import org.apache.doris.httpv2.HttpAuthManager.SessionValue;
 import org.apache.doris.httpv2.controller.BaseController;
+import org.apache.doris.httpv2.exception.UnauthorizedException;
 import org.apache.doris.mysql.authenticate.mtls.MTLSUtils;
 import org.apache.doris.qe.ConnectContext;
 
@@ -40,6 +41,9 @@ import javax.servlet.http.HttpServletResponse;
 public class AuthInterceptor extends BaseController implements HandlerInterceptor {
     private static final Logger LOG = LogManager.getLogger(AuthInterceptor.class);
 
+    /**
+     * Handle authentication for all requests.
+     */
     @Override
     public boolean preHandle(HttpServletRequest request,
                              HttpServletResponse response, Object handler) throws Exception {
@@ -60,61 +64,92 @@ public class AuthInterceptor extends BaseController implements HandlerIntercepto
             return true;
         }
 
-        // mTLS mode: authenticate using client certificate
+        // Choose authentication method based on configuration
         if ("mtls".equalsIgnoreCase(Config.authentication_type)) {
-            X509Certificate[] certs = (X509Certificate[]) request.getAttribute("javax.servlet.request.X509Certificate");
-            if (certs == null || certs.length == 0) {
-                LOG.warn("No client certificate presented for mTLS HTTP authentication");
-                response.sendError(HttpStatus.UNAUTHORIZED.value(), "Client certificate required");
-                return false;
-            }
-            X509Certificate clientCert = certs[0];
-
-            try {
-                // Generate username from certificate serial number
-                String username = MTLSUtils.getUsernameFromCertificate(clientCert);
-                String serialNumber = MTLSUtils.getSerialNumberHex(clientCert);
-
-                // Check if user exists with generated username
-                UserIdentity userIdentity = UserIdentity.createAnalyzedUserIdentWithIp(username, "%");
-                if (!Env.getCurrentEnv().getAuth().doesUserExist(userIdentity)) {
-                    LOG.warn("No Doris user found for username: {} (certificate serial: {})", username, serialNumber);
-                    response.sendError(HttpStatus.UNAUTHORIZED.value(), "User not found for certificate");
-                    return false;
-                }
-
-                // Set up ConnectContext for this user
-                ConnectContext ctx = new ConnectContext();
-                ctx.setQualifiedUser(username);
-                ctx.setRemoteIP(request.getRemoteAddr());
-                ctx.setCurrentUserIdentity(userIdentity);
-                ctx.setEnv(Env.getCurrentEnv());
-                ctx.setThreadLocalInfo();
-
-                // Create a session for this user
-                SessionValue value = new SessionValue();
-                value.currentUser = userIdentity;
-                value.password = ""; // No password for MTLS
-                addSession(request, response, value);
-
-                if (LOG.isDebugEnabled()) {
-                    LOG.debug("mTLS authentication succeeded for username: {}", username);
-                }
-                return true;
-            } catch (AnalysisException e) {
-                LOG.error("Failed to authenticate with mTLS: {}", e.getMessage());
-                response.sendError(HttpStatus.UNAUTHORIZED.value(),
-                        "Certificate authentication failed: " + e.getMessage());
-                return false;
-            } catch (Exception e) {
-                LOG.error("Exception during mTLS authentication", e);
-                response.sendError(HttpStatus.UNAUTHORIZED.value(), "Certificate authentication failed");
-                return false;
-            }
+            return handleMTLSAuthentication(request, response);
         } else {
             // Default/LDAP: use existing logic
             checkAuthWithCookie(request, response);
             return true;
+        }
+    }
+
+    /**
+     * Handle MTLS authentication by first checking for a valid session cookie,
+     * and falling back to certificate authentication if needed.
+     */
+    private boolean handleMTLSAuthentication(HttpServletRequest request, HttpServletResponse response) throws Exception {
+        try {
+            // First try to validate the session cookie
+            if (LOG.isDebugEnabled()) {
+                LOG.debug("MTLS mode: trying to validate session cookie first");
+            }
+            checkAuthWithCookie(request, response);
+            if (LOG.isDebugEnabled()) {
+                LOG.debug("MTLS mode: session cookie validation successful");
+            }
+            return true;
+        } catch (UnauthorizedException e) {
+            // If cookie validation fails, try certificate authentication
+            if (LOG.isDebugEnabled()) {
+                LOG.debug("MTLS mode: session cookie validation failed, trying certificate: {}", e.getMessage());
+            }
+            return authenticateWithCertificate(request, response);
+        }
+    }
+
+    /**
+     * Authenticate using client certificate.
+     */
+    private boolean authenticateWithCertificate(HttpServletRequest request, HttpServletResponse response) throws Exception {
+        X509Certificate[] certs = (X509Certificate[]) request.getAttribute("javax.servlet.request.X509Certificate");
+        if (certs == null || certs.length == 0) {
+            LOG.warn("No client certificate presented for mTLS HTTP authentication");
+            response.sendError(HttpStatus.UNAUTHORIZED.value(), "Client certificate required");
+            return false;
+        }
+        X509Certificate clientCert = certs[0];
+
+        try {
+            // Generate username from certificate serial number
+            String username = MTLSUtils.getUsernameFromCertificate(clientCert);
+            String serialNumber = MTLSUtils.getSerialNumberHex(clientCert);
+
+            // Check if user exists with generated username
+            UserIdentity userIdentity = UserIdentity.createAnalyzedUserIdentWithIp(username, "%");
+            if (!Env.getCurrentEnv().getAuth().doesUserExist(userIdentity)) {
+                LOG.warn("No Doris user found for username: {} (certificate serial: {})", username, serialNumber);
+                response.sendError(HttpStatus.UNAUTHORIZED.value(), "User not found for certificate");
+                return false;
+            }
+
+            // Set up ConnectContext for this user
+            ConnectContext ctx = new ConnectContext();
+            ctx.setQualifiedUser(username);
+            ctx.setRemoteIP(request.getRemoteAddr());
+            ctx.setCurrentUserIdentity(userIdentity);
+            ctx.setEnv(Env.getCurrentEnv());
+            ctx.setThreadLocalInfo();
+
+            // Create a session for this user
+            SessionValue value = new SessionValue();
+            value.currentUser = userIdentity;
+            value.password = ""; // No password for MTLS
+            addSession(request, response, value);
+
+            if (LOG.isDebugEnabled()) {
+                LOG.debug("MTLS certificate authentication succeeded for username: {}", username);
+            }
+            return true;
+        } catch (AnalysisException ae) {
+            LOG.error("Failed to authenticate with mTLS: {}", ae.getMessage());
+            response.sendError(HttpStatus.UNAUTHORIZED.value(),
+                    "Certificate authentication failed: " + ae.getMessage());
+            return false;
+        } catch (Exception ex) {
+            LOG.error("Exception during mTLS authentication", ex);
+            response.sendError(HttpStatus.UNAUTHORIZED.value(), "Certificate authentication failed");
+            return false;
         }
     }
 
