@@ -65,13 +65,13 @@ public class WebServerFactoryCustomizerConfig implements WebServerFactoryCustomi
                         connector.setPort(Config.http_port);
 
                         server.addConnector(connector);
-                        
+
                         // Configure HTTPS connector with client certificate authentication if enabled
                         if ("mtls".equalsIgnoreCase(Config.authentication_type)) {
                             try {
                                 // Create SSL Context Factory
                                 SslContextFactory.Server sslContextFactory = new SslContextFactory.Server();
-                                
+
                                 // Configure server keystore - use the same keystore as MySQL
                                 sslContextFactory.setKeyStorePath(Config.key_store_path);
                                 if (Config.key_store_password != null && !Config.key_store_password.isEmpty()) {
@@ -80,34 +80,36 @@ public class WebServerFactoryCustomizerConfig implements WebServerFactoryCustomi
                                 if (Config.key_store_alias != null && !Config.key_store_alias.isEmpty()) {
                                     sslContextFactory.setCertAlias(Config.key_store_alias);
                                 }
-                                
+
                                 // Configure client certificate authentication
                                 sslContextFactory.setNeedClientAuth(true);
-                                
+
                                 // Configure truststore for client certificates
                                 if (Config.mysql_ssl_default_ca_certificate != null) {
                                     File trustStoreFile = new File(Config.mysql_ssl_default_ca_certificate);
                                     if (trustStoreFile.exists()) {
                                         sslContextFactory.setTrustStorePath(Config.mysql_ssl_default_ca_certificate);
                                         if (Config.mysql_ssl_default_ca_certificate_password != null) {
-                                            sslContextFactory.setTrustStorePassword(Config.mysql_ssl_default_ca_certificate_password);
+                                            sslContextFactory.setTrustStorePassword(
+                                                    Config.mysql_ssl_default_ca_certificate_password);
                                         }
                                     } else {
-                                        LOG.warn("Truststore file not found: {}", Config.mysql_ssl_default_ca_certificate);
+                                        LOG.warn("Truststore file not found: {}",
+                                                Config.mysql_ssl_default_ca_certificate);
                                     }
                                 }
-                                
+
                                 // Configure HTTPS
                                 HttpConfiguration httpsConfig = new HttpConfiguration(httpConfiguration);
                                 httpsConfig.addCustomizer(new SecureRequestCustomizer());
-                                
+
                                 // Create SSL connector
                                 ServerConnector sslConnector = new ServerConnector(
                                         server,
                                         new SslConnectionFactory(sslContextFactory, HttpVersion.HTTP_1_1.asString()),
                                         new HttpConnectionFactory(httpsConfig));
                                 sslConnector.setPort(Config.https_port);
-                                
+
                                 server.addConnector(sslConnector);
                                 LOG.info("HTTPS connector with client certificate authentication enabled on port {}",
                                          Config.https_port);

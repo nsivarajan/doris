@@ -45,6 +45,7 @@ public class LoginController extends BaseController {
         msg.put("msg", "Login success!");
         return msg;
     }
+
     @RequestMapping(path = "/check_mtls_auth", method = RequestMethod.GET)
     public Object checkMtlsAuth(HttpServletRequest request, HttpServletResponse response) {
         try {

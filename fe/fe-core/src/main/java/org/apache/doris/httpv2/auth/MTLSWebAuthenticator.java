@@ -39,7 +39,6 @@ public class MTLSWebAuthenticator {
 
     /**
      * Authenticate a user using client certificate
-     * 
      * @param request The HTTP request containing the client certificate
      * @return ActionAuthorizationInfo if authentication succeeds, null otherwise
      */
@@ -61,7 +60,7 @@ public class MTLSWebAuthenticator {
             // Generate username from certificate serial number
             String username = MTLSUtils.getUsernameFromCertificate(clientCert);
             String serialNumber = MTLSUtils.getSerialNumberHex(clientCert);
-            
+
             LOG.info("Web UI MTLS: Generated username '{}' for certificate with serial number '{}'",
                     username, serialNumber);
 
@@ -72,7 +71,7 @@ public class MTLSWebAuthenticator {
                         username, serialNumber);
                 return null;
             }
-            
+
             // Create authorization info
             ActionAuthorizationInfo authInfo = new ActionAuthorizationInfo();
             authInfo.fullUserName = userIdentity.getQualifiedUser();
