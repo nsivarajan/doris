@@ -27,13 +27,10 @@ import org.springframework.boot.web.embedded.jetty.JettyServletWebServerFactory;
 import org.springframework.boot.web.server.Ssl;
 import org.springframework.boot.web.server.WebServerFactoryCustomizer;
 import org.springframework.context.annotation.Configuration;
-import org.springframework.core.Ordered;
-import org.springframework.core.annotation.Order;
 
 import java.util.Collections;
 
 @Configuration
-@Order(Ordered.HIGHEST_PRECEDENCE) // Ensure this customizer runs before any others
 public class WebServerFactoryCustomizerConfig implements WebServerFactoryCustomizer<ConfigurableJettyWebServerFactory> {
     @Override
     public void customize(ConfigurableJettyWebServerFactory factory) {
@@ -74,7 +71,6 @@ public class WebServerFactoryCustomizerConfig implements WebServerFactoryCustomi
                 // Apply SSL configuration with client authentication
                 applySslWithClientAuth(factory);
             }
-            // For standard HTTPS without client authentication, HttpServer.java handles it
         }
     }
 
