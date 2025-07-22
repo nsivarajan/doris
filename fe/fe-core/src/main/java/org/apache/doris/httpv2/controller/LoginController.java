@@ -17,6 +17,13 @@
 
 package org.apache.doris.httpv2.controller;
 
+import org.apache.doris.analysis.UserIdentity;
+import org.apache.doris.common.Config;
+import org.apache.doris.httpv2.HttpAuthManager.SessionValue;
+import org.apache.doris.httpv2.auth.MTLSWebAuthenticator;
+
+import org.springframework.http.HttpStatus;
+import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestMethod;
 import org.springframework.web.bind.annotation.RestController;
@@ -37,5 +44,32 @@ public class LoginController extends BaseController {
         msg.put("code", 200);
         msg.put("msg", "Login success!");
         return msg;
+    }
+    
+    @RequestMapping(path = "/check_mtls_auth", method = RequestMethod.GET)
+    public Object checkMtlsAuth(HttpServletRequest request, HttpServletResponse response) {
+        try {
+            if ("mtls".equalsIgnoreCase(Config.authentication_type)) {
+                ActionAuthorizationInfo authInfo = MTLSWebAuthenticator.authenticate(request);
+                if (authInfo != null) {
+                    // MTLS authentication successful
+                    // Create a session for the authenticated user
+                    SessionValue value = new SessionValue();
+                    value.currentUser = UserIdentity.createAnalyzedUserIdentWithIp(authInfo.fullUserName, "%");
+                    value.password = authInfo.password;
+                    addSession(request, response, value);
+                    
+                    Map<String, Object> msg = new HashMap<>();
+                    msg.put("code", 200);
+                    msg.put("msg", "MTLS authentication successful");
+                    msg.put("username", authInfo.fullUserName);
+                    return msg;
+                }
+            }
+            // MTLS authentication failed or not enabled
+            return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body("MTLS authentication failed");
+        } catch (Exception e) {
+            return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body("MTLS authentication failed: " + e.getMessage());
+        }
     }
 }

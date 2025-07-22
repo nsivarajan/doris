@@ -17,22 +17,22 @@
  * under the License.
  */
  
-import React,{useState} from 'react';
-import {Form, Input, Button, Checkbox} from 'antd';
+import React, {useEffect} from 'react';
+import {Form, Input, Button, message} from 'antd';
 import request from 'Utils/request';
 import {useHistory} from 'react-router-dom';
 import {useTranslation} from 'react-i18next';
 import {login} from 'Src/api/api';
 import styles from './index.less';
 import './cover.less';
+
 function Login(){
-    let { t } = useTranslation();
-    const [username, setUsername] = useState();
+    const { t } = useTranslation();
     const history = useHistory();
     const layout = {
         labelCol: {span: 8},
         wrapperCol: {span: 24},
-        layout='vertical',
+        layout: 'vertical',
     };
     const tailLayout = {
         wrapperCol: {span: 24},
@@ -46,17 +46,39 @@ function Login(){
         code: number;
     }
     const onFinish = values => {
-        login(values).then(res=>{
-            if(res.code===200){
+        login(values).then(res => {
+            if(res.code === 200){
+                // Store the username from form values (not from state)
+                localStorage.setItem('username', values.username);
                 history.push('/home');
-                localStorage.setItem('username', username)
-            } 
+            } else {
+                // Show error message if login fails
+                message.error(t('loginWarning'));
+            }
+        }).catch(err => {
+            message.error(t('errMsg'));
         });
     };
 
     const onFinishFailed = errorInfo => {
         console.log('Failed:', errorInfo);
     };
+    // Check if MTLS authentication is enabled and try to authenticate
+    useEffect(() => {
+        // Try to access the MTLS authentication check endpoint
+        request('/rest/v1/check_mtls_auth', { method: 'GET' }, false, false)
+            .then(res => {
+                if (res && res.code === 200) {
+                    // MTLS authentication successful, store username and redirect to home
+                    localStorage.setItem('username', res.username);
+                    history.push('/home');
+                }
+            })
+            .catch(err => {
+                // MTLS authentication failed or not enabled - just continue to show login form
+            });
+    }, []);
+
     // 878CB1
     // 31395B
     return (
@@ -77,7 +99,7 @@ function Login(){
                     name="username"
                     rules={[{required: true, message: 'Please input your username!'}]}
                 >
-                    <Input value={username} onChange={(e)=>{setUsername(e.target.value)}} />
+                    <Input autoComplete="username" />
                 </Form.Item>
 
                 <Form.Item
@@ -85,7 +107,7 @@ function Login(){
                     name="password"
                     rules={[{required: false, message: 'Please input your password!'}]}
                 >
-                    <Input.Password/>
+                    <Input.Password autoComplete="current-password" />
                 </Form.Item>
 
                 <Form.Item {...tailLayout}>
