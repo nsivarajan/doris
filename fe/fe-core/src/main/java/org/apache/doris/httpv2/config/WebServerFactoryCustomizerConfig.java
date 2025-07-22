@@ -40,7 +40,7 @@ public class WebServerFactoryCustomizerConfig implements WebServerFactoryCustomi
     public void customize(ConfigurableJettyWebServerFactory factory) {
         // Enable SSL if either HTTPS is enabled or mTLS authentication is configured
         boolean enableSsl = Config.enable_https || "mtls".equalsIgnoreCase(Config.authentication_type);
-        
+
         if (enableSsl) {
             ((JettyServletWebServerFactory) factory).setConfigurations(
                     Collections.singleton(new HttpToHttpsJettyConfig())
@@ -73,37 +73,37 @@ public class WebServerFactoryCustomizerConfig implements WebServerFactoryCustomi
     private void configureSslConnector(Server server, HttpConfiguration httpConfiguration) {
         // Create SSL Context Factory
         SslContextFactory.Server sslContextFactory = new SslContextFactory.Server();
-        
+
         // Determine if we're using mTLS authentication
         boolean isMtls = "mtls".equalsIgnoreCase(Config.authentication_type);
-        
+
         // Configure server certificate (key store)
         sslContextFactory.setKeyStorePath(Config.key_store_path);
         sslContextFactory.setKeyStorePassword(Config.key_store_password);
         sslContextFactory.setKeyStoreType(Config.key_store_type);
-        
+
         // Configure client certificate validation (trust store) for mTLS
         boolean needClientAuth = isMtls || Config.ssl_force_client_auth;
         if (needClientAuth) {
             sslContextFactory.setNeedClientAuth(true);
-            
+
             // For trust store (client certificate validation), still use the MySQL SSL CA certificate
             sslContextFactory.setTrustStorePath(Config.mysql_ssl_default_ca_certificate);
             sslContextFactory.setTrustStorePassword(Config.mysql_ssl_default_ca_certificate_password);
             sslContextFactory.setTrustStoreType(Config.ssl_trust_store_type);
         }
-        
+
         // Configure HTTPS
         HttpConfiguration httpsConfiguration = new HttpConfiguration(httpConfiguration);
         httpsConfiguration.addCustomizer(new SecureRequestCustomizer());
-        
+
         // Create a single SSL connector on the configured HTTPS port
         ServerConnector sslConnector = new ServerConnector(
                 server,
                 new SslConnectionFactory(sslContextFactory, HttpVersion.HTTP_1_1.asString()),
                 new HttpConnectionFactory(httpsConfiguration));
         sslConnector.setPort(Config.https_port);
-        
+
         server.addConnector(sslConnector);
     }
 }
