@@ -45,7 +45,6 @@ public class LoginController extends BaseController {
         msg.put("msg", "Login success!");
         return msg;
     }
-    
     @RequestMapping(path = "/check_mtls_auth", method = RequestMethod.GET)
     public Object checkMtlsAuth(HttpServletRequest request, HttpServletResponse response) {
         try {
@@ -58,7 +57,6 @@ public class LoginController extends BaseController {
                     value.currentUser = UserIdentity.createAnalyzedUserIdentWithIp(authInfo.fullUserName, "%");
                     value.password = authInfo.password;
                     addSession(request, response, value);
-                    
                     Map<String, Object> msg = new HashMap<>();
                     msg.put("code", 200);
                     msg.put("msg", "MTLS authentication successful");

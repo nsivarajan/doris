@@ -19,6 +19,8 @@ package org.apache.doris.httpv2.config;
 
 import org.apache.doris.common.Config;
 
+import org.apache.logging.log4j.LogManager;
+import org.apache.logging.log4j.Logger;
 import org.eclipse.jetty.http.HttpVersion;
 import org.eclipse.jetty.server.HttpConfiguration;
 import org.eclipse.jetty.server.HttpConnectionFactory;
@@ -26,8 +28,6 @@ import org.eclipse.jetty.server.SecureRequestCustomizer;
 import org.eclipse.jetty.server.ServerConnector;
 import org.eclipse.jetty.server.SslConnectionFactory;
 import org.eclipse.jetty.util.ssl.SslContextFactory;
-import org.apache.logging.log4j.LogManager;
-import org.apache.logging.log4j.Logger;
 import org.springframework.boot.web.embedded.jetty.ConfigurableJettyWebServerFactory;
 import org.springframework.boot.web.embedded.jetty.JettyServletWebServerFactory;
 import org.springframework.boot.web.server.WebServerFactoryCustomizer;
@@ -39,7 +39,7 @@ import java.util.Collections;
 @Configuration
 public class WebServerFactoryCustomizerConfig implements WebServerFactoryCustomizer<ConfigurableJettyWebServerFactory> {
     private static final Logger LOG = LogManager.getLogger(WebServerFactoryCustomizerConfig.class);
-    
+
     @Override
     public void customize(ConfigurableJettyWebServerFactory factory) {
         // When authentication_type is "mtls", automatically enable HTTPS
@@ -47,7 +47,7 @@ public class WebServerFactoryCustomizerConfig implements WebServerFactoryCustomi
             Config.enable_https = true;
             Config.ssl_force_client_auth = true;
         }
-        
+
         if (Config.enable_https) {
             ((JettyServletWebServerFactory) factory).setConfigurations(
                     Collections.singleton(new HttpToHttpsJettyConfig())
@@ -110,7 +110,7 @@ public class WebServerFactoryCustomizerConfig implements WebServerFactoryCustomi
                                 
                                 server.addConnector(sslConnector);
                                 LOG.info("HTTPS connector with client certificate authentication enabled on port {}",
-                                        Config.https_port);
+                                         Config.https_port);
                             } catch (Exception e) {
                                 LOG.error("Failed to configure HTTPS with client certificate authentication", e);
                             }

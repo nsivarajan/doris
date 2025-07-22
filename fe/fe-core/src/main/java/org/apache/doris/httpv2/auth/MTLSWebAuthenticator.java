@@ -57,18 +57,18 @@ public class MTLSWebAuthenticator {
             }
 
             X509Certificate clientCert = certs[0];
-            
+
             // Generate username from certificate serial number
             String username = MTLSUtils.getUsernameFromCertificate(clientCert);
             String serialNumber = MTLSUtils.getSerialNumberHex(clientCert);
             
-            LOG.info("Web UI MTLS: Generated username '{}' for certificate with serial number '{}'", 
+            LOG.info("Web UI MTLS: Generated username '{}' for certificate with serial number '{}'",
                     username, serialNumber);
-            
+
             // Look up Doris user by generated username
             UserIdentity userIdentity = UserIdentity.createAnalyzedUserIdentWithIp(username, "%");
             if (!Env.getCurrentEnv().getAuth().doesUserExist(userIdentity)) {
-                LOG.warn("Web UI MTLS: No Doris user found for username: {} (certificate serial: {})", 
+                LOG.warn("Web UI MTLS: No Doris user found for username: {} (certificate serial: {})",
                         username, serialNumber);
                 return null;
             }
@@ -79,7 +79,7 @@ public class MTLSWebAuthenticator {
             authInfo.remoteIp = request.getRemoteAddr();
             // Password is not used in MTLS authentication
             authInfo.password = "";
-            
+
             LOG.info("Web UI MTLS authentication successful for user: {}", username);
             return authInfo;
         } catch (AnalysisException e) {

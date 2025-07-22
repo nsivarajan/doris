@@ -68,17 +68,14 @@ public class BaseController {
             ActionAuthorizationInfo authInfo = org.apache.doris.httpv2.auth.MTLSWebAuthenticator.authenticate(request);
             if (authInfo != null) {
                 UserIdentity currentUser = UserIdentity.createAnalyzedUserIdentWithIp(authInfo.fullUserName, "%");
-                
                 if (Config.isCloudMode() && checkAuth) {
                     checkInstanceOverdue(currentUser);
                     checkGlobalAuth(currentUser, PrivPredicate.ADMIN_OR_NODE);
                 }
-                
                 SessionValue value = new SessionValue();
                 value.currentUser = currentUser;
                 value.password = authInfo.password;
                 addSession(request, response, value);
-                
                 ConnectContext ctx = new ConnectContext();
                 ctx.setQualifiedUser(authInfo.fullUserName);
                 ctx.setRemoteIP(authInfo.remoteIp);
@@ -92,7 +89,6 @@ public class BaseController {
                 return authInfo;
             }
         }
-        
         // Next we check if the request has Authorization header.
         String encodedAuthString = request.getHeader("Authorization");
         if (encodedAuthString != null) {
