@@ -19,12 +19,11 @@ package org.apache.doris.httpv2.config;
 
 import org.apache.doris.common.Config;
 
-import org.apache.logging.log4j.LogManager;
-import org.apache.logging.log4j.Logger;
 import org.eclipse.jetty.http.HttpVersion;
 import org.eclipse.jetty.server.HttpConfiguration;
 import org.eclipse.jetty.server.HttpConnectionFactory;
 import org.eclipse.jetty.server.SecureRequestCustomizer;
+import org.eclipse.jetty.server.Server;
 import org.eclipse.jetty.server.ServerConnector;
 import org.eclipse.jetty.server.SslConnectionFactory;
 import org.eclipse.jetty.util.ssl.SslContextFactory;
@@ -33,92 +32,78 @@ import org.springframework.boot.web.embedded.jetty.JettyServletWebServerFactory;
 import org.springframework.boot.web.server.WebServerFactoryCustomizer;
 import org.springframework.context.annotation.Configuration;
 
-import java.io.File;
 import java.util.Collections;
 
 @Configuration
 public class WebServerFactoryCustomizerConfig implements WebServerFactoryCustomizer<ConfigurableJettyWebServerFactory> {
-    private static final Logger LOG = LogManager.getLogger(WebServerFactoryCustomizerConfig.class);
-
     @Override
     public void customize(ConfigurableJettyWebServerFactory factory) {
-        // When authentication_type is "mtls", automatically enable HTTPS
-        if ("mtls".equalsIgnoreCase(Config.authentication_type)) {
-            Config.enable_https = true;
-            Config.ssl_force_client_auth = true;
-        }
-
-        if (Config.enable_https) {
+        // Enable SSL if either HTTPS is enabled or mTLS authentication is configured
+        boolean enableSsl = Config.enable_https || "mtls".equalsIgnoreCase(Config.authentication_type);
+        
+        if (enableSsl) {
             ((JettyServletWebServerFactory) factory).setConfigurations(
                     Collections.singleton(new HttpToHttpsJettyConfig())
             );
 
             factory.addServerCustomizers(
                     server -> {
-                        // Configure HTTP connector
+                        // Configure HTTP
                         HttpConfiguration httpConfiguration = new HttpConfiguration();
                         httpConfiguration.setSecurePort(Config.https_port);
                         httpConfiguration.setSecureScheme("https");
 
-                        ServerConnector connector = new ServerConnector(server);
-                        connector.addConnectionFactory(new HttpConnectionFactory(httpConfiguration));
-                        connector.setPort(Config.http_port);
+                        // Create HTTP connector
+                        ServerConnector httpConnector = new ServerConnector(server);
+                        httpConnector.addConnectionFactory(new HttpConnectionFactory(httpConfiguration));
+                        httpConnector.setPort(Config.http_port);
+                        server.addConnector(httpConnector);
 
-                        server.addConnector(connector);
-
-                        // Configure HTTPS connector with client certificate authentication if enabled
-                        if ("mtls".equalsIgnoreCase(Config.authentication_type)) {
-                            try {
-                                // Create SSL Context Factory
-                                SslContextFactory.Server sslContextFactory = new SslContextFactory.Server();
-
-                                // Configure server keystore - use the same keystore as MySQL
-                                sslContextFactory.setKeyStorePath(Config.key_store_path);
-                                if (Config.key_store_password != null && !Config.key_store_password.isEmpty()) {
-                                    sslContextFactory.setKeyStorePassword(Config.key_store_password);
-                                }
-                                if (Config.key_store_alias != null && !Config.key_store_alias.isEmpty()) {
-                                    sslContextFactory.setCertAlias(Config.key_store_alias);
-                                }
-
-                                // Configure client certificate authentication
-                                sslContextFactory.setNeedClientAuth(true);
-
-                                // Configure truststore for client certificates
-                                if (Config.mysql_ssl_default_ca_certificate != null) {
-                                    File trustStoreFile = new File(Config.mysql_ssl_default_ca_certificate);
-                                    if (trustStoreFile.exists()) {
-                                        sslContextFactory.setTrustStorePath(Config.mysql_ssl_default_ca_certificate);
-                                        if (Config.mysql_ssl_default_ca_certificate_password != null) {
-                                            sslContextFactory.setTrustStorePassword(
-                                                    Config.mysql_ssl_default_ca_certificate_password);
-                                        }
-                                    } else {
-                                        LOG.warn("Truststore file not found: {}",
-                                                Config.mysql_ssl_default_ca_certificate);
-                                    }
-                                }
-
-                                // Configure HTTPS
-                                HttpConfiguration httpsConfig = new HttpConfiguration(httpConfiguration);
-                                httpsConfig.addCustomizer(new SecureRequestCustomizer());
-
-                                // Create SSL connector
-                                ServerConnector sslConnector = new ServerConnector(
-                                        server,
-                                        new SslConnectionFactory(sslContextFactory, HttpVersion.HTTP_1_1.asString()),
-                                        new HttpConnectionFactory(httpsConfig));
-                                sslConnector.setPort(Config.https_port);
-
-                                server.addConnector(sslConnector);
-                                LOG.info("HTTPS connector with client certificate authentication enabled on port {}",
-                                         Config.https_port);
-                            } catch (Exception e) {
-                                LOG.error("Failed to configure HTTPS with client certificate authentication", e);
-                            }
-                        }
+                        // Configure and add a single HTTPS connector
+                        configureSslConnector(server, httpConfiguration);
                     }
             );
         }
+    }
+
+    /**
+     * Configures a single SSL connector for either standard HTTPS or mTLS authentication
+     * using the same port (Config.https_port) to avoid any conflicts.
+     */
+    private void configureSslConnector(Server server, HttpConfiguration httpConfiguration) {
+        // Create SSL Context Factory
+        SslContextFactory.Server sslContextFactory = new SslContextFactory.Server();
+        
+        // Determine if we're using mTLS authentication
+        boolean isMtls = "mtls".equalsIgnoreCase(Config.authentication_type);
+        
+        // Configure server certificate (key store)
+        sslContextFactory.setKeyStorePath(Config.key_store_path);
+        sslContextFactory.setKeyStorePassword(Config.key_store_password);
+        sslContextFactory.setKeyStoreType(Config.key_store_type);
+        
+        // Configure client certificate validation (trust store) for mTLS
+        boolean needClientAuth = isMtls || Config.ssl_force_client_auth;
+        if (needClientAuth) {
+            sslContextFactory.setNeedClientAuth(true);
+            
+            // For trust store (client certificate validation), still use the MySQL SSL CA certificate
+            sslContextFactory.setTrustStorePath(Config.mysql_ssl_default_ca_certificate);
+            sslContextFactory.setTrustStorePassword(Config.mysql_ssl_default_ca_certificate_password);
+            sslContextFactory.setTrustStoreType(Config.ssl_trust_store_type);
+        }
+        
+        // Configure HTTPS
+        HttpConfiguration httpsConfiguration = new HttpConfiguration(httpConfiguration);
+        httpsConfiguration.addCustomizer(new SecureRequestCustomizer());
+        
+        // Create a single SSL connector on the configured HTTPS port
+        ServerConnector sslConnector = new ServerConnector(
+                server,
+                new SslConnectionFactory(sslContextFactory, HttpVersion.HTTP_1_1.asString()),
+                new HttpConnectionFactory(httpsConfiguration));
+        sslConnector.setPort(Config.https_port);
+        
+        server.addConnector(sslConnector);
     }
 }
