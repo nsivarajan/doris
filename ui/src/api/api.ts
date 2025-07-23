@@ -19,11 +19,26 @@ import {API_BASE} from 'Constants';
 import request from 'Utils/request';
 import {Result} from '@src/interfaces/http.interface';
 
+// Get authentication information
+export function getAuthInfo(): Promise<any> {
+    return request('/auth_info', {
+        method: 'GET',
+    });
+}
+
 //login
 export function login<T>(data: any): Promise<Result<T>> {
     return request('/rest/v1/login', {
         method: 'POST',
         headers: {Authorization: data.password ? `Basic ${btoa(data.username + ':' + data.password)}` : `Basic ${btoa(data.username + ':')}`},
+    }).then(response => {
+        // If this is an mTLS authentication, include the actual username from certificate
+        if (response.mtlsUsername) {
+            response.displayUsername = response.mtlsUsername;
+        } else {
+            response.displayUsername = data.username;
+        }
+        return response;
     });
 }
 

@@ -22,7 +22,7 @@ import {Form, Input, Button, message} from 'antd';
 import request from 'Utils/request';
 import {useHistory} from 'react-router-dom';
 import {useTranslation} from 'react-i18next';
-import {login} from 'Src/api/api';
+import {login, getAuthInfo} from 'Src/api/api';
 import styles from './index.less';
 import './cover.less';
 
@@ -45,11 +45,19 @@ function Login(){
         msg: string;
         code: number;
     }
+    
+    // Define interface for auth info response
+    interface AuthInfoResponse {
+        authenticated?: boolean;
+        username?: string;
+        authType?: string;
+        code?: number;
+    }
     const onFinish = values => {
-        login(values).then(res => {
+        login(values).then((res: any) => {
             if(res.code === 200){
-                // Store the username from form values (not from state)
-                localStorage.setItem('username', values.username);
+                const usernameToStore = res.displayUsername || values.username;
+                localStorage.setItem('username', usernameToStore);
                 history.push('/home');
             } else {
                 // Show error message if login fails
@@ -65,10 +73,10 @@ function Login(){
     };
     // Check if MTLS authentication is enabled and try to authenticate
     useEffect(() => {
-        // Try to access the MTLS authentication check endpoint
-        request('/rest/v1/check_mtls_auth', { method: 'GET' }, false, false)
-            .then(res => {
-                if (res && res.code === 200) {
+        // Use our new auth_info endpoint that handles client certificates properly
+        getAuthInfo()
+            .then((res: AuthInfoResponse) => {
+                if (res && res.code === 200 && res.authenticated === true && res.username) {
                     // MTLS authentication successful, store username and redirect to home
                     localStorage.setItem('username', res.username);
                     history.push('/home');
@@ -76,6 +84,7 @@ function Login(){
             })
             .catch(err => {
                 // MTLS authentication failed or not enabled - just continue to show login form
+                console.log('Auth info check failed or not enabled');
             });
     }, []);
 
