@@ -53,7 +53,7 @@ public class LoginController extends BaseController {
         return msg;
     }
 
-    @RequestMapping(path = "/auth_info", method = RequestMethod.GET)
+    @RequestMapping(path = "/auth_info", method = {RequestMethod.GET, RequestMethod.POST})
     public Object getAuthInfo(HttpServletRequest request, HttpServletResponse response) {
         Map<String, Object> info = new HashMap<>();
         info.put("authType", Config.authentication_type);

@@ -21,8 +21,11 @@ import {Result} from '@src/interfaces/http.interface';
 
 // Get authentication information
 export function getAuthInfo(): Promise<any> {
+    // Use POST instead of GET to trigger the certificate prompt
+    // This mimics what happens in the login function
     return request('/rest/v1/auth_info', {
-        method: 'GET',
+        method: 'POST',
+        headers: {Authorization: `Basic ${btoa('doris:')}`}
     });
 }
 
