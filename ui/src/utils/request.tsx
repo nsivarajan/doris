@@ -69,7 +69,8 @@ function checkStatus(response) {
  * @return {Object}
  */
 export default async function request(url, options = {}, tipSuccess = false, tipError = true, fullResponse = false) {
-    if(!localStorage.getItem('username') && url.includes('login') === false){
+    // Skip username check for auth_info endpoint since it's used for initial authentication
+    if(!localStorage.getItem('username') && url.includes('login') === false && url.includes('auth_info') === false){
         clearAllCookie();
         Modal.confirm({
             title: <Trans>tips</Trans>,

@@ -71,20 +71,19 @@ function Login(){
     const onFinishFailed = errorInfo => {
         console.log('Failed:', errorInfo);
     };
-    // Check if MTLS authentication is enabled and try to authenticate
     useEffect(() => {
-        // Use our new auth_info endpoint that handles client certificates properly
         getAuthInfo()
             .then((res: AuthInfoResponse) => {
                 if (res && res.code === 200 && res.authenticated === true && res.username) {
                     // MTLS authentication successful, store username and redirect to home
                     localStorage.setItem('username', res.username);
                     history.push('/home');
+                } else {
+                    console.log('MTLS auth not available or failed, showing login form');
                 }
             })
             .catch(err => {
-                // MTLS authentication failed or not enabled - just continue to show login form
-                console.log('Auth info check failed or not enabled');
+                console.log('Auth info check error:', err);
             });
     }, []);
 

@@ -21,7 +21,7 @@ import {Result} from '@src/interfaces/http.interface';
 
 // Get authentication information
 export function getAuthInfo(): Promise<any> {
-    return request('/auth_info', {
+    return request('/rest/v1/auth_info', {
         method: 'GET',
     });
 }
