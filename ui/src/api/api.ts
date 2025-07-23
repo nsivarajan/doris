@@ -23,7 +23,7 @@ import {Result} from '@src/interfaces/http.interface';
 export function getAuthInfo(): Promise<any> {
     return request('/rest/v1/auth_info', {
         method: 'GET',
-    }, false, true, false, true); // Set skipAuthCheck to true
+    });
 }
 
 //login
