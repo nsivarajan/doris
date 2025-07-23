@@ -22,8 +22,6 @@ import org.apache.doris.common.Config;
 import org.apache.doris.httpv2.HttpAuthManager.SessionValue;
 import org.apache.doris.httpv2.auth.MTLSWebAuthenticator;
 
-import org.springframework.http.HttpStatus;
-import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestMethod;
 import org.springframework.web.bind.annotation.RestController;
@@ -43,7 +41,7 @@ public class LoginController extends BaseController {
         Map<String, Object> msg = new HashMap<>();
         msg.put("code", 200);
         msg.put("msg", "Login success!");
-        
+
         // If this is an mTLS authentication, include the actual username from certificate
         if ("mtls".equalsIgnoreCase(Config.authentication_type)) {
             ActionAuthorizationInfo authInfo = MTLSWebAuthenticator.authenticate(request);
@@ -51,15 +49,15 @@ public class LoginController extends BaseController {
                 msg.put("mtlsUsername", authInfo.fullUserName);
             }
         }
-        
+
         return msg;
     }
-    
+
     @RequestMapping(path = "/auth_info", method = RequestMethod.GET)
     public Object getAuthInfo(HttpServletRequest request, HttpServletResponse response) {
         Map<String, Object> info = new HashMap<>();
         info.put("authType", Config.authentication_type);
-        
+
         // If this is an mTLS authentication, check if we have a valid certificate
         if ("mtls".equalsIgnoreCase(Config.authentication_type)) {
             ActionAuthorizationInfo authInfo = MTLSWebAuthenticator.authenticate(request);
@@ -70,7 +68,7 @@ public class LoginController extends BaseController {
                 value.currentUser = UserIdentity.createAnalyzedUserIdentWithIp(authInfo.fullUserName, "%");
                 value.password = authInfo.password;
                 addSession(request, response, value);
-                
+
                 info.put("authenticated", true);
                 info.put("username", authInfo.fullUserName);
             } else {
@@ -79,7 +77,7 @@ public class LoginController extends BaseController {
         } else {
             info.put("authenticated", false);
         }
-        
+
         return info;
     }
 }
