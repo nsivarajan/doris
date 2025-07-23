@@ -69,8 +69,19 @@ function checkStatus(response) {
  * @return {Object}
  */
 export default async function request(url, options = {}, tipSuccess = false, tipError = true, fullResponse = false) {
-    // Skip authentication check for login and auth_info endpoints
-    if(!localStorage.getItem('username') && url.includes('login') === false && url.includes('auth_info') === false){
+    // Special case for auth_info endpoint - bypass all checks
+    if (url === '/rest/v1/auth_info') {
+        // Skip all authentication checks for this specific endpoint
+        const basePath = getBasePath();
+        const newOptions = {credentials: 'include', ...options};
+        if (basePath && basePath!=='/') {
+            url = basePath + url
+        }
+        const response = await fetch(url, newOptions);
+        const text = await response.text();
+        return JSONbig.parse(text);
+    }
+    if(!localStorage.getItem('username') && url.includes('login') === false){
         clearAllCookie();
         Modal.confirm({
             title: <Trans>tips</Trans>,
