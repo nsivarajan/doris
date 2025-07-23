@@ -39,7 +39,7 @@ public class WebConfigurer implements WebMvcConfigurer {
     public void addInterceptors(InterceptorRegistry registry) {
         registry.addInterceptor(new AuthInterceptor())
                 .addPathPatterns("/rest/v1/**")
-                .excludePathPatterns("/", "/api/**", "/rest/v1/login", "/rest/v1/logout", "/static/**", "/metrics")
+                .excludePathPatterns("/", "/api/**", "/rest/v1/login", "/rest/v1/logout", "/rest/v1/auth_info", "/static/**", "/metrics")
                 .excludePathPatterns("/image", "/info", "/version", "/put", "/journal_id", "/role", "/check", "/dump");
     }
 
