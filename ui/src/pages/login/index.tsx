@@ -74,12 +74,22 @@ function Login(){
     useEffect(() => {
         getAuthInfo()
             .then((res: AuthInfoResponse) => {
+                console.log('Auth info response:', res);
                 if (res && res.code === 200 && res.authenticated === true && res.username) {
                     // MTLS authentication successful, store username and redirect to home
+                    console.log('MTLS authentication successful for user:', res.username);
                     localStorage.setItem('username', res.username);
                     history.push('/home');
                 } else {
                     console.log('MTLS auth not available or failed, showing login form');
+                    if (res) {
+                        console.log('Auth type:', res.authType);
+                        console.log('Authenticated:', res.authenticated);
+                        console.log('Code:', res.code);
+                        console.log('Username:', res.username);
+                    } else {
+                        console.log('Response is null or undefined');
+                    }
                 }
             })
             .catch(err => {
