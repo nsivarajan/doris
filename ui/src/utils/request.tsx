@@ -31,11 +31,11 @@ import SyntaxHighlighter from 'react-syntax-highlighter';
 import {docco} from 'react-syntax-highlighter/dist/esm/styles/hljs';
 
 const JSONbig = require('json-bigint')({ storeAsString: true });
-function checkStatus(response) {
+function checkStatus(response, skipAuthCheck = false) {
     if (response.status >= 200 && response.status < 300) {
         return response;
     }
-    if (response.status === 401) {
+    if (response.status === 401 && !skipAuthCheck) {
         Modal.confirm({
             title: <Trans>tips</Trans>,
             icon: <ExclamationCircleOutlined/>,
@@ -66,11 +66,12 @@ function checkStatus(response) {
  * @param  {boolean} tipSuccess false: Do not show successful update true: show successful update
  * @param  {boolean} tipError  false: Don't prompt error true: display error message
  * @param  {boolean} fullResponse false: Whether to return all requested information
+ * @param  {boolean} skipAuthCheck false: Perform authentication checks true: Skip all authentication checks
  * @return {Object}
  */
-export default async function request(url, options = {}, tipSuccess = false, tipError = true, fullResponse = false) {
-    // Skip username check for auth_info endpoint since it's used for initial authentication
-    if(!localStorage.getItem('username') && url.includes('login') === false && url.includes('auth_info') === false){
+export default async function request(url, options = {}, tipSuccess = false, tipError = true, fullResponse = false, skipAuthCheck = false) {
+    // Skip username check if skipAuthCheck is true or for auth_info endpoint
+    if(!skipAuthCheck && !localStorage.getItem('username') && url.includes('login') === false && url.includes('auth_info') === false){
         clearAllCookie();
         Modal.confirm({
             title: <Trans>tips</Trans>,
@@ -114,7 +115,7 @@ export default async function request(url, options = {}, tipSuccess = false, tip
     ) {
         return response;
     }
-    checkStatus(response);
+    checkStatus(response, skipAuthCheck);
 
     if (options && options.download) {
         return response.blob();
@@ -123,7 +124,7 @@ export default async function request(url, options = {}, tipSuccess = false, tip
     const data = JSONbig.parse(text);
     if ('code' in data || 'msg' in data) {
         const {code, msg} = data;
-        if (code === 401 && data.data === 'Cookie is invalid') {
+        if (code === 401 && data.data === 'Cookie is invalid' && !skipAuthCheck) {
             Modal.confirm({
                 title: <Trans>tips</Trans>,
                 icon: <ExclamationCircleOutlined/>,
@@ -135,7 +136,7 @@ export default async function request(url, options = {}, tipSuccess = false, tip
                     //
                 }
             });
-        } else if (code === 401 && data.data !== 'Cookie is invalid') {
+        } else if (code === 401 && data.data !== 'Cookie is invalid' && !skipAuthCheck) {
             notification.error({
                 message:<Trans>loginWarning</Trans>
             });
