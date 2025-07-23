@@ -57,6 +57,7 @@ public class LoginController extends BaseController {
     public Object getAuthInfo(HttpServletRequest request, HttpServletResponse response) {
         Map<String, Object> info = new HashMap<>();
         info.put("authType", Config.authentication_type);
+        info.put("code", 200);
 
         // If this is an mTLS authentication, check if we have a valid certificate
         if ("mtls".equalsIgnoreCase(Config.authentication_type)) {
