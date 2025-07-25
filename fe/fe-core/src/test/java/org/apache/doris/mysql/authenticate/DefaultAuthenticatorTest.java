@@ -43,7 +43,7 @@ public class DefaultAuthenticatorTest {
 
     private DefaultAuthenticator defaultAuthenticator = new DefaultAuthenticator();
     private AuthenticateRequest request = new AuthenticateRequest(USER_NAME,
-            new NativePassword(new byte[2], new byte[2]), IP);
+            new NativePassword(new byte[2], new byte[2]), IP, null);
 
 
     @Before

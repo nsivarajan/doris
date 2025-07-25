@@ -63,7 +63,33 @@ public class BaseController {
 
     public ActionAuthorizationInfo checkWithCookie(HttpServletRequest request,
             HttpServletResponse response, boolean checkAuth) {
-        // First we check if the request has Authorization header.
+        // First check if MTLS authentication is enabled and we have a client certificate
+        if ("mtls".equalsIgnoreCase(Config.authentication_type)) {
+            ActionAuthorizationInfo authInfo = org.apache.doris.httpv2.auth.MTLSWebAuthenticator.authenticate(request);
+            if (authInfo != null) {
+                UserIdentity currentUser = UserIdentity.createAnalyzedUserIdentWithIp(authInfo.fullUserName, "%");
+                if (Config.isCloudMode() && checkAuth) {
+                    checkInstanceOverdue(currentUser);
+                    checkGlobalAuth(currentUser, PrivPredicate.ADMIN_OR_NODE);
+                }
+                SessionValue value = new SessionValue();
+                value.currentUser = currentUser;
+                value.password = authInfo.password;
+                addSession(request, response, value);
+                ConnectContext ctx = new ConnectContext();
+                ctx.setQualifiedUser(authInfo.fullUserName);
+                ctx.setRemoteIP(authInfo.remoteIp);
+                ctx.setCurrentUserIdentity(currentUser);
+                ctx.setEnv(Env.getCurrentEnv());
+                ctx.setThreadLocalInfo();
+                if (LOG.isDebugEnabled()) {
+                    LOG.debug("MTLS authentication success for user: {}, thread: {}",
+                            currentUser, Thread.currentThread().getId());
+                }
+                return authInfo;
+            }
+        }
+        // Next we check if the request has Authorization header.
         String encodedAuthString = request.getHeader("Authorization");
         if (encodedAuthString != null) {
             // If has Authorization header, check auth info
