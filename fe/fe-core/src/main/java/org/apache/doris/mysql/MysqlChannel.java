@@ -622,4 +622,8 @@ public class MysqlChannel implements BytesChannel {
         this.remoteIp = ip;
         this.remoteHostPortString = NetUtils.getHostPortInAccessibleFormat(ip, port);
     }
+
+    public SSLEngine getSslEngine() {
+        return this.sslEngine;
+    }
 }
