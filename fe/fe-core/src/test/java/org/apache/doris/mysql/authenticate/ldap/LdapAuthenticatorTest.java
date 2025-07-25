@@ -44,7 +44,7 @@ public class LdapAuthenticatorTest {
     private Auth auth;
 
     private LdapAuthenticator ldapAuthenticator = new LdapAuthenticator();
-    private AuthenticateRequest request = new AuthenticateRequest(USER_NAME, new ClearPassword("123"), IP);
+    private AuthenticateRequest request = new AuthenticateRequest(USER_NAME, new ClearPassword("123"), IP, null);
 
     private void setCheckPassword(boolean res) {
         new Expectations() {

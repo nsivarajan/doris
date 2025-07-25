@@ -15,37 +15,20 @@
 // specific language governing permissions and limitations
 // under the License.
 
-package org.apache.doris.mysql.authenticate;
+package org.apache.doris.mysql.authenticate.mtls;
 
-import org.apache.doris.mysql.MysqlChannel;
-import org.apache.doris.mysql.authenticate.password.Password;
+import org.apache.doris.mysql.authenticate.AuthenticatorFactory;
 
-public class AuthenticateRequest {
-    private String userName;
-    private Password password;
-    private String remoteIp;
-    private MysqlChannel channel;
+import java.util.Properties;
 
-    public AuthenticateRequest(String userName, Password password, String remoteIp, MysqlChannel channel) {
-        this.userName = userName;
-        this.password = password;
-        this.remoteIp = remoteIp;
-        this.channel = channel;
+public class MTLSAuthenticatorFactory implements AuthenticatorFactory {
+    @Override
+    public MTLSAuthenticator create(Properties initProps) {
+        return new MTLSAuthenticator();
     }
 
-    public String getUserName() {
-        return userName;
-    }
-
-    public Password getPassword() {
-        return password;
-    }
-
-    public String getRemoteIp() {
-        return remoteIp;
-    }
-
-    public MysqlChannel getChannel() {
-        return channel;
+    @Override
+    public String factoryIdentifier() {
+        return "mtls";
     }
 }

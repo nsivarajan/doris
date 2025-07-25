@@ -52,7 +52,6 @@ public class MysqlSslContext {
     private static final String trustStoreFile = Config.mysql_ssl_default_ca_certificate;
     private static final String caCertificatePassword = Config.mysql_ssl_default_ca_certificate_password;
     private static final String serverCertificatePassword = Config.mysql_ssl_default_server_certificate_password;
-    private static final String trustStoreType = Config.ssl_trust_store_type;
     private ByteBuffer serverNetData;
     private ByteBuffer clientAppData;
     private ByteBuffer clientNetData;
@@ -68,8 +67,8 @@ public class MysqlSslContext {
 
     private void initSslContext() {
         try {
-            KeyStore ks = KeyStore.getInstance(trustStoreType);
-            KeyStore ts = KeyStore.getInstance(trustStoreType);
+            KeyStore ks = KeyStore.getInstance(Config.ssl_trust_store_type);
+            KeyStore ts = KeyStore.getInstance(Config.ssl_trust_store_type);
 
             char[] serverPassword = serverCertificatePassword.toCharArray();
             char[] caPassword = caCertificatePassword.toCharArray();
@@ -100,7 +99,8 @@ public class MysqlSslContext {
         sslEngine.setUseClientMode(false);
         sslEngine.setEnabledCipherSuites(sslEngine.getSupportedCipherSuites());
         sslEngine.setWantClientAuth(true);
-        if (Config.ssl_force_client_auth) {
+        // Automatically require client certificates when MTLS authentication is enabled
+        if (Config.ssl_force_client_auth || "mtls".equalsIgnoreCase(Config.authentication_type)) {
             sslEngine.setNeedClientAuth(true);
         }
     }
@@ -206,6 +206,7 @@ public class MysqlSslContext {
         } catch (SSLException e) {
             sslEngine.closeOutbound();
         } catch (IOException e) {
+            LOG.error("IOException during SSL handshake", e);
             throw new RuntimeException("send failed");
         }
     }
