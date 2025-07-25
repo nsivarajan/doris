@@ -17,3 +17,4 @@
 #
 org.apache.doris.mysql.authenticate.DefaultAuthenticatorFactory
 org.apache.doris.mysql.authenticate.ldap.LdapAuthenticatorFactory
+org.apache.doris.mysql.authenticate.mtls.MTLSAuthenticatorFactory

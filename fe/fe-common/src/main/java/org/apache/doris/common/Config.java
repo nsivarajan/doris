@@ -2424,13 +2424,15 @@ public class Config extends ConfigBase {
     public static int max_error_tablet_of_broker_load = 3;
 
     /**
-     * If set to ture, doris will establish an encrypted channel based on the SSL protocol with mysql.
+     * If set to true, doris will establish an encrypted channel based on the SSL protocol with mysql.
+     * When authentication_type is set to "mtls", this is automatically enabled.
      */
     @ConfField(mutable = false, masterOnly = false, varType = VariableAnnotation.EXPERIMENTAL)
     public static boolean enable_ssl = false;
 
     /**
-     * If set to ture, ssl connection needs to authenticate client's certificate.
+     * If set to true, ssl connection needs to authenticate client's certificate.
+     * When authentication_type is set to "mtls", this is automatically enabled.
      */
     @ConfField(mutable = false, masterOnly = false)
     public static boolean ssl_force_client_auth = false;
@@ -2539,7 +2541,7 @@ public class Config extends ConfigBase {
     /**
      * To prevent different types (V1, V2, V3) of behavioral inconsistencies,
      * we may delete the DecimalV2 and DateV1 types in the future.
-     * At this stage, we use ‘disable_decimalv2’ and ‘disable_datev1’
+     * At this stage, we use 'disable_decimalv2' and 'disable_datev1'
      * to determine whether these two types take effect.
      */
     @ConfField(mutable = true)
@@ -3018,8 +3020,14 @@ public class Config extends ConfigBase {
 
     @ConfField(description = {"指定 mysql登录身份认证类型",
             "Specifies the authentication type"},
-            options = {"default", "ldap"})
+            options = {"default", "ldap", "mtls"})
     public static String authentication_type = "default";
+
+    @ConfField(mutable = true, description = {"mTLS 认证中证书序列号到用户的映射关系，"
+            + "格式为：'serial_number1:username1;serial_number2:username2'",
+            "Certificate serial number to username mapping in mTLS authentication, "
+            + "format: 'serial_number1:username1;serial_number2:username2'"})
+    public static String mtls_cert_user_mapping = "";
 
     @ConfField(mutable = true, masterOnly = false, description = {"指定 trino-connector catalog 的插件默认加载路径",
             "Specify the default plugins loading path for the trino-connector catalog"})
@@ -3568,4 +3576,5 @@ public class Config extends ConfigBase {
     @ConfField(mutable = true, description = {"Prometheus 输出表维度指标的个数限制",
             "Prometheus output table dimension metric count limit"})
     public static int prom_output_table_metrics_limit = 10000;
+
 }

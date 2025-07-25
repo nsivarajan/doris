@@ -103,7 +103,7 @@ public class AuthenticatorManager {
             return false;
         }
         String remoteIp = context.getMysqlChannel().getRemoteIp();
-        AuthenticateRequest request = new AuthenticateRequest(userName, password.get(), remoteIp);
+        AuthenticateRequest request = new AuthenticateRequest(userName, password.get(), remoteIp, channel);
         AuthenticateResponse response = authenticator.authenticate(request);
         if (!response.isSuccess()) {
             MysqlProto.sendResponsePacket(context);

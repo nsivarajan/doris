@@ -22,7 +22,8 @@ import org.apache.doris.common.LdapConfig;
 
 public enum AuthenticateType {
     DEFAULT,
-    LDAP;
+    LDAP,
+    MTLS; // Added for mutual TLS authentication
 
     public static AuthenticateType getAuthTypeConfig() {
         // Compatible with previously enabled ldap configuration
@@ -34,8 +35,9 @@ public enum AuthenticateType {
                 return DEFAULT;
             case "ldap":
                 return LDAP;
+            case "mtls":
+                return MTLS;
             // add other authentication system here
-            // case otherAuthType:
             default:
                 return DEFAULT;
         }
