@@ -19,6 +19,7 @@ package org.apache.doris.mysql.authenticate.mtls;
 
 import org.apache.doris.analysis.UserIdentity;
 import org.apache.doris.catalog.Env;
+import org.apache.doris.common.Config;
 import org.apache.doris.mysql.MysqlChannel;
 import org.apache.doris.mysql.authenticate.AuthenticateRequest;
 import org.apache.doris.mysql.authenticate.AuthenticateResponse;
@@ -30,13 +31,14 @@ import org.junit.Assert;
 import org.junit.Before;
 import org.junit.Test;
 
+import java.math.BigInteger;
 import java.security.cert.X509Certificate;
 import javax.net.ssl.SSLEngine;
 import javax.net.ssl.SSLSession;
 
 public class MTLSAuthenticatorTest {
-    private static final String UID = "testuser123";
-    private static final String SUBJECT_DN = "UID=testuser123, CN=Alice Smith, O=AcmeCorp, C=US";
+    private static final String SERIAL_HEX = "abcdef12";
+    private static final String EXPECTED_USERNAME = "mtls_" + SERIAL_HEX;
 
     @Mocked
     private Auth auth;
@@ -71,10 +73,14 @@ public class MTLSAuthenticatorTest {
                 result = sslSession;
                 sslSession.getPeerCertificates();
                 result = new X509Certificate[] { certificate };
-                certificate.getSubjectX500Principal().getName();
-                result = SUBJECT_DN;
+                certificate.getSerialNumber();
+                result = new BigInteger(SERIAL_HEX, 16);
             }
         };
+
+        // Clear any existing mappings
+        Config.mtls_cert_user_mapping = "";
+        MTLSUtils.initCertMapping();
     }
 
     @Test
@@ -88,7 +94,7 @@ public class MTLSAuthenticatorTest {
         AuthenticateRequest request = new AuthenticateRequest(null, null, null, channel);
         AuthenticateResponse response = authenticator.authenticate(request);
         Assert.assertTrue(response.isSuccess());
-        Assert.assertEquals(UID, response.getUserIdentity().getQualifiedUser());
+        Assert.assertEquals(EXPECTED_USERNAME, response.getUserIdentity().getQualifiedUser());
     }
 
     @Test
@@ -105,13 +111,62 @@ public class MTLSAuthenticatorTest {
     }
 
     @Test
-    public void testAuthenticateFailNoUID() throws Exception {
+    public void testAuthenticateFailNullChannel() throws Exception {
+        AuthenticateRequest request = new AuthenticateRequest(null, null, null, null);
+        AuthenticateResponse response = authenticator.authenticate(request);
+        Assert.assertFalse(response.isSuccess());
+    }
+
+    @Test
+    public void testAuthenticateFailNullSslEngine() throws Exception {
         new Expectations() {
             {
-                certificate.getSubjectX500Principal().getName();
-                result = "CN=Test, O=Example, C=US";
+                channel.getSslEngine();
+                result = null;
             }
         };
+
+        AuthenticateRequest request = new AuthenticateRequest(null, null, null, channel);
+        AuthenticateResponse response = authenticator.authenticate(request);
+        Assert.assertFalse(response.isSuccess());
+    }
+
+    @Test
+    public void testAuthenticateWithCertMapping() throws Exception {
+        // Setup certificate with a specific serial number
+        final String serialHex = "1a2b3c";
+        final String mappedUser = "mapped_user";
+
+        new Expectations() {
+            {
+                certificate.getSerialNumber();
+                result = new BigInteger(serialHex, 16);
+                
+                auth.doesUserExist((UserIdentity) any);
+                result = true;
+            }
+        };
+
+        // Set up the mapping in Config
+        Config.mtls_cert_user_mapping = serialHex + ":" + mappedUser;
+        MTLSUtils.initCertMapping();
+        
+        AuthenticateRequest request = new AuthenticateRequest(null, null, null, channel);
+        AuthenticateResponse response = authenticator.authenticate(request);
+        
+        Assert.assertTrue(response.isSuccess());
+        Assert.assertEquals(mappedUser, response.getUserIdentity().getQualifiedUser());
+    }
+
+    @Test
+    public void testAuthenticateFailSerialNumberException() throws Exception {
+        new Expectations() {
+            {
+                certificate.getSerialNumber();
+                result = new RuntimeException("Failed to get serial number");
+            }
+        };
+ 
         AuthenticateRequest request = new AuthenticateRequest(null, null, null, channel);
         AuthenticateResponse response = authenticator.authenticate(request);
         Assert.assertFalse(response.isSuccess());
@@ -120,11 +175,11 @@ public class MTLSAuthenticatorTest {
     @Test
     public void testTrustStoreConfigUsed() throws Exception {
         // Set custom CA certificate config
-        org.apache.doris.common.Config.mysql_ssl_default_ca_certificate = "/tmp/fake-truststore-mysql.jks";
-        org.apache.doris.common.Config.mysql_ssl_default_ca_certificate_password = "mysqlpass";
-        org.apache.doris.common.Config.ssl_trust_store_type = "PKCS12";
-        Assert.assertEquals("/tmp/fake-truststore-mysql.jks", org.apache.doris.common.Config.mysql_ssl_default_ca_certificate);
-        Assert.assertEquals("mysqlpass", org.apache.doris.common.Config.mysql_ssl_default_ca_certificate_password);
-        Assert.assertEquals("PKCS12", org.apache.doris.common.Config.ssl_trust_store_type);
+        Config.mysql_ssl_default_ca_certificate = "/tmp/fake-truststore-mysql.jks";
+        Config.mysql_ssl_default_ca_certificate_password = "mysqlpass";
+        Config.ssl_trust_store_type = "PKCS12";
+        Assert.assertEquals("/tmp/fake-truststore-mysql.jks", Config.mysql_ssl_default_ca_certificate);
+        Assert.assertEquals("mysqlpass", Config.mysql_ssl_default_ca_certificate_password);
+        Assert.assertEquals("PKCS12", Config.ssl_trust_store_type);
     }
 }
