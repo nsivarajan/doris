@@ -141,7 +141,6 @@ public class MTLSAuthenticatorTest {
             {
                 certificate.getSerialNumber();
                 result = new BigInteger(serialHex, 16);
-                
                 auth.doesUserExist((UserIdentity) any);
                 result = true;
             }
@@ -150,10 +149,8 @@ public class MTLSAuthenticatorTest {
         // Set up the mapping in Config
         Config.mtls_cert_user_mapping = serialHex + ":" + mappedUser;
         MTLSUtils.initCertMapping();
-        
         AuthenticateRequest request = new AuthenticateRequest(null, null, null, channel);
         AuthenticateResponse response = authenticator.authenticate(request);
-        
         Assert.assertTrue(response.isSuccess());
         Assert.assertEquals(mappedUser, response.getUserIdentity().getQualifiedUser());
     }
@@ -166,7 +163,7 @@ public class MTLSAuthenticatorTest {
                 result = new RuntimeException("Failed to get serial number");
             }
         };
- 
+
         AuthenticateRequest request = new AuthenticateRequest(null, null, null, channel);
         AuthenticateResponse response = authenticator.authenticate(request);
         Assert.assertFalse(response.isSuccess());
