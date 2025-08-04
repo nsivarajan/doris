@@ -77,7 +77,6 @@ public class BaseController {
                 value.password = authInfo.password;
                 addSession(request, response, value);
                 ConnectContext ctx = new ConnectContext();
-                ctx.setQualifiedUser(authInfo.fullUserName);
                 ctx.setRemoteIP(authInfo.remoteIp);
                 ctx.setCurrentUserIdentity(currentUser);
                 ctx.setEnv(Env.getCurrentEnv());
