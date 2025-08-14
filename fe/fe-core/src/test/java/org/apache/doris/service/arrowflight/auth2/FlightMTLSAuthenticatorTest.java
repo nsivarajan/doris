@@ -28,6 +28,7 @@ import org.apache.doris.service.arrowflight.tokens.FlightTokenManager;
 import org.apache.arrow.flight.CallHeaders;
 import org.apache.arrow.flight.CallStatus;
 import org.apache.arrow.flight.auth2.CallHeaderAuthenticator.AuthResult;
+import io.grpc.Context;
 import org.junit.Assert;
 import org.junit.Before;
 import org.junit.Test;
@@ -35,8 +36,6 @@ import org.junit.runner.RunWith;
 import org.mockito.Mock;
 import org.mockito.Mockito;
 import org.mockito.junit.MockitoJUnitRunner;
-
-import io.grpc.Context;
 
 import java.math.BigInteger;
 import java.security.cert.X509Certificate;
@@ -77,7 +76,7 @@ public class FlightMTLSAuthenticatorTest {
         Mockito.when(mockEnv.getAuth().doesUserExist(Mockito.any(UserIdentity.class))).thenReturn(true);
 
         // Mock token manager
-        FlightTokenDetails mockTokenDetails = new FlightTokenDetails("test_token", "test_user", 
+        FlightTokenDetails mockTokenDetails = new FlightTokenDetails("test_token", "test_user",
                 System.currentTimeMillis() + 3600000);
         Mockito.when(mockTokenManager.createToken(Mockito.anyString(), Mockito.any(FlightAuthResult.class)))
                 .thenReturn(mockTokenDetails);
