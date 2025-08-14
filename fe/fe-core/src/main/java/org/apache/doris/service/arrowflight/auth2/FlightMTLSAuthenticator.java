@@ -19,9 +19,6 @@ package org.apache.doris.service.arrowflight.auth2;
 
 import org.apache.doris.service.arrowflight.tokens.FlightTokenManager;
 
-import org.apache.arrow.flight.CallHeaders;
-import org.apache.arrow.flight.CallStatus;
-import org.apache.arrow.flight.auth2.CallHeaderAuthenticator;
 import io.grpc.Context;
 import io.grpc.Contexts;
 import io.grpc.Metadata;
@@ -29,6 +26,9 @@ import io.grpc.ServerCall;
 import io.grpc.ServerCallHandler;
 import io.grpc.ServerInterceptor;
 import io.netty.handler.ssl.SslHandler;
+import org.apache.arrow.flight.CallHeaders;
+import org.apache.arrow.flight.CallStatus;
+import org.apache.arrow.flight.auth2.CallHeaderAuthenticator;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 
@@ -71,11 +71,11 @@ public class FlightMTLSAuthenticator implements CallHeaderAuthenticator {
         try {
             // Use MTLSFlightUtils to validate certificate and get auth result
             FlightAuthResult flightAuthResult =
-                MTLSFlightUtils.validateCertificateAndGetAuthResult(clientCert, "0.0.0.0");
-
+                    MTLSFlightUtils.validateCertificateAndGetAuthResult(clientCert, "0.0.0.0");
+            
             // Create token for the user
             String token = FlightAuthUtils.createToken(
-                flightTokenManager, flightAuthResult.getUserName(), flightAuthResult);
+                    flightTokenManager, flightAuthResult.getUserName(), flightAuthResult);
 
             // Return AuthResult with token
             return createAuthResultWithBearerToken(token);
