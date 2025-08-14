@@ -40,7 +40,7 @@ public class MTLSFlightUtils {
 
     /**
      * Validates a client certificate and returns the corresponding username.
-     * 
+     *
      * @param clientCert the client certificate
      * @return the username derived from the certificate
      * @throws CallStatus.FlightRuntimeException if validation fails
@@ -77,7 +77,7 @@ public class MTLSFlightUtils {
 
     /**
      * Validates a client certificate and returns the corresponding FlightAuthResult.
-     * 
+     *
      * @param clientCert the client certificate
      * @param remoteIp the remote IP address
      * @return the FlightAuthResult
