@@ -22,9 +22,6 @@ import org.apache.doris.service.arrowflight.tokens.FlightTokenManager;
 import org.apache.arrow.flight.CallHeaders;
 import org.apache.arrow.flight.CallStatus;
 import org.apache.arrow.flight.auth2.CallHeaderAuthenticator;
-import org.apache.logging.log4j.LogManager;
-import org.apache.logging.log4j.Logger;
-
 import io.grpc.Context;
 import io.grpc.Contexts;
 import io.grpc.Metadata;
@@ -32,6 +29,8 @@ import io.grpc.ServerCall;
 import io.grpc.ServerCallHandler;
 import io.grpc.ServerInterceptor;
 import io.netty.handler.ssl.SslHandler;
+import org.apache.logging.log4j.LogManager;
+import org.apache.logging.log4j.Logger;
 
 import java.security.cert.X509Certificate;
 import javax.net.ssl.SSLPeerUnverifiedException;
@@ -54,7 +53,7 @@ public class FlightMTLSAuthenticator implements CallHeaderAuthenticator {
 
     /**
      * Authenticates the client using the client certificate.
-     * 
+     *
      * @param incomingHeaders call headers
      * @return an AuthResult with the username derived from the certificate
      */
@@ -71,10 +70,12 @@ public class FlightMTLSAuthenticator implements CallHeaderAuthenticator {
 
         try {
             // Use MTLSFlightUtils to validate certificate and get auth result
-            FlightAuthResult flightAuthResult = MTLSFlightUtils.validateCertificateAndGetAuthResult(clientCert, "0.0.0.0");
+            FlightAuthResult flightAuthResult =
+                MTLSFlightUtils.validateCertificateAndGetAuthResult(clientCert, "0.0.0.0");
 
             // Create token for the user
-            String token = FlightAuthUtils.createToken(flightTokenManager, flightAuthResult.getUserName(), flightAuthResult);
+            String token = FlightAuthUtils.createToken(
+                flightTokenManager, flightAuthResult.getUserName(), flightAuthResult);
 
             // Return AuthResult with token
             return createAuthResultWithBearerToken(token);
@@ -86,7 +87,7 @@ public class FlightMTLSAuthenticator implements CallHeaderAuthenticator {
 
     /**
      * Helper method to create an AuthResult with bearer token.
-     * 
+     *
      * @param token the token
      * @return an AuthResult with the token
      */
@@ -107,7 +108,7 @@ public class FlightMTLSAuthenticator implements CallHeaderAuthenticator {
     /**
      * Creates a gRPC interceptor that extracts client certificates from SSL sessions
      * and stores them in the gRPC context.
-     * 
+     *
      * @return a gRPC interceptor
      */
     public static ServerInterceptor createCertificateInterceptor() {
