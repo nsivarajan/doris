@@ -25,10 +25,10 @@ import org.apache.doris.mysql.authenticate.mtls.MTLSUtils;
 import org.apache.doris.service.arrowflight.tokens.FlightTokenDetails;
 import org.apache.doris.service.arrowflight.tokens.FlightTokenManager;
 
+import io.grpc.Context;
 import org.apache.arrow.flight.CallHeaders;
 import org.apache.arrow.flight.CallStatus;
 import org.apache.arrow.flight.auth2.CallHeaderAuthenticator.AuthResult;
-import io.grpc.Context;
 import org.junit.Assert;
 import org.junit.Before;
 import org.junit.Test;
