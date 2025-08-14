@@ -72,7 +72,7 @@ public class FlightMTLSAuthenticator implements CallHeaderAuthenticator {
             // Use MTLSFlightUtils to validate certificate and get auth result
             FlightAuthResult flightAuthResult =
                     MTLSFlightUtils.validateCertificateAndGetAuthResult(clientCert, "0.0.0.0");
-            
+
             // Create token for the user
             String token = FlightAuthUtils.createToken(
                     flightTokenManager, flightAuthResult.getUserName(), flightAuthResult);
