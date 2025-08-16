@@ -259,8 +259,9 @@ public class LdapManager {
 
     // Checks if LDAP authentication should be used for Arrow Flight.
     public static boolean isLdapAuthEnabledForArrowFlight() {
-        return AuthenticateType.getAuthTypeConfig() == AuthenticateType.LDAP ||
-               "ldap".equalsIgnoreCase(org.apache.doris.common.Config.arrow_flight_authentication_type);
+        return AuthenticateType.getAuthTypeConfig() == AuthenticateType.LDAP
+                || "ldap".equalsIgnoreCase(
+                        org.apache.doris.common.Config.arrow_flight_authentication_type);
     }
 
 }
