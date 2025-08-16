@@ -25,7 +25,6 @@ import java.io.FileOutputStream;
 import java.io.IOException;
 import java.io.OutputStream;
 import java.nio.file.Files;
-import java.nio.file.Path;
 import java.security.Key;
 import java.security.KeyStore;
 import java.security.cert.Certificate;
@@ -119,7 +118,7 @@ public class JksToPemConverter {
             os.write(END_PRIVATE_KEY.getBytes());
         }
 
-        LOG.info("JKS to PEM conversion complete. Certificate: {}, Private key: {}", 
+        LOG.info("JKS to PEM conversion complete. Certificate: {}, Private key: {}",
                 certFile.getAbsolutePath(), keyFile.getAbsolutePath());
 
         return new File[] { certFile, keyFile };
