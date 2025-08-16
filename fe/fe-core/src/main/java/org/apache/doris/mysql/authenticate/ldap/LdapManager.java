@@ -256,4 +256,11 @@ public class LdapManager {
         Role newRole = new Role(role.getRoleName(), tblPattern, PrivBitSet.of(Privilege.SELECT_PRIV));
         role.merge(newRole);
     }
+
+    // Checks if LDAP authentication should be used for Arrow Flight.
+    public static boolean isLdapAuthEnabledForArrowFlight() {
+        return AuthenticateType.getAuthTypeConfig() == AuthenticateType.LDAP ||
+               "ldap".equalsIgnoreCase(org.apache.doris.common.Config.arrow_flight_authentication_type);
+    }
+
 }

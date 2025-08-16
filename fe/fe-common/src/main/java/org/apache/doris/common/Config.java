@@ -487,6 +487,16 @@ public class Config extends ConfigBase {
     @ConfField(description = {"FE Arrow-Flight-SQL server 的端口号", "The port of FE Arrow-Flight-SQL server"})
     public static int arrow_flight_sql_port = 8070;
 
+    @ConfField(description = {"是否为 Arrow Flight 启用 SSL/TLS", "Whether to enable SSL/TLS for Arrow Flight"})
+    public static boolean arrow_flight_enable_ssl = false;
+
+    @ConfField(description = {"Arrow Flight 的认证类型，可选值为 default 或 ldap。"
+            + "如果未设置，将根据全局 authentication_type 自动继承"
+            + "Authentication type for Arrow Flight, can be default or ldap."
+            + "If not set, it will inherit from global authentication_type"},
+            options = {"default", "ldap"})
+    public static String arrow_flight_authentication_type = "";
+
     @ConfField(description = {"MySQL 服务的 IO 线程数", "The number of IO threads in MySQL service"})
     public static int mysql_service_io_threads_num = 4;
 
