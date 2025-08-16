@@ -20,7 +20,7 @@ package org.apache.doris.service.arrowflight;
 import org.apache.doris.common.Config;
 import org.apache.doris.service.FrontendOptions;
 import org.apache.doris.service.arrowflight.auth2.FlightBearerTokenAuthenticator;
-import org.apache.doris.service.arrowflight.auth2.FlightMTLSAuthenticator;
+import org.apache.doris.service.arrowflight.auth2.JksToPemConverter;
 import org.apache.doris.service.arrowflight.sessions.FlightSessionsManager;
 import org.apache.doris.service.arrowflight.sessions.FlightSessionsWithTokenManager;
 import org.apache.doris.service.arrowflight.tokens.FlightTokenManager;
@@ -59,9 +59,18 @@ public class DorisFlightSqlService {
         DorisFlightSqlProducer producer = new DorisFlightSqlProducer(
                 Location.forGrpcInsecure(FrontendOptions.getLocalHostAddress(), port), flightSessionsManager);
 
-        // Check if mTLS authentication is enabled
-        boolean isMtls = "mtls".equalsIgnoreCase(Config.authentication_type);
-        boolean enableSsl = Config.enable_https || isMtls;
+        // Determine the effective authentication type based on inheritance rules
+        String effectiveAuthType = determineEffectiveAuthType();
+
+        // Determine if SSL should be enabled
+        // If global authentication_type is mtls, SSL is automatically enabled
+        boolean globalIsMtls = "mtls".equalsIgnoreCase(Config.authentication_type);
+        boolean enableSsl = Config.arrow_flight_enable_ssl || globalIsMtls;
+
+        // If the effective authentication type is ldap, ensure LDAP is properly configured
+        if ("ldap".equalsIgnoreCase(effectiveAuthType)) {
+            LOG.info("LDAP authentication is enabled for Arrow Flight");
+        }
 
         FlightServer.Builder builder;
 
@@ -71,36 +80,49 @@ public class DorisFlightSqlService {
                 Location location = Location.forGrpcTls("0.0.0.0", port);
                 builder = FlightServer.builder(allocator, location, producer);
 
-                // Configure TLS options
+                // Check if key store file exists
                 File keyStoreFile = new File(Config.key_store_path);
                 if (!keyStoreFile.exists()) {
                     LOG.error("Key store file not found: {}", Config.key_store_path);
                     throw new IOException("Key store file not found: " + Config.key_store_path);
                 }
 
-                builder.useTls(Config.key_store_path, Config.key_store_password.toCharArray());
+                try {
+                    // Convert key store to PEM format
+                    File[] keyFiles = JksToPemConverter.convertJksToPem(
+                            Config.key_store_path,
+                            Config.key_store_password.toCharArray(),
+                            Config.key_store_alias);
 
-                // If mTLS is enabled, require client certificates
-                if (isMtls) {
-                    LOG.info("mTLS authentication is enabled for Arrow Flight");
+                    // Configure TLS with PEM files
+                    builder.useTls(keyFiles[0].getAbsolutePath(), keyFiles[1].getAbsolutePath());
 
-                    File trustStoreFile = new File(Config.mysql_ssl_default_ca_certificate);
-                    if (!trustStoreFile.exists()) {
-                        LOG.error("Trust store file not found: {}", Config.mysql_ssl_default_ca_certificate);
-                        throw new IOException("Trust store file not found: " + Config.mysql_ssl_default_ca_certificate);
+                    // If global authentication_type is mtls, require client certificates
+                    if (globalIsMtls) {
+                        LOG.info("mTLS transport security is enabled for Arrow Flight");
+
+                        // Check if trust store file exists
+                        File trustStoreFile = new File(Config.mysql_ssl_default_ca_certificate);
+                        if (!trustStoreFile.exists()) {
+                            LOG.error("Trust store file not found: {}", Config.mysql_ssl_default_ca_certificate);
+                            throw new IOException("Trust store file not found: " + Config.mysql_ssl_default_ca_certificate);
+                        }
+
+                        // Convert trust store to PEM format
+                        File trustFile = JksToPemConverter.convertTruststoreToPem(
+                                Config.mysql_ssl_default_ca_certificate,
+                                Config.mysql_ssl_default_ca_certificate_password.toCharArray());
+
+                        // Configure client authentication with PEM file
+                        builder.requireClientAuth(trustFile.getAbsolutePath());
                     }
 
-                    builder.requireClientAuth(Config.mysql_ssl_default_ca_certificate,
-                                            Config.mysql_ssl_default_ca_certificate_password.toCharArray());
-
-                    // Use mTLS authenticator
-                    builder.headerAuthenticator(new FlightMTLSAuthenticator(flightTokenManager));
-
-                    // Add certificate interceptor
-                    builder.intercept(FlightMTLSAuthenticator.createCertificateInterceptor());
-                } else {
-                    // Use bearer token authenticator
+                    // Always use bearer token authenticator since Arrow Flight 17.0.0 cannot
+                    // access client certificates during authentication
                     builder.headerAuthenticator(new FlightBearerTokenAuthenticator(flightTokenManager));
+                } catch (Exception e) {
+                    LOG.error("Failed to convert certificates to PEM format", e);
+                    throw new IOException("Failed to convert certificates to PEM format", e);
                 }
             } catch (IOException e) {
                 LOG.error("Failed to configure TLS for Arrow Flight", e);
@@ -117,8 +139,10 @@ public class DorisFlightSqlService {
         flightServer = builder.build();
 
         LOG.info("Arrow Flight SQL service is created, port: {}, arrow_flight_max_connections: {}, "
-                + "arrow_flight_token_alive_time_second: {}, mTLS: {}",
-                port, Config.arrow_flight_max_connections, Config.arrow_flight_token_alive_time_second, isMtls);
+                + "arrow_flight_token_alive_time_second: {}, authentication_type: {}, "
+                + "global_authentication_type: {}, SSL enabled: {}",
+                port, Config.arrow_flight_max_connections, Config.arrow_flight_token_alive_time_second,
+                effectiveAuthType, Config.authentication_type, enableSsl);
     }
 
     // start Arrow Flight SQL service, return true if success, otherwise false
@@ -143,5 +167,41 @@ public class DorisFlightSqlService {
                 LOG.warn("close Arrow Flight SQL server failed.", e);
             }
         }
+    }
+    
+    /**
+     * Determines the effective authentication type for Arrow Flight based on inheritance rules:
+     * 1. If arrow_flight_authentication_type is explicitly set, use that value
+     * 2. If authentication_type is "ldap", arrow_flight_authentication_type inherits "ldap"
+     * 3. If authentication_type is "default", arrow_flight_authentication_type inherits "default"
+     * 4. If authentication_type is "mtls", use arrow_flight_authentication_type if set, otherwise use "default"
+     *
+     * @return The effective authentication type to use for Arrow Flight
+     */
+    private String determineEffectiveAuthType() {
+        // If arrow_flight_authentication_type is explicitly set, use that value
+        if (Config.arrow_flight_authentication_type != null && !Config.arrow_flight_authentication_type.isEmpty()) {
+            return Config.arrow_flight_authentication_type;
+        }
+        
+        // Otherwise, inherit from authentication_type based on rules
+        String globalAuthType = Config.authentication_type;
+        
+        // Handle null authentication_type
+        if (globalAuthType == null || globalAuthType.isEmpty()) {
+            return "default";
+        }
+        
+        globalAuthType = globalAuthType.toLowerCase();
+        
+        if ("ldap".equals(globalAuthType) || "default".equals(globalAuthType)) {
+            return globalAuthType;
+        } else if ("mtls".equals(globalAuthType)) {
+            // For mtls global auth type, default to "default" for Arrow Flight
+            return "default";
+        }
+        
+        // Default to "default" if authentication_type is not recognized
+        return "default";
     }
 }
