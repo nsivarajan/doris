@@ -94,7 +94,7 @@ public class DorisFlightSqlService {
                             Config.key_store_alias);
 
                     // Configure TLS with PEM files
-                    builder.useTls(keyFiles[0].getAbsolutePath(), keyFiles[1].getAbsolutePath());
+                    builder.useTls(keyFiles[0], keyFiles[1]);
 
                     // If global authentication_type is mtls, require client certificates
                     if (globalIsMtls) {
@@ -114,7 +114,7 @@ public class DorisFlightSqlService {
                                 Config.mysql_ssl_default_ca_certificate_password.toCharArray());
 
                         // Configure client authentication with PEM file
-                        builder.requireClientAuth(trustFile.getAbsolutePath());
+                        builder.useMTlsClientVerification(trustFile);
                     }
 
                     // Always use bearer token authenticator since Arrow Flight 17.0.0 cannot
