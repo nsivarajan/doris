@@ -20,9 +20,12 @@ package org.apache.doris.service.arrowflight.auth2;
 import org.apache.doris.analysis.UserIdentity;
 import org.apache.doris.catalog.Env;
 import org.apache.doris.common.AuthenticationException;
+import org.apache.doris.common.ErrorCode;
+import org.apache.doris.mysql.authenticate.ldap.LdapManager;
 import org.apache.doris.service.arrowflight.tokens.FlightTokenManager;
 
 import com.google.common.base.Preconditions;
+import com.google.common.base.Strings;
 import com.google.common.collect.Lists;
 import org.apache.arrow.flight.CallStatus;
 import org.apache.logging.log4j.Logger;
@@ -55,6 +58,28 @@ public final class FlightAuthUtils {
             // Here, "null" is converted to null, if user's password is really the string "null",
             // authentication will fail. Usually, the user's password will not be "null", let's hope so.
             password = (password.equals("null")) ? null : password;
+            
+            // Check if LDAP authentication should be used for Arrow Flight
+            if (LdapManager.isLdapAuthEnabledForArrowFlight()) {
+                // Try LDAP authentication first
+                LdapManager ldapManager = new LdapManager();
+                if (ldapManager.doesUserExist(username)) {
+                    // User exists in LDAP, try LDAP authentication
+                    if (ldapManager.checkUserPasswd(username, password, remoteIp, currentUserIdentity)) {
+                        // LDAP authentication successful
+                        Preconditions.checkState(currentUserIdentity.size() == 1);
+                        return FlightAuthResult.of(username, currentUserIdentity.get(0), remoteIp);
+                    } else {
+                        // LDAP authentication failed
+                        logger.error("LDAP authentication failed for user {}", username);
+                        throw new AuthenticationException(ErrorCode.ERR_ACCESS_DENIED_ERROR, username + "@" + remoteIp,
+                                Strings.isNullOrEmpty(password) ? "NO" : "YES");
+                    }
+                }
+            }
+            
+            // If LDAP authentication is not enabled or user doesn't exist in LDAP,
+            // fall back to default password authentication
             Env.getCurrentEnv().getAuth().checkPlainPassword(username, remoteIp, password, currentUserIdentity);
             Preconditions.checkState(currentUserIdentity.size() == 1);
             return FlightAuthResult.of(username, currentUserIdentity.get(0), remoteIp);
