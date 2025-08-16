@@ -104,7 +104,8 @@ public class DorisFlightSqlService {
                         File trustStoreFile = new File(Config.mysql_ssl_default_ca_certificate);
                         if (!trustStoreFile.exists()) {
                             LOG.error("Trust store file not found: {}", Config.mysql_ssl_default_ca_certificate);
-                            throw new IOException("Trust store file not found: " + Config.mysql_ssl_default_ca_certificate);
+                            throw new IOException("Trust store file not found: "
+                                    + Config.mysql_ssl_default_ca_certificate);
                         }
 
                         // Convert trust store to PEM format
@@ -167,7 +168,7 @@ public class DorisFlightSqlService {
             }
         }
     }
-    
+
     /**
      * Determines the effective authentication type for Arrow Flight based on inheritance rules:
      * 1. If arrow_flight_authentication_type is explicitly set, use that value
@@ -182,24 +183,24 @@ public class DorisFlightSqlService {
         if (Config.arrow_flight_authentication_type != null && !Config.arrow_flight_authentication_type.isEmpty()) {
             return Config.arrow_flight_authentication_type;
         }
-        
+
         // Otherwise, inherit from authentication_type based on rules
         String globalAuthType = Config.authentication_type;
-        
+
         // Handle null authentication_type
         if (globalAuthType == null || globalAuthType.isEmpty()) {
             return "default";
         }
-        
+
         globalAuthType = globalAuthType.toLowerCase();
-        
+
         if ("ldap".equals(globalAuthType) || "default".equals(globalAuthType)) {
             return globalAuthType;
         } else if ("mtls".equals(globalAuthType)) {
             // For mtls global auth type, default to "default" for Arrow Flight
             return "default";
         }
-        
+
         // Default to "default" if authentication_type is not recognized
         return "default";
     }

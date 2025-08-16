@@ -58,7 +58,7 @@ public final class FlightAuthUtils {
             // Here, "null" is converted to null, if user's password is really the string "null",
             // authentication will fail. Usually, the user's password will not be "null", let's hope so.
             password = (password.equals("null")) ? null : password;
-            
+
             // Check if LDAP authentication should be used for Arrow Flight
             if (LdapManager.isLdapAuthEnabledForArrowFlight()) {
                 // Try LDAP authentication first
@@ -77,7 +77,7 @@ public final class FlightAuthUtils {
                     }
                 }
             }
-            
+
             // If LDAP authentication is not enabled or user doesn't exist in LDAP,
             // fall back to default password authentication
             Env.getCurrentEnv().getAuth().checkPlainPassword(username, remoteIp, password, currentUserIdentity);
