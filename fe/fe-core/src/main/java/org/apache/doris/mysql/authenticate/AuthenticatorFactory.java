@@ -17,8 +17,6 @@
 
 package org.apache.doris.mysql.authenticate;
 
-import org.apache.doris.mysql.authenticate.Authenticator;
-
 import java.util.Properties;
 
 /**
