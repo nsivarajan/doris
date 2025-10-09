@@ -19,6 +19,7 @@ package org.apache.doris.mysql.authenticate;
 
 import org.apache.doris.common.Config;
 import org.apache.doris.mysql.MysqlSha2Password;
+
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 
@@ -88,7 +89,7 @@ public class RSAKeyManager {
         // Schedule periodic key rotation
         scheduleKeyRotation();
         
-        LOG.info("RSA key manager initialized: keySize={}, rotationInterval={}h", 
+        LOG.info("RSA key manager initialized: keySize={}, rotationInterval={}h",
                 keySize, keyRotationIntervalHours);
     }
     
@@ -312,10 +313,10 @@ public class RSAKeyManager {
      */
     private void scheduleKeyRotation() {
         keyRotationExecutor.scheduleAtFixedRate(
-            this::performScheduledKeyRotation,
-            keyRotationIntervalHours,
-            keyRotationIntervalHours,
-            TimeUnit.HOURS
+                this::performScheduledKeyRotation,
+                keyRotationIntervalHours,
+                keyRotationIntervalHours,
+                TimeUnit.HOURS
         );
         
         LOG.info("Scheduled RSA key rotation every {} hours", keyRotationIntervalHours);
@@ -354,12 +355,12 @@ public class RSAKeyManager {
     
     /**
      * Validate key manager configuration
-     * 
+     *
      * @return true if configuration is valid
      */
     public boolean isConfigurationValid() {
-        return keySize >= 1024 && keySize <= 4096 
-            && keyRotationIntervalHours >= MIN_KEY_ROTATION_HOURS 
+        return keySize >= 1024 && keySize <= 4096
+            && keyRotationIntervalHours >= MIN_KEY_ROTATION_HOURS
             && keyRotationIntervalHours <= MAX_KEY_ROTATION_HOURS;
     }
 }

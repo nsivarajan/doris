@@ -19,8 +19,8 @@ package org.apache.doris.mysql.authenticate;
 
 import org.apache.doris.common.Config;
 import org.apache.doris.mysql.MysqlChannel;
-import org.apache.doris.mysql.authenticate.RSAKeyManager;
 import org.apache.doris.qe.ConnectContext;
+
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 
@@ -74,14 +74,29 @@ public class SecurityTransportDecision {
             this.requiresRSAKey = requiresRSAKey;
         }
         
-        public TransportMethod getMethod() { return method; }
-        public String getReason() { return reason; }
-        public boolean isSecure() { return isSecure; }
-        public boolean requiresRSAKey() { return requiresRSAKey; }
+        public TransportMethod getMethod()
+        {
+            return method;
+        }
+        
+        public String getReason()
+        {
+            return reason;
+        }
+        
+        public boolean isSecure()
+        {
+            return isSecure;
+        }
+        
+        public boolean requiresRSAKey()
+        {
+            return requiresRSAKey;
+        }
         
         @Override
         public String toString() {
-            return String.format("TransportDecision[method=%s, secure=%s, reason=%s]", 
+            return String.format("TransportDecision[method=%s, secure=%s, reason=%s]",
                     method, isSecure, reason);
         }
     }
@@ -132,7 +147,7 @@ public class SecurityTransportDecision {
         
         // Priority 3: Fallback to insecure transport
         insecureFallbackCount.incrementAndGet();
-        LOG.warn("No secure transport available for connection: {}, falling back to insecure method", 
+        LOG.warn("No secure transport available for connection: {}, falling back to insecure method",
                 context.getConnectionId());
         
         return new TransportDecision(
@@ -193,7 +208,7 @@ public class SecurityTransportDecision {
             // Check if RSA key manager is available and has keys
             if (keyManager.getPublicKey() != null) {
                 if (LOG.isDebugEnabled()) {
-                    LOG.debug("RSA transport available with key size: {} bits", 
+                    LOG.debug("RSA transport available with key size: {} bits",
                             keyManager.getPublicKey().getModulus().bitLength());
                 }
                 
@@ -318,11 +333,30 @@ public class SecurityTransportDecision {
             this.insecureCount = insecureCount;
         }
         
-        public long getTotalDecisions() { return totalDecisions; }
-        public long getSslCount() { return sslCount; }
-        public long getRsaCount() { return rsaCount; }
-        public long getInsecureCount() { return insecureCount; }
-        public long getSecureCount() { return sslCount + rsaCount; }
+        public long getTotalDecisions()
+        {
+            return totalDecisions;
+        }
+        
+        public long getSslCount()
+        {
+            return sslCount;
+        }
+        
+        public long getRsaCount()
+        {
+            return rsaCount;
+        }
+        
+        public long getInsecureCount()
+        {
+            return insecureCount;
+        }
+        
+        public long getSecureCount()
+        {
+            return sslCount + rsaCount;
+        }
         
         public double getSslPercentage() {
             return totalDecisions > 0 ? (double) sslCount / totalDecisions * 100.0 : 0.0;

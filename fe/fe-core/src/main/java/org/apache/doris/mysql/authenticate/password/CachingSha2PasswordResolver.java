@@ -29,6 +29,7 @@ import org.apache.doris.mysql.MysqlSha2Password;
 import org.apache.doris.mysql.authenticate.PasswordCache;
 import org.apache.doris.mysql.authenticate.RSAKeyManager;
 import org.apache.doris.qe.ConnectContext;
+
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 
@@ -39,7 +40,7 @@ import java.util.Optional;
 
 /**
  * Password resolver for caching_sha2_password authentication plugin.
- * 
+ *
  * This resolver implements the MySQL caching_sha2_password authentication protocol:
  * 1. Initial authentication with SHA-256 scrambled password
  * 2. Fast authentication if password is cached
@@ -47,7 +48,7 @@ import java.util.Optional;
  *    - Use SSL for password transmission if available
  *    - Use RSA encryption if SSL is not available
  * 4. Cache password hash for future fast authentication
- * 
+ *
  * This eliminates the security vulnerability of clear text password transmission
  * that exists in the current mysql_native_password implementation.
  */
@@ -86,12 +87,11 @@ public class CachingSha2PasswordResolver implements PasswordResolver {
     }
     
     @Override
-    public Optional<Password> resolvePassword(ConnectContext context, 
-                                            MysqlChannel channel, 
+    public Optional<Password> resolvePassword(ConnectContext context,
+                                            MysqlChannel channel,
                                             MysqlSerializer serializer,
                                             MysqlAuthPacket authPacket,
                                             MysqlHandshakePacket handshakePacket) throws IOException {
-        
         if (LOG.isDebugEnabled()) {
             LOG.debug("Starting caching_sha2_password authentication for user: {}", authPacket.getUser());
         }
@@ -281,26 +281,21 @@ public class CachingSha2PasswordResolver implements PasswordResolver {
     /**
      * Send RSA public key to client
      */
-    private void sendRSAPublicKey(MysqlSerializer serializer, MysqlChannel channel, RSAPublicKey publicKey) 
+    private void sendRSAPublicKey(MysqlSerializer serializer, MysqlChannel channel, RSAPublicKey publicKey)
             throws IOException {
-        
         try {
             String pemKey = MysqlSha2Password.convertPublicKeyToPEM(publicKey);
-            
             serializer.reset();
             serializer.writeEofString(pemKey);
             channel.sendAndFlush(serializer.toByteBuffer());
-            
             if (LOG.isDebugEnabled()) {
                 LOG.debug("Sent RSA public key to client (key size: {} bits)", publicKey.getModulus().bitLength());
             }
-            
         } catch (Exception e) {
             LOG.error("Failed to send RSA public key to client", e);
             throw new IOException("Failed to send RSA public key", e);
         }
     }
-    
     /**
      * Get password cache for monitoring
      */

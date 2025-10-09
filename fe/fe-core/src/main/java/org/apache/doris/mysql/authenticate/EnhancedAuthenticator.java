@@ -39,11 +39,11 @@ import java.util.concurrent.atomic.AtomicLong;
 
 /**
  * Enhanced authenticator that supports both caching_sha2_password and mysql_native_password.
- * 
+ *
  * This authenticator provides a unified authentication interface that can handle multiple
  * authentication plugins based on configuration and client capabilities. It maintains
  * backward compatibility while enabling enhanced security features.
- * 
+ *
  * Features:
  * - Dynamic password resolver selection based on password type
  * - Support for both caching_sha2_password and mysql_native_password
@@ -71,7 +71,7 @@ public class EnhancedAuthenticator implements Authenticator {
         this.cachingSha2PasswordResolver = new CachingSha2PasswordResolver();
         this.nativePasswordResolver = new NativePasswordResolver();
         
-        LOG.info("Enhanced authenticator initialized with caching_sha2_password support: {}", 
+        LOG.info("Enhanced authenticator initialized with caching_sha2_password support: {}",
                 Config.enable_caching_sha2_password);
     }
     
@@ -82,7 +82,7 @@ public class EnhancedAuthenticator implements Authenticator {
         Password password = request.getPassword();
         
         if (LOG.isDebugEnabled()) {
-            LOG.debug("Enhanced authentication started for user: {} from IP: {} using password type: {}", 
+            LOG.debug("Enhanced authentication started for user: {} from IP: {} using password type: {}",
                     userName, remoteIp, password.getClass().getSimpleName());
         }
         
@@ -113,17 +113,15 @@ public class EnhancedAuthenticator implements Authenticator {
     /**
      * Authenticate using caching_sha2_password method
      */
-    private AuthenticateResponse authenticateWithCachingSha2Password(AuthenticateRequest request, 
-                                                                   CachingSha2Password password) 
-            throws IOException {
-        
+    private AuthenticateResponse authenticateWithCachingSha2Password(AuthenticateRequest request,
+            CachingSha2Password password) throws IOException {
         String userName = request.getUserName();
         String remoteIp = request.getRemoteIp();
         
         cachingSha2AuthCount.incrementAndGet();
         
         if (LOG.isDebugEnabled()) {
-            LOG.debug("Authenticating user {} with caching_sha2_password (phase: {})", 
+            LOG.debug("Authenticating user {} with caching_sha2_password (phase: {})",
                     userName, password.getCurrentPhase());
         }
         
@@ -138,7 +136,7 @@ public class EnhancedAuthenticator implements Authenticator {
         // Get plain text password for user verification
         String plainTextPassword = password.getPlainTextPassword();
         if (plainTextPassword == null) {
-            LOG.error("Plain text password not available after caching_sha2_password authentication for user: {}", 
+            LOG.error("Plain text password not available after caching_sha2_password authentication for user: {}",
                     userName);
             failedAuthCount.incrementAndGet();
             return AuthenticateResponse.failedResponse;
@@ -149,20 +147,20 @@ public class EnhancedAuthenticator implements Authenticator {
         try {
             // Use the plain text password for internal authentication
             // Note: This is secure because the password was obtained through encrypted transmission
-            Env.getCurrentEnv().getAuth().checkPlainPassword(userName, remoteIp, plainTextPassword, 
+            Env.getCurrentEnv().getAuth().checkPlainPassword(userName, remoteIp, plainTextPassword,
                     currentUserIdentity);
             
             successfulAuthCount.incrementAndGet();
             
             if (LOG.isInfoEnabled()) {
-                LOG.info("caching_sha2_password authentication successful for user: {} from IP: {}", 
+                LOG.info("caching_sha2_password authentication successful for user: {} from IP: {}",
                         userName, remoteIp);
             }
             
             return new AuthenticateResponse(true, currentUserIdentity.get(0));
             
         } catch (AuthenticationException e) {
-            LOG.warn("User verification failed for caching_sha2_password authentication: user={}, ip={}", 
+            LOG.warn("User verification failed for caching_sha2_password authentication: user={}, ip={}",
                     userName, remoteIp, e);
             ErrorReport.report(e.errorCode, e.msgs);
             failedAuthCount.incrementAndGet();
@@ -173,10 +171,8 @@ public class EnhancedAuthenticator implements Authenticator {
     /**
      * Authenticate using mysql_native_password method (legacy compatibility)
      */
-    private AuthenticateResponse authenticateWithNativePassword(AuthenticateRequest request, 
-                                                              NativePassword password) 
-            throws IOException {
-        
+    private AuthenticateResponse authenticateWithNativePassword(AuthenticateRequest request,
+            NativePassword password) throws IOException {
         String userName = request.getUserName();
         String remoteIp = request.getRemoteIp();
         
@@ -190,12 +186,12 @@ public class EnhancedAuthenticator implements Authenticator {
         List<UserIdentity> currentUserIdentity = Lists.newArrayList();
         try {
             Env.getCurrentEnv().getAuth().checkPassword(userName, remoteIp,
-                    password.getRemotePasswd(), password.getRandomString(), currentUserIdentity);
+                    password.getRemotePasswd(), password.getNonce(), currentUserIdentity);
             
             successfulAuthCount.incrementAndGet();
             
             if (LOG.isInfoEnabled()) {
-                LOG.info("mysql_native_password authentication successful for user: {} from IP: {}", 
+                LOG.info("mysql_native_password authentication successful for user: {} from IP: {}",
                         userName, remoteIp);
             }
             
@@ -246,10 +242,10 @@ public class EnhancedAuthenticator implements Authenticator {
         long totalAuth = cachingSha2AuthCount.get() + nativePasswordAuthCount.get();
         long successRate = totalAuth > 0 ? (successfulAuthCount.get() * 100 / totalAuth) : 0;
         
-        return String.format("EnhancedAuthenticator[total=%d, success=%d, failed=%d, successRate=%d%%, " +
-                           "caching_sha2=%d, native=%d, enhanced_enabled=%s]",
+        return String.format("EnhancedAuthenticator[total=%d, success=%d, failed=%d, successRate=%d%%, "
+                + "caching_sha2=%d, native=%d, enhanced_enabled=%s]",
                 totalAuth, successfulAuthCount.get(), failedAuthCount.get(), successRate,
-                cachingSha2AuthCount.get(), nativePasswordAuthCount.get(), 
+                cachingSha2AuthCount.get(), nativePasswordAuthCount.get(),
                 Config.enable_caching_sha2_password);
     }
     
@@ -301,9 +297,8 @@ public class EnhancedAuthenticator implements Authenticator {
         private final long successCount;
         private final long failureCount;
         private final boolean enhancedEnabled;
-        
-        public AuthenticationMetrics(long cachingSha2Count, long nativePasswordCount, 
-                                   long successCount, long failureCount, boolean enhancedEnabled) {
+        public AuthenticationMetrics(long cachingSha2Count, long nativePasswordCount,
+                long successCount, long failureCount, boolean enhancedEnabled) {
             this.cachingSha2Count = cachingSha2Count;
             this.nativePasswordCount = nativePasswordCount;
             this.successCount = successCount;
@@ -311,15 +306,34 @@ public class EnhancedAuthenticator implements Authenticator {
             this.enhancedEnabled = enhancedEnabled;
         }
         
-        public long getCachingSha2Count() { return cachingSha2Count; }
-        public long getNativePasswordCount() { return nativePasswordCount; }
-        public long getSuccessCount() { return successCount; }
-        public long getFailureCount() { return failureCount; }
-        public boolean isEnhancedEnabled() { return enhancedEnabled; }
-        public long getTotalCount() { return cachingSha2Count + nativePasswordCount; }
-        public double getSuccessRate() { 
+        
+        public long getCachingSha2Count() {
+            return cachingSha2Count;
+        }
+
+        public long getNativePasswordCount() {
+            return nativePasswordCount;
+        }
+
+        public long getSuccessCount() {
+            return successCount;
+        }
+
+        public long getFailureCount() {
+            return failureCount;
+        }
+
+        public boolean isEnhancedEnabled() {
+            return enhancedEnabled;
+        }
+
+        public long getTotalCount() {
+            return cachingSha2Count + nativePasswordCount;
+        }
+
+        public double getSuccessRate() {
             long total = getTotalCount();
-            return total > 0 ? (double) successCount / total * 100.0 : 0.0; 
+            return total > 0 ? (double) successCount / total * 100.0 : 0.0;
         }
     }
 }

@@ -18,8 +18,8 @@
 package org.apache.doris.mysql.authenticate.password;
 
 import org.junit.jupiter.api.BeforeEach;
-import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.DisplayName;
+import org.junit.jupiter.api.Test;
 
 import java.security.KeyPair;
 import java.security.KeyPairGenerator;
@@ -30,7 +30,7 @@ import static org.junit.jupiter.api.Assertions.*;
 
 /**
  * Comprehensive test suite for CachingSha2Password class.
- * 
+ *
  * Tests all phases of the caching_sha2_password authentication process including
  * state transitions, data management, and security features.
  */

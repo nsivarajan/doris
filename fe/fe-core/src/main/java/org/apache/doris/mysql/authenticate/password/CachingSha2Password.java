@@ -22,7 +22,7 @@ import java.util.Arrays;
 
 /**
  * Password implementation for caching_sha2_password authentication plugin.
- * 
+ *
  * This class manages the multi-phase authentication process for MySQL's
  * caching_sha2_password plugin, which uses SHA-256 hashing and supports
  * both fast authentication (cached passwords) and full authentication
@@ -62,7 +62,7 @@ public class CachingSha2Password implements Password {
     
     /**
      * Constructor for initial authentication phase
-     * 
+     *
      * @param scrambledPassword SHA-256 scrambled password from client
      * @param nonce Random nonce from server handshake
      */
@@ -74,7 +74,7 @@ public class CachingSha2Password implements Password {
     
     /**
      * Constructor for full authentication with plain text password
-     * 
+     *
      * @param scrambledPassword SHA-256 scrambled password from client
      * @param nonce Random nonce from server handshake
      * @param plainTextPassword Plain text password for full authentication
@@ -86,7 +86,7 @@ public class CachingSha2Password implements Password {
     
     /**
      * Get the scrambled password received from client
-     * 
+     *
      * @return Copy of scrambled password bytes
      */
     public byte[] getScrambledPassword() {
@@ -95,7 +95,7 @@ public class CachingSha2Password implements Password {
     
     /**
      * Get the nonce (random string) from server handshake
-     * 
+     *
      * @return Copy of nonce bytes
      */
     public byte[] getNonce() {
@@ -104,7 +104,7 @@ public class CachingSha2Password implements Password {
     
     /**
      * Get current authentication phase
-     * 
+     *
      * @return Current authentication phase
      */
     public AuthPhase getCurrentPhase() {
@@ -127,7 +127,7 @@ public class CachingSha2Password implements Password {
     
     /**
      * Transition to RSA key exchange phase
-     * 
+     *
      * @param publicKey RSA public key for encryption
      */
     public void transitionToRSAExchange(RSAPublicKey publicKey) {
@@ -137,7 +137,7 @@ public class CachingSha2Password implements Password {
     
     /**
      * Transition to password encrypted phase
-     * 
+     *
      * @param encryptedPassword Encrypted password bytes
      */
     public void transitionToPasswordEncrypted(byte[] encryptedPassword) {
@@ -154,7 +154,7 @@ public class CachingSha2Password implements Password {
     
     /**
      * Check if authentication is in initial phase
-     * 
+     *
      * @return true if in initial authentication phase
      */
     public boolean isInitialAuth() {
@@ -163,7 +163,7 @@ public class CachingSha2Password implements Password {
     
     /**
      * Check if fast authentication was successful
-     * 
+     *
      * @return true if fast authentication succeeded
      */
     public boolean isFastAuthSuccess() {
@@ -172,7 +172,7 @@ public class CachingSha2Password implements Password {
     
     /**
      * Check if full authentication is required
-     * 
+     *
      * @return true if full authentication is required
      */
     public boolean isFullAuthRequired() {
@@ -181,7 +181,7 @@ public class CachingSha2Password implements Password {
     
     /**
      * Check if RSA key exchange is required
-     * 
+     *
      * @return true if RSA key exchange is needed
      */
     public boolean isRSAExchangeRequired() {
@@ -190,7 +190,7 @@ public class CachingSha2Password implements Password {
     
     /**
      * Check if password has been encrypted
-     * 
+     *
      * @return true if password is encrypted
      */
     public boolean isPasswordEncrypted() {
@@ -199,7 +199,7 @@ public class CachingSha2Password implements Password {
     
     /**
      * Check if authentication is complete
-     * 
+     *
      * @return true if authentication is complete
      */
     public boolean isAuthComplete() {
@@ -208,7 +208,7 @@ public class CachingSha2Password implements Password {
     
     /**
      * Get RSA public key for encryption
-     * 
+     *
      * @return RSA public key, or null if not set
      */
     public RSAPublicKey getServerPublicKey() {
@@ -217,7 +217,7 @@ public class CachingSha2Password implements Password {
     
     /**
      * Get encrypted password bytes
-     * 
+     *
      * @return Copy of encrypted password, or empty array if not set
      */
     public byte[] getEncryptedPassword() {
@@ -226,7 +226,7 @@ public class CachingSha2Password implements Password {
     
     /**
      * Get plain text password for full authentication
-     * 
+     *
      * @return Plain text password, or null if not set
      */
     public String getPlainTextPassword() {
@@ -235,7 +235,7 @@ public class CachingSha2Password implements Password {
     
     /**
      * Set plain text password for full authentication
-     * 
+     *
      * @param plainTextPassword Plain text password
      */
     public void setPlainTextPassword(String plainTextPassword) {
@@ -244,7 +244,7 @@ public class CachingSha2Password implements Password {
     
     /**
      * Validate that the password is in a consistent state
-     * 
+     *
      * @return true if password state is valid
      */
     public boolean isValid() {
@@ -291,8 +291,8 @@ public class CachingSha2Password implements Password {
     
     @Override
     public boolean isAuthenticated() {
-        return currentPhase == AuthPhase.FAST_AUTH_SUCCESS ||
-               currentPhase == AuthPhase.AUTH_COMPLETE;
+        return currentPhase == AuthPhase.FAST_AUTH_SUCCESS
+                || currentPhase == AuthPhase.AUTH_COMPLETE;
     }
     
     @Override

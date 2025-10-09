@@ -18,6 +18,7 @@
 package org.apache.doris.mysql;
 
 import org.apache.doris.common.Config;
+
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 
@@ -41,15 +42,15 @@ public class MysqlEnhancedHandshakePacket extends MysqlHandshakePacket {
     
     // Enhanced capabilities for caching_sha2_password
     private static final MysqlCapability ENHANCED_CAPABILITY = new MysqlCapability(
-        MysqlCapability.DEFAULT_CAPABILITY.getFlags() | 
-        MysqlCapability.Flag.CLIENT_PLUGIN_AUTH.getFlagBit() |
-        MysqlCapability.Flag.CLIENT_SECURE_CONNECTION.getFlagBit()
+            MysqlCapability.DEFAULT_CAPABILITY.getFlags()
+            | MysqlCapability.Flag.CLIENT_PLUGIN_AUTH.getFlagBit()
+            | MysqlCapability.Flag.CLIENT_SECURE_CONNECTION.getFlagBit()
     );
     
     private static final MysqlCapability ENHANCED_SSL_CAPABILITY = new MysqlCapability(
-        MysqlCapability.SSL_CAPABILITY.getFlags() | 
-        MysqlCapability.Flag.CLIENT_PLUGIN_AUTH.getFlagBit() |
-        MysqlCapability.Flag.CLIENT_SECURE_CONNECTION.getFlagBit()
+            MysqlCapability.SSL_CAPABILITY.getFlags()
+            | MysqlCapability.Flag.CLIENT_PLUGIN_AUTH.getFlagBit()
+            | MysqlCapability.Flag.CLIENT_SECURE_CONNECTION.getFlagBit()
     );
     
     private final String selectedAuthPlugin;
@@ -60,11 +61,11 @@ public class MysqlEnhancedHandshakePacket extends MysqlHandshakePacket {
      */
     public MysqlEnhancedHandshakePacket(int connectionId) {
         super(connectionId);
-        
         // Determine authentication plugin based on configuration
         this.useEnhancedAuth = Config.enable_caching_sha2_password;
-        this.selectedAuthPlugin = useEnhancedAuth ? 
-            CACHING_SHA2_PASSWORD_PLUGIN : MYSQL_NATIVE_PASSWORD_PLUGIN;
+        this.selectedAuthPlugin = useEnhancedAuth
+            ? CACHING_SHA2_PASSWORD_PLUGIN : MYSQL_NATIVE_PASSWORD_PLUGIN;
+        
         
         if (LOG.isDebugEnabled()) {
             LOG.debug("Enhanced handshake packet created with auth plugin: {}", selectedAuthPlugin);
@@ -78,8 +79,8 @@ public class MysqlEnhancedHandshakePacket extends MysqlHandshakePacket {
         super(connectionId);
         
         // Validate and set authentication plugin
-        if (CACHING_SHA2_PASSWORD_PLUGIN.equals(authPlugin) || 
-            MYSQL_NATIVE_PASSWORD_PLUGIN.equals(authPlugin)) {
+        if (CACHING_SHA2_PASSWORD_PLUGIN.equals(authPlugin)
+                || MYSQL_NATIVE_PASSWORD_PLUGIN.equals(authPlugin)) {
             this.selectedAuthPlugin = authPlugin;
             this.useEnhancedAuth = CACHING_SHA2_PASSWORD_PLUGIN.equals(authPlugin);
         } else {
@@ -170,8 +171,8 @@ public class MysqlEnhancedHandshakePacket extends MysqlHandshakePacket {
         }
         
         if (LOG.isDebugEnabled()) {
-            LOG.debug("Enhanced handshake packet written with plugin: {}, SSL: {}, capabilities: 0x{}", 
-                    selectedAuthPlugin, MysqlProto.SERVER_USE_SSL, 
+            LOG.debug("Enhanced handshake packet written with plugin: {}, SSL: {}, capabilities: 0x{}",
+                    selectedAuthPlugin, MysqlProto.SERVER_USE_SSL,
                     Integer.toHexString(capability.getFlags()));
         }
     }
@@ -181,7 +182,7 @@ public class MysqlEnhancedHandshakePacket extends MysqlHandshakePacket {
         boolean isSame = selectedAuthPlugin.equals(pluginName);
         
         if (LOG.isDebugEnabled()) {
-            LOG.debug("Auth plugin check: client='{}', server='{}', same={}", 
+            LOG.debug("Auth plugin check: client='{}', server='{}', same={}",
                     pluginName, selectedAuthPlugin, isSame);
         }
         
@@ -212,7 +213,7 @@ public class MysqlEnhancedHandshakePacket extends MysqlHandshakePacket {
         boolean supports = supportsPluginAuth && supportsSecureConnection;
         
         if (LOG.isDebugEnabled()) {
-            LOG.debug("Client caching_sha2_password support check: pluginAuth={}, secureConnection={}, result={}", 
+            LOG.debug("Client caching_sha2_password support check: pluginAuth={}, secureConnection={}, result={}",
                     supportsPluginAuth, supportsSecureConnection, supports);
         }
         

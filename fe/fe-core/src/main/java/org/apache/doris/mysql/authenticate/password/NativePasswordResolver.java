@@ -45,8 +45,8 @@ public class NativePasswordResolver implements PasswordResolver {
         // Note: Check the authPacket whether support plugin auth firstly,
         // before we check AuthPlugin between doris and client to compatible with older version: like mysql 5.1
         // If caching_sha2_password is enabled and client is using it, don't force plugin switch
-        if (Config.enable_caching_sha2_password &&
-            MysqlEnhancedHandshakePacket.CACHING_SHA2_PASSWORD_PLUGIN.equals(authPacket.getPluginName())) {
+        if (Config.enable_caching_sha2_password
+                && MysqlEnhancedHandshakePacket.CACHING_SHA2_PASSWORD_PLUGIN.equals(authPacket.getPluginName())) {
             // Let the CachingSha2PasswordResolver handle this
             return Optional.empty();
         }

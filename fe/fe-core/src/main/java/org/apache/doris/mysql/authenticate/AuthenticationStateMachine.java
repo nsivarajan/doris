@@ -28,6 +28,7 @@ import org.apache.doris.mysql.authenticate.password.NativePasswordResolver;
 import org.apache.doris.mysql.authenticate.password.Password;
 import org.apache.doris.mysql.authenticate.password.PasswordResolver;
 import org.apache.doris.qe.ConnectContext;
+
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 
@@ -39,11 +40,11 @@ import java.util.concurrent.atomic.AtomicLong;
 
 /**
  * Authentication state machine for managing MySQL protocol authentication flows.
- * 
+ *
  * This state machine coordinates the authentication process between clients and server,
  * handling different authentication plugins and their specific protocol requirements.
  * It manages state transitions, protocol packet exchanges, and authentication resolution.
- * 
+ *
  * Supported authentication flows:
  * 1. caching_sha2_password - Multi-phase authentication with caching
  * 2. mysql_native_password - Legacy single-phase authentication
@@ -115,7 +116,7 @@ public class AuthenticationStateMachine {
         pluginUsageStats.put(MysqlEnhancedHandshakePacket.MYSQL_NATIVE_PASSWORD_PLUGIN, new AtomicLong(0));
         
         if (LOG.isDebugEnabled()) {
-            LOG.debug("Authentication state machine initialized for connection: {}", 
+            LOG.debug("Authentication state machine initialized for connection: {}",
                     context.getConnectionId());
         }
     }
@@ -160,7 +161,7 @@ public class AuthenticationStateMachine {
             }
             
             if (LOG.isDebugEnabled() && previousState != currentState) {
-                LOG.debug("Authentication state transition: {} -> {} (event: {}, success: {})", 
+                LOG.debug("Authentication state transition: {} -> {} (event: {}, success: {})",
                         previousState, currentState, event, success);
             }
             
@@ -271,9 +272,9 @@ public class AuthenticationStateMachine {
             pluginUsageStats.get(selectedAuthPlugin).incrementAndGet();
             
             if (LOG.isInfoEnabled()) {
-                LOG.info("Authentication successful for user: {} using plugin: {} (duration: {}ms)", 
-                        authPacket != null ? authPacket.getUser() : "unknown", 
-                        selectedAuthPlugin, 
+                LOG.info("Authentication successful for user: {} using plugin: {} (duration: {}ms)",
+                        authPacket != null ? authPacket.getUser() : "unknown",
+                        selectedAuthPlugin,
                         authEndTime - authStartTime);
             }
             
@@ -283,9 +284,9 @@ public class AuthenticationStateMachine {
             authEndTime = System.currentTimeMillis();
             
             if (LOG.isWarnEnabled()) {
-                LOG.warn("Authentication failed for user: {} using plugin: {} (duration: {}ms)", 
-                        authPacket != null ? authPacket.getUser() : "unknown", 
-                        selectedAuthPlugin, 
+                LOG.warn("Authentication failed for user: {} using plugin: {} (duration: {}ms)",
+                        authPacket != null ? authPacket.getUser() : "unknown",
+                        selectedAuthPlugin,
                         authEndTime - authStartTime);
             }
             
@@ -363,9 +364,9 @@ public class AuthenticationStateMachine {
      * Check if authentication is complete (success or failure)
      */
     public boolean isAuthenticationComplete() {
-        return currentState == State.AUTHENTICATED || 
-               currentState == State.AUTHENTICATION_FAILED || 
-               currentState == State.ERROR;
+        return currentState == State.AUTHENTICATED
+                || currentState == State.AUTHENTICATION_FAILED
+                || currentState == State.ERROR;
     }
     
     /**
@@ -404,8 +405,8 @@ public class AuthenticationStateMachine {
      * Get statistics for monitoring
      */
     public String getStatistics() {
-        return String.format("AuthStateMachine[state=%s, plugin=%s, transitions=%d, duration=%dms, " +
-                           "caching_sha2_usage=%d, native_password_usage=%d]",
+        return String.format("AuthStateMachine[state=%s, plugin=%s, transitions=%d, duration=%dms,"
+                + " caching_sha2_usage=%d, native_password_usage=%d]",
                 currentState, selectedAuthPlugin, stateTransitions.get(), getAuthenticationDuration(),
                 pluginUsageStats.get(MysqlEnhancedHandshakePacket.CACHING_SHA2_PASSWORD_PLUGIN).get(),
                 pluginUsageStats.get(MysqlEnhancedHandshakePacket.MYSQL_NATIVE_PASSWORD_PLUGIN).get());

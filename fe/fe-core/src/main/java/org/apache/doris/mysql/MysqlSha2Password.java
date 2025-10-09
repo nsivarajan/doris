@@ -70,10 +70,10 @@ public class MysqlSha2Password {
      * 
      * The scrambling process follows MySQL's specification:
      * 1. SHA256(password) -> stage1_hash
-     * 2. SHA256(stage1_hash) -> stage2_hash  
+     * 2. SHA256(stage1_hash) -> stage2_hash
      * 3. SHA256(nonce + stage2_hash) -> stage3_hash
      * 4. XOR(stage1_hash, stage3_hash) -> scrambled_password
-     * 
+     *
      * @param password Plain text password bytes
      * @param nonce Random nonce from server handshake
      * @return Scrambled password bytes
@@ -122,8 +122,8 @@ public class MysqlSha2Password {
      * @return true if password is valid, false otherwise
      * @throws NoSuchAlgorithmException if SHA-256 algorithm is not available
      */
-    public static boolean checkScrambleSha256(byte[] scrambledPassword, byte[] nonce, byte[] storedPasswordHash) 
-            throws NoSuchAlgorithmException {
+    public static boolean checkScrambleSha256(
+            byte[] scrambledPassword, byte[] nonce, byte[] storedPasswordHash) throws NoSuchAlgorithmException {
         
         if (scrambledPassword == null || nonce == null || storedPasswordHash == null) {
             return false;

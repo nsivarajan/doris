@@ -18,11 +18,11 @@
 package org.apache.doris.mysql.authenticate;
 
 import org.apache.doris.mysql.MysqlSha2Password;
+
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 
 import java.security.MessageDigest;
-import java.util.Arrays;
 import java.util.Comparator;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.Executors;
@@ -32,7 +32,7 @@ import java.util.concurrent.atomic.AtomicLong;
 
 /**
  * Thread-safe password cache for caching_sha2_password authentication.
- * 
+ *
  * This cache stores SHA-256 password hashes to enable fast authentication
  * for repeat connections. It implements:
  * - LRU eviction policy when cache is full
@@ -108,7 +108,7 @@ public class PasswordCache {
     
     /**
      * Create password cache with specified configuration
-     * 
+     *
      * @param maxSize Maximum number of entries in cache
      * @param ttlSeconds Time-to-live for cache entries in seconds
      */
@@ -133,10 +133,10 @@ public class PasswordCache {
         
         // Schedule periodic cleanup
         cleanupExecutor.scheduleAtFixedRate(
-            this::cleanup, 
-            CLEANUP_INTERVAL_SECONDS, 
-            CLEANUP_INTERVAL_SECONDS, 
-            TimeUnit.SECONDS
+                this::cleanup,
+                CLEANUP_INTERVAL_SECONDS,
+                CLEANUP_INTERVAL_SECONDS,
+                TimeUnit.SECONDS
         );
         
         LOG.info("Password cache initialized: maxSize={}, ttlSeconds={}", maxSize, ttlSeconds);
@@ -191,7 +191,7 @@ public class PasswordCache {
     
     /**
      * Cache password hash for user
-     * 
+     *
      * @param username Username to cache
      * @param passwordHash SHA-256 password hash to cache
      */
@@ -221,7 +221,7 @@ public class PasswordCache {
     
     /**
      * Remove user from cache
-     * 
+     *
      * @param username Username to remove
      * @return true if user was cached and removed
      */
@@ -259,7 +259,7 @@ public class PasswordCache {
     
     /**
      * Get current cache size
-     * 
+     *
      * @return Number of entries in cache
      */
     public int size() {
@@ -268,7 +268,7 @@ public class PasswordCache {
     
     /**
      * Get maximum cache size
-     * 
+     *
      * @return Maximum number of entries
      */
     public int getMaxSize() {
@@ -277,7 +277,7 @@ public class PasswordCache {
     
     /**
      * Get cache TTL in seconds
-     * 
+     *
      * @return TTL in seconds
      */
     public long getTtlSeconds() {
@@ -286,7 +286,7 @@ public class PasswordCache {
     
     /**
      * Get cache hit count
-     * 
+     *
      * @return Number of cache hits
      */
     public long getHitCount() {
@@ -295,7 +295,7 @@ public class PasswordCache {
     
     /**
      * Get cache miss count
-     * 
+     *
      * @return Number of cache misses
      */
     public long getMissCount() {
@@ -304,7 +304,7 @@ public class PasswordCache {
     
     /**
      * Get cache hit rate
-     * 
+     *
      * @return Hit rate as percentage (0.0 to 1.0)
      */
     public double getHitRate() {
@@ -315,7 +315,7 @@ public class PasswordCache {
     
     /**
      * Get eviction count
-     * 
+     *
      * @return Number of entries evicted due to size limit
      */
     public long getEvictionCount() {
@@ -324,7 +324,7 @@ public class PasswordCache {
     
     /**
      * Get expired entry count
-     * 
+     *
      * @return Number of entries that expired
      */
     public long getExpiredCount() {
@@ -333,13 +333,13 @@ public class PasswordCache {
     
     /**
      * Get cache statistics as formatted string
-     * 
+     *
      * @return Cache statistics
      */
     public String getStatistics() {
         return String.format(
             "PasswordCache[size=%d/%d, hits=%d, misses=%d, hitRate=%.2f%%, evictions=%d, expired=%d]",
-            size(), maxSize, getHitCount(), getMissCount(), getHitRate() * 100, 
+            size(), maxSize, getHitCount(), getMissCount(), getHitRate() * 100,
             getEvictionCount(), getExpiredCount()
         );
     }
@@ -407,20 +407,20 @@ public class PasswordCache {
         
         // Find entry with oldest timestamp (LRU based on creation time)
         cache.entrySet().stream()
-            .min(Comparator.comparing(entry -> entry.getValue().timestamp))
-            .ifPresent(entry -> {
-                String username = entry.getKey();
-                CacheEntry cacheEntry = entry.getValue();
-                
-                if (cache.remove(username, cacheEntry)) {
-                    cacheEntry.clearSensitiveData();
-                    evictionCount.incrementAndGet();
+                .min(Comparator.comparing(entry -> entry.getValue().timestamp))
+                .ifPresent(entry -> {
+                    String username = entry.getKey();
+                    CacheEntry cacheEntry = entry.getValue();
                     
-                    if (LOG.isDebugEnabled()) {
-                        LOG.debug("Evicted oldest cache entry for user: {} (age: {}ms)", 
-                                username, cacheEntry.getAge());
+                    if (cache.remove(username, cacheEntry)) {
+                        cacheEntry.clearSensitiveData();
+                        evictionCount.incrementAndGet();
+                        
+                        if (LOG.isDebugEnabled()) {
+                            LOG.debug("Evicted oldest cache entry for user: {} (age: {}ms)",
+                                    username, cacheEntry.getAge());
+                        }
                     }
-                }
-            });
+                });
     }
 }

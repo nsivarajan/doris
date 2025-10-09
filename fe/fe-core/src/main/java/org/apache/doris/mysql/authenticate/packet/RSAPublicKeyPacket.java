@@ -20,6 +20,7 @@ package org.apache.doris.mysql.authenticate.packet;
 import org.apache.doris.mysql.MysqlPacket;
 import org.apache.doris.mysql.MysqlSerializer;
 import org.apache.logging.log4j.LogManager;
+
 import org.apache.logging.log4j.Logger;
 
 import java.security.interfaces.RSAPublicKey;
@@ -86,12 +87,11 @@ public class RSAPublicKeyPacket extends MysqlPacket {
             LOG.error("Cannot write RSA public key packet: PEM key is null or empty");
             return;
         }
-        
         // Write PEM-formatted public key as null-terminated string
         serializer.writeEofString(pemPublicKey);
         
         if (LOG.isDebugEnabled()) {
-            LOG.debug("RSA public key packet written: keySize={} bits, pemLength={} chars", 
+            LOG.debug("RSA public key packet written: keySize={} bits, pemLength={} chars",
                     getKeySize(), pemPublicKey.length());
         }
     }
@@ -103,6 +103,7 @@ public class RSAPublicKeyPacket extends MysqlPacket {
         if (pemPublicKey == null || pemPublicKey.isEmpty()) {
             return false;
         }
+        
         
         // Basic PEM format validation
         return pemPublicKey.contains("-----BEGIN PUBLIC KEY-----") && 

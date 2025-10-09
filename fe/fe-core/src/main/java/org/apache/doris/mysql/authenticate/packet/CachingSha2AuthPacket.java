@@ -19,15 +19,16 @@ package org.apache.doris.mysql.authenticate.packet;
 
 import org.apache.doris.mysql.MysqlPacket;
 import org.apache.doris.mysql.MysqlSerializer;
+
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 
 /**
  * MySQL caching_sha2_password authentication response packet.
- * 
+ *
  * This packet is sent by the server during caching_sha2_password authentication
  * to indicate the authentication status and next steps in the multi-phase process.
- * 
+ *
  * Packet format:
  * - 1 byte: Status code
  *   - 0x01: Full authentication required
@@ -116,8 +117,8 @@ public class CachingSha2AuthPacket extends MysqlPacket {
         }
         
         if (LOG.isDebugEnabled()) {
-            LOG.debug("CachingSha2AuthPacket written: status=0x{}, dataLen={}", 
-                    Integer.toHexString(statusCode & 0xFF), 
+            LOG.debug("CachingSha2AuthPacket written: status=0x{}, dataLen={}",
+                    Integer.toHexString(statusCode & 0xFF),
                     additionalData != null ? additionalData.length : 0);
         }
     }

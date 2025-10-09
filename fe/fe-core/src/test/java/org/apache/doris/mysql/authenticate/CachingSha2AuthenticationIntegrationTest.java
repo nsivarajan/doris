@@ -24,10 +24,11 @@ import org.apache.doris.mysql.authenticate.password.CachingSha2Password;
 import org.apache.doris.mysql.authenticate.password.CachingSha2PasswordResolver;
 import org.apache.doris.mysql.authenticate.password.Password;
 import org.apache.doris.qe.ConnectContext;
-import org.junit.jupiter.api.BeforeEach;
-import org.junit.jupiter.api.Test;
-import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.DisplayName;
+import org.junit.jupiter.api.Test;
+
 import org.mockito.Mock;
 import org.mockito.MockitoAnnotations;
 
@@ -40,7 +41,7 @@ import static org.mockito.Mockito.*;
 
 /**
  * Integration test suite for caching_sha2_password authentication system.
- * 
+ *
  * Tests the complete authentication flow including handshake, authentication state machine,
  * password resolution, and security transport decisions.
  */
@@ -200,8 +201,8 @@ public class CachingSha2AuthenticationIntegrationTest {
         
         assertNotNull(decision);
         // Should be RSA_ENCRYPTED if RSA keys are available, or INSECURE_FALLBACK if not
-        assertTrue(decision.getMethod() == SecurityTransportDecision.TransportMethod.RSA_ENCRYPTED ||
-                  decision.getMethod() == SecurityTransportDecision.TransportMethod.INSECURE_FALLBACK);
+        assertTrue(decision.getMethod() == SecurityTransportDecision.TransportMethod.RSA_ENCRYPTED
+                || decision.getMethod() == SecurityTransportDecision.TransportMethod.INSECURE_FALLBACK);
         
         if (decision.getMethod() == SecurityTransportDecision.TransportMethod.RSA_ENCRYPTED) {
             assertTrue(decision.isSecure());
