@@ -227,7 +227,7 @@ public class RSAKeyManager {
 
     /**
      * Decrypt password using current private key
-     * 
+     *
      * @param encryptedPassword Encrypted password bytes
      * @return Decrypted plain text password
      * @throws Exception if decryption fails
@@ -267,13 +267,13 @@ public class RSAKeyManager {
         } finally {
             keyLock.writeLock().unlock();
         }
-        
+
         LOG.info("RSA key manager shutdown complete");
     }
 
     /**
      * Generate new RSA key pair
-     * 
+     *
      * @return true if key generation was successful
      */
     private boolean generateNewKeyPair() {
@@ -301,7 +301,7 @@ public class RSAKeyManager {
 
             return true;
 
- 
+
         } catch (Exception e) {
             LOG.error("Failed to generate RSA key pair", e);
             return false;

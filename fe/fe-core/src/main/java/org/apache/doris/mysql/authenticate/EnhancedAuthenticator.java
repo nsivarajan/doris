@@ -270,7 +270,7 @@ public class EnhancedAuthenticator implements Authenticator {
         nativePasswordAuthCount.set(0);
         successfulAuthCount.set(0);
         failedAuthCount.set(0);
-        
+
         LOG.info("Enhanced authenticator statistics reset");
     }
 
@@ -297,7 +297,7 @@ public class EnhancedAuthenticator implements Authenticator {
         private final long successCount;
         private final long failureCount;
         private final boolean enhancedEnabled;
-   
+
         public AuthenticationMetrics(long cachingSha2Count, long nativePasswordCount,
                 long successCount, long failureCount, boolean enhancedEnabled) {
             this.cachingSha2Count = cachingSha2Count;

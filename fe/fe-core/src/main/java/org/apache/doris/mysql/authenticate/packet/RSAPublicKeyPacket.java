@@ -89,7 +89,7 @@ public class RSAPublicKeyPacket extends MysqlPacket {
         }
         // Write PEM-formatted public key as null-terminated string
         serializer.writeEofString(pemPublicKey);
-        
+
         if (LOG.isDebugEnabled()) {
             LOG.debug("RSA public key packet written: keySize={} bits, pemLength={} chars",
                     getKeySize(), pemPublicKey.length());
@@ -147,7 +147,7 @@ public class RSAPublicKeyPacket extends MysqlPacket {
         if (pemKey == null || pemKey.isEmpty()) {
             throw new IllegalArgumentException("PEM public key string cannot be null or empty");
         }
-        
+
         return new RSAPublicKeyPacket(pemKey);
     }
 

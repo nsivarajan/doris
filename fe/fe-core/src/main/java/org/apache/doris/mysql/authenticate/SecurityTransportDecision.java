@@ -280,11 +280,11 @@ public class SecurityTransportDecision {
         long sslCount = sslTransportCount.get();
         long rsaCount = rsaTransportCount.get();
         long insecureCount = insecureFallbackCount.get();
-        
+
         double sslPercent = total > 0 ? (double) sslCount / total * 100.0 : 0.0;
         double rsaPercent = total > 0 ? (double) rsaCount / total * 100.0 : 0.0;
         double insecurePercent = total > 0 ? (double) insecureCount / total * 100.0 : 0.0;
-        
+
         return String.format("TransportStats[total=%d, SSL=%d(%.1f%%), RSA=%d(%.1f%%), insecure=%d(%.1f%%)]",
                 total, sslCount, sslPercent, rsaCount, rsaPercent, insecureCount, insecurePercent);
     }
@@ -321,7 +321,7 @@ public class SecurityTransportDecision {
         private final long sslCount;
         private final long rsaCount;
         private final long insecureCount;
-        
+
         public TransportMetrics(long totalDecisions, long sslCount, long rsaCount, long insecureCount) {
             this.totalDecisions = totalDecisions;
             this.sslCount = sslCount;

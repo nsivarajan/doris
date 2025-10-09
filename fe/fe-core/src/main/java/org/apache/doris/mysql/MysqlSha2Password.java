@@ -220,7 +220,7 @@ public class MysqlSha2Password {
         if (privateKey == null) {
             throw new IllegalArgumentException("RSA private key cannot be null");
         }
-    
+
         Cipher cipher = Cipher.getInstance(RSA_CIPHER_ALGORITHM);
         cipher.init(Cipher.DECRYPT_MODE, privateKey);
 

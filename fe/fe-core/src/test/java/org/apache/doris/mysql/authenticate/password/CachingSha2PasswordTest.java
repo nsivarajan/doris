@@ -163,7 +163,7 @@ public class CachingSha2PasswordTest {
     @DisplayName("Complete authentication flow")
     void testCompleteAuthenticationFlow() {
         CachingSha2Password password = new CachingSha2Password(testScrambledPassword, testNonce);
-    
+
         // Initial state
         Assertions.assertTrue(password.isInitialAuth());
         Assertions.assertTrue(password.isValid());

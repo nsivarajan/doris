@@ -50,7 +50,7 @@ public class NativePasswordResolver implements PasswordResolver {
             // Let the CachingSha2PasswordResolver handle this
             return Optional.empty();
         }
-        
+
         if (authPacket.getCapability().isPluginAuth()
                 && !handshakePacket.checkAuthPluginSameAsDoris(authPacket.getPluginName())) {
             // 1. clear the serializer

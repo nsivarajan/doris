@@ -107,7 +107,7 @@ public class CachingSha2AuthenticationIntegrationTest {
         Assertions.assertEquals(MysqlEnhancedHandshakePacket.CACHING_SHA2_PASSWORD_PLUGIN,
                     handshake.getSelectedAuthPlugin());
         Assertions.assertTrue(handshake.isEnhancedAuthEnabled());
-        
+
         // Test plugin compatibility check
         Assertions.assertTrue(handshake.checkAuthPluginSameAsDoris(
                 MysqlEnhancedHandshakePacket.CACHING_SHA2_PASSWORD_PLUGIN));

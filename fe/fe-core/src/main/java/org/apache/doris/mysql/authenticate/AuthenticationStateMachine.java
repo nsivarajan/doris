@@ -159,18 +159,18 @@ public class AuthenticationStateMachine {
                     transitionTo(State.ERROR);
                     success = false;
             }
-            
+
             if (LOG.isDebugEnabled() && previousState != currentState) {
                 LOG.debug("Authentication state transition: {} -> {} (event: {}, success: {})",
                         previousState, currentState, event, success);
             }
-            
+
         } catch (Exception e) {
             LOG.error("Error processing authentication event {} in state {}", event, currentState, e);
             transitionTo(State.ERROR);
             success = false;
         }
-    
+
         return success;
     }
 

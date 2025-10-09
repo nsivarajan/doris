@@ -148,7 +148,7 @@ public class CachingSha2PasswordResolver implements PasswordResolver {
                                                       MysqlSerializer serializer,
                                                       CachingSha2Password password,
                                                       String username) throws IOException {
-        
+
         // Check if SSL is available for secure password transmission
         if (channel.isSslMode()) {
             if (LOG.isDebugEnabled()) {
@@ -169,7 +169,7 @@ public class CachingSha2PasswordResolver implements PasswordResolver {
     private Optional<Password> handleSSLPasswordTransmission(MysqlChannel channel,
                                                            CachingSha2Password password,
                                                            String username) throws IOException {
-        
+
         // Receive plain text password over SSL connection
         ByteBuffer passwordPacket = channel.fetchOnePacket();
         if (passwordPacket == null) {
@@ -243,7 +243,7 @@ public class CachingSha2PasswordResolver implements PasswordResolver {
             try {
                 byte[] passwordHash = MysqlSha2Password.makeScrambledPasswordSha256(plainTextPassword);
                 passwordCache.cachePassword(username, passwordHash);
-                
+
                 if (LOG.isDebugEnabled()) {
                     LOG.debug("Cached password hash for user: {} (RSA decryption)", username);
                 }
@@ -299,7 +299,7 @@ public class CachingSha2PasswordResolver implements PasswordResolver {
     /**
      * Get password cache for monitoring
      */
-    
+
     public PasswordCache getPasswordCache() {
         return passwordCache;
     }
@@ -350,7 +350,7 @@ public class CachingSha2PasswordResolver implements PasswordResolver {
         }
 
         // Note: RSAKeyManager is singleton and managed globally
-        
+
         LOG.info("CachingSha2PasswordResolver shutdown complete");
     }
 }

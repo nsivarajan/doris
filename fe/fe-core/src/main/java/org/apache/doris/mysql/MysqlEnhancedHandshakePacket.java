@@ -196,7 +196,7 @@ public class MysqlEnhancedHandshakePacket extends MysqlHandshakePacket {
         serializer.writeNulTerminateString(selectedAuthPlugin);
         serializer.writeBytes(getAuthPluginData());
         serializer.writeInt1(0); // null terminator
-        
+
         if (LOG.isDebugEnabled()) {
             LOG.debug("Auth switch request built for plugin: {}", selectedAuthPlugin);
         }
