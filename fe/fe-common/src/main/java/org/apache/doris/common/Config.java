@@ -3092,6 +3092,33 @@ public class Config extends ConfigBase {
             options = {"default", "ldap", "mtls"})
     public static String authentication_type = "default";
 
+    @ConfField(mutable = true, masterOnly = false, description = {
+            "是否启用 caching_sha2_password 认证插件。启用后将使用 SHA-256 而不是 SHA-1 进行密码认证，"
+            + "并支持 MySQL 8.0+ 客户端的默认认证方式，同时消除明文密码传输的安全漏洞。默认为 false。",
+            "Whether to enable caching_sha2_password authentication plugin. When enabled, "
+            + "SHA-256 will be used instead of SHA-1 for password authentication, "
+            + "supporting the default authentication method of MySQL 8.0+ clients "
+            + "and eliminating clear text password transmission security vulnerabilities. Default is false."})
+    public static boolean enable_caching_sha2_password = false;
+
+    @ConfField(mutable = true, masterOnly = false, description = {
+            "caching_sha2_password 密码缓存的最大条目数。缓存用于加速重复连接的认证过程。默认为 1000。",
+            "Maximum number of entries in the caching_sha2_password password cache. "
+            + "The cache is used to speed up authentication for repeat connections. Default is 1000."})
+    public static int sha2_password_cache_size = 1000;
+
+    @ConfField(mutable = true, masterOnly = false, description = {
+            "caching_sha2_password 密码缓存的过期时间（秒）。过期后需要重新进行完整认证。默认为 3600 秒（1小时）。",
+            "TTL for caching_sha2_password password cache entries in seconds. "
+            + "After expiration, full authentication is required. Default is 3600 seconds (1 hour)."})
+    public static int sha2_password_cache_ttl_seconds = 3600;
+
+    @ConfField(mutable = true, masterOnly = false, description = {
+            "用于 caching_sha2_password RSA 加密的密钥长度。更长的密钥提供更好的安全性但性能较低。默认为 2048。",
+            "RSA key length for caching_sha2_password encryption. Longer keys provide better security "
+            + "but lower performance. Default is 2048."})
+    public static int sha2_password_rsa_key_length = 2048;
+
     @ConfField(mutable = true, description = {"mTLS 认证中证书序列号到用户的映射关系，"
             + "格式为：'serial_number1:username1;serial_number2:username2'",
             "Certificate serial number to username mapping in mTLS authentication, "

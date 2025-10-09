@@ -53,7 +53,7 @@ public class DorisFlightSqlService {
         // bearer token is evict from the cache will unregister ConnectContext.
         this.flightTokenManager = new FlightTokenManagerImpl(
                 Math.min(Config.arrow_flight_token_cache_size, Config.qe_max_connection / 2),
-                Config.arrow_flight_token_alive_time);
+                Config.arrow_flight_token_alive_time_second);
         this.flightSessionsManager = new FlightSessionsWithTokenManager(flightTokenManager);
 
         DorisFlightSqlProducer producer = new DorisFlightSqlProducer(

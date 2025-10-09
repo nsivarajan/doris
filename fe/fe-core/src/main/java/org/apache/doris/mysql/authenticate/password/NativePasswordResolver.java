@@ -20,6 +20,7 @@ package org.apache.doris.mysql.authenticate.password;
 import org.apache.doris.common.Config;
 import org.apache.doris.mysql.MysqlAuthPacket;
 import org.apache.doris.mysql.MysqlChannel;
+import org.apache.doris.mysql.MysqlEnhancedHandshakePacket;
 import org.apache.doris.mysql.MysqlHandshakePacket;
 import org.apache.doris.mysql.MysqlProto;
 import org.apache.doris.mysql.MysqlSerializer;
@@ -43,6 +44,13 @@ public class NativePasswordResolver implements PasswordResolver {
         // which Doris is using now.
         // Note: Check the authPacket whether support plugin auth firstly,
         // before we check AuthPlugin between doris and client to compatible with older version: like mysql 5.1
+        // If caching_sha2_password is enabled and client is using it, don't force plugin switch
+        if (Config.enable_caching_sha2_password &&
+            MysqlEnhancedHandshakePacket.CACHING_SHA2_PASSWORD_PLUGIN.equals(authPacket.getPluginName())) {
+            // Let the CachingSha2PasswordResolver handle this
+            return Optional.empty();
+        }
+        
         if (authPacket.getCapability().isPluginAuth()
                 && !handshakePacket.checkAuthPluginSameAsDoris(authPacket.getPluginName())) {
             // 1. clear the serializer

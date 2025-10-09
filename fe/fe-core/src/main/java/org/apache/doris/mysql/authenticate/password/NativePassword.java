@@ -17,9 +17,12 @@
 
 package org.apache.doris.mysql.authenticate.password;
 
-public class NativePassword extends Password {
+import java.util.Arrays;
+
+public class NativePassword implements Password {
     private byte[] remotePasswd;
     private byte[] randomString;
+    private boolean authenticated = true;
 
     public NativePassword(byte[] remotePasswd, byte[] randomString) {
         this.remotePasswd = remotePasswd;
@@ -30,7 +33,40 @@ public class NativePassword extends Password {
         return remotePasswd;
     }
 
-    public byte[] getRandomString() {
+    @Override
+    public String getAuthPluginName() {
+        return "mysql_native_password";
+    }
+
+    @Override
+    public boolean isAuthenticated() {
+        return authenticated;
+    }
+
+    @Override
+    public String getPlainTextPassword() {
+        return null; // Native password doesn't have plain text
+    }
+
+    @Override
+    public byte[] getScrambledPassword() {
+        return remotePasswd;
+    }
+
+    @Override
+    public byte[] getNonce() {
         return randomString;
+    }
+
+    @Override
+    public void clearPassword() {
+        if (remotePasswd != null) {
+            Arrays.fill(remotePasswd, (byte) 0);
+        }
+    }
+
+    @Override
+    public String toSafeString() {
+        return "NativePassword{authenticated=" + authenticated + "}";
     }
 }

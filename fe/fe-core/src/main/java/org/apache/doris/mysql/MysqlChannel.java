@@ -639,4 +639,8 @@ public class MysqlChannel implements BytesChannel {
     public SSLEngine getSslEngine() {
         return this.sslEngine;
     }
+
+    public boolean isSslMode() {
+        return this.isSslMode;
+    }
 }
