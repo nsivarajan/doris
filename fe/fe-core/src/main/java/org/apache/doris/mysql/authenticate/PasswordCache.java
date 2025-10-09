@@ -43,23 +43,23 @@ import java.util.concurrent.atomic.AtomicLong;
  */
 public class PasswordCache {
     private static final Logger LOG = LogManager.getLogger(PasswordCache.class);
-    
+
     // Cache configuration
     private final int maxSize;
     private final long ttlMillis;
     private final ConcurrentHashMap<String, CacheEntry> cache;
     private final ScheduledExecutorService cleanupExecutor;
-    
+
     // Performance metrics
     private final AtomicLong hitCount = new AtomicLong(0);
     private final AtomicLong missCount = new AtomicLong(0);
     private final AtomicLong evictionCount = new AtomicLong(0);
     private final AtomicLong expiredCount = new AtomicLong(0);
-    
+
     // Cleanup configuration
     private static final long CLEANUP_INTERVAL_SECONDS = 60; // Clean up every minute
     private static final String CLEANUP_THREAD_NAME = "password-cache-cleanup";
-    
+
     /**
      * Cache entry containing password hash and metadata
      */
@@ -68,21 +68,21 @@ public class PasswordCache {
         final long timestamp;
         final AtomicLong accessCount;
         volatile long lastAccessTime;
-        
+
         CacheEntry(byte[] passwordHash) {
             this.passwordHash = passwordHash != null ? passwordHash.clone() : new byte[0];
             this.timestamp = System.currentTimeMillis();
             this.lastAccessTime = this.timestamp;
             this.accessCount = new AtomicLong(0);
         }
-        
+
         /**
          * Check if entry has expired based on TTL
          */
         boolean isExpired(long ttlMillis) {
             return System.currentTimeMillis() - timestamp > ttlMillis;
         }
-        
+
         /**
          * Update access time and increment access count
          */
@@ -90,14 +90,14 @@ public class PasswordCache {
             this.lastAccessTime = System.currentTimeMillis();
             this.accessCount.incrementAndGet();
         }
-        
+
         /**
          * Get age of entry in milliseconds
          */
         long getAge() {
             return System.currentTimeMillis() - timestamp;
         }
-        
+
         /**
          * Clear sensitive data from memory
          */
@@ -105,7 +105,7 @@ public class PasswordCache {
             MysqlSha2Password.clearSensitiveData(passwordHash);
         }
     }
-    
+
     /**
      * Create password cache with specified configuration
      *
@@ -119,18 +119,18 @@ public class PasswordCache {
         if (ttlSeconds <= 0) {
             throw new IllegalArgumentException("Cache TTL must be positive");
         }
-        
+
         this.maxSize = maxSize;
         this.ttlMillis = ttlSeconds * 1000;
         this.cache = new ConcurrentHashMap<>(Math.min(maxSize, 1024)); // Initial capacity
-        
+
         // Create cleanup executor with daemon thread
         this.cleanupExecutor = Executors.newSingleThreadScheduledExecutor(r -> {
             Thread t = new Thread(r, CLEANUP_THREAD_NAME);
             t.setDaemon(true);
             return t;
         });
-        
+
         // Schedule periodic cleanup
         cleanupExecutor.scheduleAtFixedRate(
                 this::cleanup,
@@ -138,13 +138,13 @@ public class PasswordCache {
                 CLEANUP_INTERVAL_SECONDS,
                 TimeUnit.SECONDS
         );
-        
+
         LOG.info("Password cache initialized: maxSize={}, ttlSeconds={}", maxSize, ttlSeconds);
     }
-    
+
     /**
      * Check if password is cached and valid
-     * 
+     *
      * @param username Username to check
      * @param scrambledPassword Scrambled password to verify
      * @return true if password is cached and matches
@@ -153,13 +153,13 @@ public class PasswordCache {
         if (username == null || scrambledPassword == null) {
             return false;
         }
-        
+
         CacheEntry entry = cache.get(username);
         if (entry == null) {
             missCount.incrementAndGet();
             return false;
         }
-        
+
         // Check if entry has expired
         if (entry.isExpired(ttlMillis)) {
             cache.remove(username, entry); // Remove expired entry
@@ -168,27 +168,27 @@ public class PasswordCache {
             missCount.incrementAndGet();
             return false;
         }
-        
+
         // Verify password hash matches
         boolean matches = MessageDigest.isEqual(entry.passwordHash, scrambledPassword);
         if (matches) {
             entry.recordAccess();
             hitCount.incrementAndGet();
-            
+
             if (LOG.isDebugEnabled()) {
                 LOG.debug("Password cache hit for user: {}", username);
             }
         } else {
             missCount.incrementAndGet();
-            
+
             if (LOG.isDebugEnabled()) {
                 LOG.debug("Password cache miss for user: {} (hash mismatch)", username);
             }
         }
-        
+
         return matches;
     }
-    
+
     /**
      * Cache password hash for user
      *
@@ -200,25 +200,25 @@ public class PasswordCache {
             LOG.warn("Cannot cache null username or password hash");
             return;
         }
-        
+
         // Check if cache is full and needs eviction
         if (cache.size() >= maxSize) {
             evictOldestEntry();
         }
-        
+
         CacheEntry newEntry = new CacheEntry(passwordHash);
         CacheEntry oldEntry = cache.put(username, newEntry);
-        
+
         // Clear old entry if it existed
         if (oldEntry != null) {
             oldEntry.clearSensitiveData();
         }
-        
+
         if (LOG.isDebugEnabled()) {
             LOG.debug("Cached password for user: {} (cache size: {})", username, cache.size());
         }
     }
-    
+
     /**
      * Remove user from cache
      *
@@ -229,17 +229,17 @@ public class PasswordCache {
         if (username == null) {
             return false;
         }
-        
+
         CacheEntry removed = cache.remove(username);
         if (removed != null) {
             removed.clearSensitiveData();
             LOG.debug("Removed user from cache: {}", username);
             return true;
         }
-        
+
         return false;
     }
-    
+
     /**
      * Clear all entries from cache
      */
@@ -247,16 +247,16 @@ public class PasswordCache {
         // Clear sensitive data before removing entries
         cache.values().forEach(CacheEntry::clearSensitiveData);
         cache.clear();
-        
+
         // Reset metrics
         hitCount.set(0);
         missCount.set(0);
         evictionCount.set(0);
         expiredCount.set(0);
-        
+
         LOG.info("Password cache cleared");
     }
-    
+
     /**
      * Get current cache size
      *
@@ -265,7 +265,7 @@ public class PasswordCache {
     public int size() {
         return cache.size();
     }
-    
+
     /**
      * Get maximum cache size
      *
@@ -274,7 +274,7 @@ public class PasswordCache {
     public int getMaxSize() {
         return maxSize;
     }
-    
+
     /**
      * Get cache TTL in seconds
      *
@@ -283,7 +283,7 @@ public class PasswordCache {
     public long getTtlSeconds() {
         return ttlMillis / 1000;
     }
-    
+
     /**
      * Get cache hit count
      *
@@ -292,7 +292,7 @@ public class PasswordCache {
     public long getHitCount() {
         return hitCount.get();
     }
-    
+
     /**
      * Get cache miss count
      *
@@ -301,7 +301,7 @@ public class PasswordCache {
     public long getMissCount() {
         return missCount.get();
     }
-    
+
     /**
      * Get cache hit rate
      *
@@ -312,7 +312,7 @@ public class PasswordCache {
         long total = hits + missCount.get();
         return total > 0 ? (double) hits / total : 0.0;
     }
-    
+
     /**
      * Get eviction count
      *
@@ -321,7 +321,7 @@ public class PasswordCache {
     public long getEvictionCount() {
         return evictionCount.get();
     }
-    
+
     /**
      * Get expired entry count
      *
@@ -330,7 +330,7 @@ public class PasswordCache {
     public long getExpiredCount() {
         return expiredCount.get();
     }
-    
+
     /**
      * Get cache statistics as formatted string
      *
@@ -343,13 +343,13 @@ public class PasswordCache {
             getEvictionCount(), getExpiredCount()
         );
     }
-    
+
     /**
      * Shutdown cache and cleanup resources
      */
     public void shutdown() {
         LOG.info("Shutting down password cache");
-        
+
         // Shutdown cleanup executor
         cleanupExecutor.shutdown();
         try {
@@ -360,13 +360,13 @@ public class PasswordCache {
             cleanupExecutor.shutdownNow();
             Thread.currentThread().interrupt();
         }
-        
+
         // Clear cache
         clear();
-        
+
         LOG.info("Password cache shutdown complete");
     }
-    
+
     /**
      * Periodic cleanup of expired entries
      */
@@ -375,7 +375,7 @@ public class PasswordCache {
             long startTime = System.currentTimeMillis();
             int initialSize = cache.size();
             int removedCount = 0;
-            
+
             // Remove expired entries
             cache.entrySet().removeIf(entry -> {
                 if (entry.getValue().isExpired(ttlMillis)) {
@@ -384,19 +384,19 @@ public class PasswordCache {
                 }
                 return false;
             });
-            
+
             removedCount = initialSize - cache.size();
             if (removedCount > 0) {
                 expiredCount.addAndGet(removedCount);
                 long duration = System.currentTimeMillis() - startTime;
                 LOG.debug("Cache cleanup removed {} expired entries in {}ms", removedCount, duration);
             }
-            
+
         } catch (Exception e) {
             LOG.warn("Error during cache cleanup", e);
         }
     }
-    
+
     /**
      * Evict oldest entry when cache is full (LRU eviction)
      */
@@ -404,18 +404,18 @@ public class PasswordCache {
         if (cache.isEmpty()) {
             return;
         }
-        
+
         // Find entry with oldest timestamp (LRU based on creation time)
         cache.entrySet().stream()
                 .min(Comparator.comparing(entry -> entry.getValue().timestamp))
                 .ifPresent(entry -> {
                     String username = entry.getKey();
                     CacheEntry cacheEntry = entry.getValue();
-                    
+
                     if (cache.remove(username, cacheEntry)) {
                         cacheEntry.clearSensitiveData();
                         evictionCount.incrementAndGet();
-                        
+
                         if (LOG.isDebugEnabled()) {
                             LOG.debug("Evicted oldest cache entry for user: {} (age: {}ms)",
                                     username, cacheEntry.getAge());

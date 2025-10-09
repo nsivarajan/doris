@@ -54,16 +54,16 @@ import java.util.Optional;
  */
 public class CachingSha2PasswordResolver implements PasswordResolver {
     private static final Logger LOG = LogManager.getLogger(CachingSha2PasswordResolver.class);
-    
+
     // Protocol constants for caching_sha2_password
     private static final byte FAST_AUTH_SUCCESS = 0x03;
     private static final byte FULL_AUTH_REQUIRED = 0x01;
     private static final byte RSA_KEY_REQUEST = 0x02;
-    
+
     // Cache and key management
     private final PasswordCache passwordCache;
     private final RSAKeyManager rsaKeyManager;
-    
+
     /**
      * Constructor with default cache and key manager
      */
@@ -73,11 +73,11 @@ public class CachingSha2PasswordResolver implements PasswordResolver {
             Config.sha2_password_cache_ttl_seconds
         );
         this.rsaKeyManager = RSAKeyManager.getInstance();
-        
+
         LOG.info("CachingSha2PasswordResolver initialized with cache size: {}, TTL: {}s",
                 Config.sha2_password_cache_size, Config.sha2_password_cache_ttl_seconds);
     }
-    
+
     /**
      * Constructor with custom cache and key manager (for testing)
      */
@@ -85,7 +85,7 @@ public class CachingSha2PasswordResolver implements PasswordResolver {
         this.passwordCache = passwordCache;
         this.rsaKeyManager = rsaKeyManager;
     }
-    
+
     @Override
     public Optional<Password> resolvePassword(ConnectContext context,
                                             MysqlChannel channel,
@@ -95,51 +95,51 @@ public class CachingSha2PasswordResolver implements PasswordResolver {
         if (LOG.isDebugEnabled()) {
             LOG.debug("Starting caching_sha2_password authentication for user: {}", authPacket.getUser());
         }
-        
+
         try {
             // Phase 1: Initial authentication attempt
             byte[] scrambledPassword = authPacket.getAuthResponse();
             byte[] nonce = handshakePacket.getAuthPluginData();
             String username = authPacket.getUser();
-            
+
             if (scrambledPassword == null || nonce == null || username == null) {
                 LOG.warn("Invalid authentication data: scrambled={}, nonce={}, user={}",
                         scrambledPassword != null, nonce != null, username != null);
                 ErrorReport.report(ErrorCode.ERR_ACCESS_DENIED_ERROR, username, "YES");
                 return Optional.empty();
             }
-            
+
             CachingSha2Password password = new CachingSha2Password(scrambledPassword, nonce);
-            
+
             // Phase 2: Check password cache (Fast Auth)
             if (passwordCache.isPasswordCached(username, scrambledPassword)) {
                 if (LOG.isDebugEnabled()) {
                     LOG.debug("Fast authentication successful for user: {}", username);
                 }
-                
+
                 password.transitionToFastAuthSuccess();
                 sendFastAuthSuccess(channel, serializer);
                 return Optional.of(password);
             }
-            
+
             // Phase 3: Full authentication required
             if (LOG.isDebugEnabled()) {
                 LOG.debug("Full authentication required for user: {}", username);
             }
-            
+
             password.transitionToFullAuth();
             sendFullAuthRequired(channel, serializer);
-            
+
             // Phase 4: Handle full authentication
             return handleFullAuthentication(context, channel, serializer, password, username);
-            
+
         } catch (Exception e) {
             LOG.error("Error during caching_sha2_password authentication", e);
             ErrorReport.report(ErrorCode.ERR_ACCESS_DENIED_ERROR, authPacket.getUser(), "YES");
             return Optional.empty();
         }
     }
-    
+
     /**
      * Handle full authentication process
      */
@@ -162,7 +162,7 @@ public class CachingSha2PasswordResolver implements PasswordResolver {
             return handleRSAPasswordTransmission(channel, serializer, password, username);
         }
     }
-    
+
     /**
      * Handle password transmission over SSL
      */
@@ -176,34 +176,34 @@ public class CachingSha2PasswordResolver implements PasswordResolver {
             LOG.warn("Failed to receive password packet over SSL for user: {}", username);
             return Optional.empty();
         }
-        
+
         // Read null-terminated password string
         byte[] passwordBytes = MysqlProto.readEofString(passwordPacket);
         String plainTextPassword = new String(passwordBytes, java.nio.charset.StandardCharsets.UTF_8);
-        
+
         // Remove null terminator if present
         if (plainTextPassword.endsWith("\0")) {
             plainTextPassword = plainTextPassword.substring(0, plainTextPassword.length() - 1);
         }
-        
+
         password.setPlainTextPassword(plainTextPassword);
         password.transitionToComplete();
-        
+
         // Cache the password hash for future fast authentication
         try {
             byte[] passwordHash = MysqlSha2Password.makeScrambledPasswordSha256(plainTextPassword);
             passwordCache.cachePassword(username, passwordHash);
-            
+
             if (LOG.isDebugEnabled()) {
                 LOG.debug("Cached password hash for user: {}", username);
             }
         } catch (Exception e) {
             LOG.warn("Failed to cache password hash for user: {}", username, e);
         }
-        
+
         return Optional.of(password);
     }
-    
+
     /**
      * Handle password transmission using RSA encryption
      */
@@ -211,7 +211,7 @@ public class CachingSha2PasswordResolver implements PasswordResolver {
                                                            MysqlSerializer serializer,
                                                            CachingSha2Password password,
                                                            String username) throws IOException {
-        
+
         try {
             // Send RSA public key to client
             RSAPublicKey publicKey = rsaKeyManager.getPublicKey();
@@ -220,25 +220,25 @@ public class CachingSha2PasswordResolver implements PasswordResolver {
                 ErrorReport.report(ErrorCode.ERR_ACCESS_DENIED_ERROR, username, "YES");
                 return Optional.empty();
             }
-            
+
             sendRSAPublicKey(serializer, channel, publicKey);
             password.transitionToRSAExchange(publicKey);
-            
+
             // Receive encrypted password from client
             ByteBuffer encryptedPasswordPacket = channel.fetchOnePacket();
             if (encryptedPasswordPacket == null) {
                 LOG.warn("Failed to receive encrypted password packet for user: {}", username);
                 return Optional.empty();
             }
-            
+
             byte[] encryptedPassword = MysqlProto.readEofString(encryptedPasswordPacket);
             password.transitionToPasswordEncrypted(encryptedPassword);
-            
+
             // Decrypt password using RSA private key
             String plainTextPassword = rsaKeyManager.decryptPassword(encryptedPassword);
             password.setPlainTextPassword(plainTextPassword);
             password.transitionToComplete();
-            
+
             // Cache the password hash for future fast authentication
             try {
                 byte[] passwordHash = MysqlSha2Password.makeScrambledPasswordSha256(plainTextPassword);
@@ -250,16 +250,16 @@ public class CachingSha2PasswordResolver implements PasswordResolver {
             } catch (Exception e) {
                 LOG.warn("Failed to cache password hash for user: {}", username, e);
             }
-            
+
             return Optional.of(password);
-            
+
         } catch (Exception e) {
             LOG.error("Error during RSA password transmission for user: {}", username, e);
             ErrorReport.report(ErrorCode.ERR_ACCESS_DENIED_ERROR, username, "YES");
             return Optional.empty();
         }
     }
-    
+
     /**
      * Send fast authentication success response
      */
@@ -268,7 +268,7 @@ public class CachingSha2PasswordResolver implements PasswordResolver {
         serializer.writeInt1(FAST_AUTH_SUCCESS);
         channel.sendAndFlush(serializer.toByteBuffer());
     }
-    
+
     /**
      * Send full authentication required response
      */
@@ -277,7 +277,7 @@ public class CachingSha2PasswordResolver implements PasswordResolver {
         serializer.writeInt1(FULL_AUTH_REQUIRED);
         channel.sendAndFlush(serializer.toByteBuffer());
     }
-    
+
     /**
      * Send RSA public key to client
      */
@@ -299,17 +299,18 @@ public class CachingSha2PasswordResolver implements PasswordResolver {
     /**
      * Get password cache for monitoring
      */
+    
     public PasswordCache getPasswordCache() {
         return passwordCache;
     }
-    
+
     /**
      * Get RSA key manager for monitoring
      */
     public RSAKeyManager getRSAKeyManager() {
         return rsaKeyManager;
     }
-    
+
     /**
      * Get resolver statistics
      */
@@ -318,7 +319,7 @@ public class CachingSha2PasswordResolver implements PasswordResolver {
                 passwordCache.getStatistics(),
                 rsaKeyManager.getStatistics());
     }
-    
+
     /**
      * Clear password cache (for administrative purposes)
      */
@@ -326,7 +327,7 @@ public class CachingSha2PasswordResolver implements PasswordResolver {
         passwordCache.clear();
         LOG.info("Password cache cleared by administrator");
     }
-    
+
     /**
      * Remove specific user from cache
      */
@@ -337,17 +338,17 @@ public class CachingSha2PasswordResolver implements PasswordResolver {
         }
         return removed;
     }
-    
+
     /**
      * Shutdown resolver and cleanup resources
      */
     public void shutdown() {
         LOG.info("Shutting down CachingSha2PasswordResolver");
-        
+
         if (passwordCache != null) {
             passwordCache.shutdown();
         }
-        
+
         // Note: RSAKeyManager is singleton and managed globally
         
         LOG.info("CachingSha2PasswordResolver shutdown complete");

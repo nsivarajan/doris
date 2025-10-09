@@ -52,7 +52,7 @@ import java.util.concurrent.atomic.AtomicLong;
  */
 public class AuthenticationStateMachine {
     private static final Logger LOG = LogManager.getLogger(AuthenticationStateMachine.class);
-    
+
     /**
      * Authentication states in the state machine
      */
@@ -67,7 +67,7 @@ public class AuthenticationStateMachine {
         AUTHENTICATION_FAILED,     // Authentication failed
         ERROR                      // Error state
     }
-    
+
     /**
      * Authentication events that trigger state transitions
      */
@@ -81,26 +81,26 @@ public class AuthenticationStateMachine {
         AUTHENTICATE_FAILURE,     // Authentication failed
         ERROR_OCCURRED           // Error occurred
     }
-    
+
     // State machine instance variables
     private State currentState;
     private final ConnectContext context;
     private final MysqlChannel channel;
     private final MysqlSerializer serializer;
-    
+
     // Authentication components
     private MysqlHandshakePacket handshakePacket;
     private MysqlAuthPacket authPacket;
     private String selectedAuthPlugin;
     private PasswordResolver passwordResolver;
     private Password resolvedPassword;
-    
+
     // Statistics and monitoring
     private final AtomicLong stateTransitions = new AtomicLong(0);
     private final Map<String, AtomicLong> pluginUsageStats = new HashMap<>();
     private long authStartTime;
     private long authEndTime;
-    
+
     /**
      * Constructor for authentication state machine
      */
@@ -110,24 +110,24 @@ public class AuthenticationStateMachine {
         this.serializer = serializer;
         this.currentState = State.INITIAL;
         this.authStartTime = System.currentTimeMillis();
-        
+
         // Initialize plugin usage statistics
         pluginUsageStats.put(MysqlEnhancedHandshakePacket.CACHING_SHA2_PASSWORD_PLUGIN, new AtomicLong(0));
         pluginUsageStats.put(MysqlEnhancedHandshakePacket.MYSQL_NATIVE_PASSWORD_PLUGIN, new AtomicLong(0));
-        
+
         if (LOG.isDebugEnabled()) {
             LOG.debug("Authentication state machine initialized for connection: {}",
                     context.getConnectionId());
         }
     }
-    
+
     /**
      * Process an authentication event and transition state
      */
     public synchronized boolean processEvent(Event event) throws IOException {
         State previousState = currentState;
         boolean success = false;
-        
+
         try {
             switch (currentState) {
                 case INITIAL:
@@ -170,10 +170,10 @@ public class AuthenticationStateMachine {
             transitionTo(State.ERROR);
             success = false;
         }
-        
+    
         return success;
     }
-    
+
     /**
      * Handle events in INITIAL state
      */
@@ -181,7 +181,7 @@ public class AuthenticationStateMachine {
         if (event == Event.SEND_HANDSHAKE) {
             // Create and send handshake packet
             int connectionId = context.getConnectionId();
-            
+
             if (Config.enable_caching_sha2_password) {
                 handshakePacket = new MysqlEnhancedHandshakePacket(connectionId);
                 selectedAuthPlugin = MysqlEnhancedHandshakePacket.CACHING_SHA2_PASSWORD_PLUGIN;
@@ -189,19 +189,19 @@ public class AuthenticationStateMachine {
                 handshakePacket = new MysqlHandshakePacket(connectionId);
                 selectedAuthPlugin = MysqlHandshakePacket.AUTH_PLUGIN_NAME;
             }
-            
+
             // Send handshake packet
             serializer.reset();
             handshakePacket.writeTo(serializer);
             channel.sendAndFlush(serializer.toByteBuffer());
-            
+
             transitionTo(State.HANDSHAKE_SENT);
             return true;
         }
-        
+
         return false;
     }
-    
+
     /**
      * Handle events in HANDSHAKE_SENT state
      */
@@ -212,10 +212,10 @@ public class AuthenticationStateMachine {
             transitionTo(State.AUTH_PACKET_RECEIVED);
             return true;
         }
-        
+
         return false;
     }
-    
+
     /**
      * Handle events in AUTH_PACKET_RECEIVED state
      */
@@ -227,10 +227,10 @@ public class AuthenticationStateMachine {
             // Direct authentication without plugin switch
             return startAuthentication();
         }
-        
+
         return false;
     }
-    
+
     /**
      * Handle events in PLUGIN_SWITCH_REQUIRED state
      */
@@ -240,14 +240,14 @@ public class AuthenticationStateMachine {
             serializer.reset();
             handshakePacket.buildAuthSwitchRequest(serializer);
             channel.sendAndFlush(serializer.toByteBuffer());
-            
+
             transitionTo(State.PLUGIN_SWITCH_SENT);
             return true;
         }
-        
+
         return false;
     }
-    
+
     /**
      * Handle events in PLUGIN_SWITCH_SENT state
      */
@@ -256,10 +256,10 @@ public class AuthenticationStateMachine {
             // Plugin response received, start authentication
             return startAuthentication();
         }
-        
+
         return false;
     }
-    
+
     /**
      * Handle events in AUTHENTICATING state
      */
@@ -267,41 +267,41 @@ public class AuthenticationStateMachine {
         if (event == Event.AUTHENTICATE_SUCCESS) {
             transitionTo(State.AUTHENTICATED);
             authEndTime = System.currentTimeMillis();
-            
+
             // Update statistics
             pluginUsageStats.get(selectedAuthPlugin).incrementAndGet();
-            
+
             if (LOG.isInfoEnabled()) {
                 LOG.info("Authentication successful for user: {} using plugin: {} (duration: {}ms)",
                         authPacket != null ? authPacket.getUser() : "unknown",
                         selectedAuthPlugin,
                         authEndTime - authStartTime);
             }
-            
+
             return true;
         } else if (event == Event.AUTHENTICATE_FAILURE) {
             transitionTo(State.AUTHENTICATION_FAILED);
             authEndTime = System.currentTimeMillis();
-            
+
             if (LOG.isWarnEnabled()) {
                 LOG.warn("Authentication failed for user: {} using plugin: {} (duration: {}ms)",
                         authPacket != null ? authPacket.getUser() : "unknown",
                         selectedAuthPlugin,
                         authEndTime - authStartTime);
             }
-            
+
             return false;
         }
-        
+
         return false;
     }
-    
+
     /**
      * Start the authentication process
      */
     private boolean startAuthentication() throws IOException {
         transitionTo(State.AUTHENTICATING);
-        
+
         // Create appropriate password resolver based on selected plugin
         if (MysqlEnhancedHandshakePacket.CACHING_SHA2_PASSWORD_PLUGIN.equals(selectedAuthPlugin)) {
             passwordResolver = new CachingSha2PasswordResolver();
@@ -309,11 +309,11 @@ public class AuthenticationStateMachine {
             // For mysql_native_password, use NativePasswordResolver
             passwordResolver = new NativePasswordResolver();
         }
-        
+
         // Resolve password using the appropriate resolver
         Optional<Password> passwordOpt = passwordResolver.resolvePassword(
                 context, channel, serializer, authPacket, handshakePacket);
-        
+
         if (passwordOpt.isPresent()) {
             resolvedPassword = passwordOpt.get();
             return processEvent(Event.AUTHENTICATE_SUCCESS);
@@ -321,7 +321,7 @@ public class AuthenticationStateMachine {
             return processEvent(Event.AUTHENTICATE_FAILURE);
         }
     }
-    
+
     /**
      * Transition to a new state
      */
@@ -329,19 +329,19 @@ public class AuthenticationStateMachine {
         State oldState = currentState;
         currentState = newState;
         stateTransitions.incrementAndGet();
-        
+
         if (LOG.isDebugEnabled()) {
             LOG.debug("State transition: {} -> {}", oldState, newState);
         }
     }
-    
+
     /**
      * Set the authentication packet received from client
      */
     public void setAuthPacket(MysqlAuthPacket authPacket) {
         this.authPacket = authPacket;
     }
-    
+
     /**
      * Check if authentication plugin matches
      */
@@ -349,17 +349,17 @@ public class AuthenticationStateMachine {
         if (handshakePacket == null) {
             return false;
         }
-        
+
         return handshakePacket.checkAuthPluginSameAsDoris(clientAuthPlugin);
     }
-    
+
     /**
      * Get current authentication state
      */
     public State getCurrentState() {
         return currentState;
     }
-    
+
     /**
      * Check if authentication is complete (success or failure)
      */
@@ -368,28 +368,28 @@ public class AuthenticationStateMachine {
                 || currentState == State.AUTHENTICATION_FAILED
                 || currentState == State.ERROR;
     }
-    
+
     /**
      * Check if authentication was successful
      */
     public boolean isAuthenticationSuccessful() {
         return currentState == State.AUTHENTICATED;
     }
-    
+
     /**
      * Get the resolved password (only available after successful authentication)
      */
     public Optional<Password> getResolvedPassword() {
         return Optional.ofNullable(resolvedPassword);
     }
-    
+
     /**
      * Get the selected authentication plugin
      */
     public String getSelectedAuthPlugin() {
         return selectedAuthPlugin;
     }
-    
+
     /**
      * Get authentication duration in milliseconds
      */
@@ -400,7 +400,7 @@ public class AuthenticationStateMachine {
             return System.currentTimeMillis() - authStartTime;
         }
     }
-    
+
     /**
      * Get statistics for monitoring
      */
@@ -411,7 +411,7 @@ public class AuthenticationStateMachine {
                 pluginUsageStats.get(MysqlEnhancedHandshakePacket.CACHING_SHA2_PASSWORD_PLUGIN).get(),
                 pluginUsageStats.get(MysqlEnhancedHandshakePacket.MYSQL_NATIVE_PASSWORD_PLUGIN).get());
     }
-    
+
     /**
      * Reset the state machine for reuse (if needed)
      */
@@ -424,12 +424,12 @@ public class AuthenticationStateMachine {
         resolvedPassword = null;
         authStartTime = System.currentTimeMillis();
         authEndTime = 0;
-        
+
         if (LOG.isDebugEnabled()) {
             LOG.debug("Authentication state machine reset");
         }
     }
-    
+
     /**
      * Cleanup resources
      */
@@ -437,7 +437,7 @@ public class AuthenticationStateMachine {
         if (resolvedPassword != null) {
             resolvedPassword.clearPassword();
         }
-        
+
         if (LOG.isDebugEnabled()) {
             LOG.debug("Authentication state machine cleanup completed");
         }

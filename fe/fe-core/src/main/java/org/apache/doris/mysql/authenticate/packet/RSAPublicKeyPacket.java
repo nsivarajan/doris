@@ -19,28 +19,28 @@ package org.apache.doris.mysql.authenticate.packet;
 
 import org.apache.doris.mysql.MysqlPacket;
 import org.apache.doris.mysql.MysqlSerializer;
-import org.apache.logging.log4j.LogManager;
 
+import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 
 import java.security.interfaces.RSAPublicKey;
 
 /**
  * MySQL RSA public key packet for caching_sha2_password authentication.
- * 
+ *
  * This packet is sent by the server to provide the RSA public key to the client
  * for encrypting the password when SSL is not available. The client uses this
  * public key to encrypt the password before sending it back to the server.
- * 
+ *
  * Packet format:
  * - Variable length: PEM-formatted RSA public key string (null-terminated)
  */
 public class RSAPublicKeyPacket extends MysqlPacket {
     private static final Logger LOG = LogManager.getLogger(RSAPublicKeyPacket.class);
-    
+
     private final String pemPublicKey;
     private final RSAPublicKey publicKey;
-    
+
     /**
      * Constructor with PEM-formatted public key string
      */
@@ -48,7 +48,7 @@ public class RSAPublicKeyPacket extends MysqlPacket {
         this.pemPublicKey = pemPublicKey;
         this.publicKey = null;
     }
-    
+
     /**
      * Constructor with RSAPublicKey object (will be converted to PEM format)
      */
@@ -56,21 +56,21 @@ public class RSAPublicKeyPacket extends MysqlPacket {
         this.publicKey = publicKey;
         this.pemPublicKey = pemPublicKey;
     }
-    
+
     /**
      * Get the PEM-formatted public key
      */
     public String getPemPublicKey() {
         return pemPublicKey;
     }
-    
+
     /**
      * Get the RSA public key object
      */
     public RSAPublicKey getPublicKey() {
         return publicKey;
     }
-    
+
     /**
      * Get the key size in bits
      */
@@ -80,7 +80,7 @@ public class RSAPublicKeyPacket extends MysqlPacket {
         }
         return -1; // Unknown key size
     }
-    
+
     @Override
     public void writeTo(MysqlSerializer serializer) {
         if (pemPublicKey == null || pemPublicKey.isEmpty()) {
@@ -95,7 +95,7 @@ public class RSAPublicKeyPacket extends MysqlPacket {
                     getKeySize(), pemPublicKey.length());
         }
     }
-    
+
     /**
      * Validate the PEM public key format
      */
@@ -103,13 +103,13 @@ public class RSAPublicKeyPacket extends MysqlPacket {
         if (pemPublicKey == null || pemPublicKey.isEmpty()) {
             return false;
         }
-        
-        
+
+
         // Basic PEM format validation
-        return pemPublicKey.contains("-----BEGIN PUBLIC KEY-----") && 
-               pemPublicKey.contains("-----END PUBLIC KEY-----");
+        return pemPublicKey.contains("-----BEGIN PUBLIC KEY-----")
+               && pemPublicKey.contains("-----END PUBLIC KEY-----");
     }
-    
+
     /**
      * Get key information for logging (without exposing the actual key)
      */
@@ -122,13 +122,13 @@ public class RSAPublicKeyPacket extends MysqlPacket {
             return "INVALID";
         }
     }
-    
+
     @Override
     public String toString() {
         return String.format("RSAPublicKeyPacket[keyInfo=%s, valid=%s]",
                 getKeyInfo(), isValidPemFormat());
     }
-    
+
     /**
      * Factory method to create packet from RSA public key
      */
@@ -136,10 +136,10 @@ public class RSAPublicKeyPacket extends MysqlPacket {
         if (publicKey == null || pemKey == null) {
             throw new IllegalArgumentException("RSA public key and PEM string cannot be null");
         }
-        
+
         return new RSAPublicKeyPacket(publicKey, pemKey);
     }
-    
+
     /**
      * Factory method to create packet from PEM string
      */
@@ -150,7 +150,7 @@ public class RSAPublicKeyPacket extends MysqlPacket {
         
         return new RSAPublicKeyPacket(pemKey);
     }
-    
+
     /**
      * Get packet size estimation for buffer allocation
      */

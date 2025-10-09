@@ -29,37 +29,37 @@ import java.util.Arrays;
  * (RSA encryption or SSL).
  */
 public class CachingSha2Password implements Password {
-    
+
     /**
      * Authentication phases for caching_sha2_password protocol
      */
     public enum AuthPhase {
         /** Initial authentication attempt with scrambled password */
         INITIAL_AUTH,
-        
+
         /** Fast authentication successful (password found in cache) */
         FAST_AUTH_SUCCESS,
-        
+
         /** Full authentication required (password not in cache) */
         FULL_AUTH_REQUIRED,
-        
+
         /** RSA key exchange phase (no SSL available) */
         RSA_KEY_EXCHANGE,
-        
+
         /** Password encrypted and transmitted */
         PASSWORD_ENCRYPTED,
-        
+
         /** Authentication process complete */
         AUTH_COMPLETE
     }
-    
+
     private final byte[] scrambledPassword;
     private final byte[] nonce;
     private AuthPhase currentPhase;
     private RSAPublicKey serverPublicKey;
     private byte[] encryptedPassword;
     private String plainTextPassword;
-    
+
     /**
      * Constructor for initial authentication phase
      *
@@ -71,7 +71,7 @@ public class CachingSha2Password implements Password {
         this.nonce = nonce != null ? nonce.clone() : new byte[0];
         this.currentPhase = AuthPhase.INITIAL_AUTH;
     }
-    
+
     /**
      * Constructor for full authentication with plain text password
      *
@@ -83,7 +83,7 @@ public class CachingSha2Password implements Password {
         this(scrambledPassword, nonce);
         this.plainTextPassword = plainTextPassword;
     }
-    
+
     /**
      * Get the scrambled password received from client
      *
@@ -92,7 +92,7 @@ public class CachingSha2Password implements Password {
     public byte[] getScrambledPassword() {
         return scrambledPassword.clone();
     }
-    
+
     /**
      * Get the nonce (random string) from server handshake
      *
@@ -101,7 +101,7 @@ public class CachingSha2Password implements Password {
     public byte[] getNonce() {
         return nonce.clone();
     }
-    
+
     /**
      * Get current authentication phase
      *
@@ -110,21 +110,21 @@ public class CachingSha2Password implements Password {
     public AuthPhase getCurrentPhase() {
         return currentPhase;
     }
-    
+
     /**
      * Transition to fast authentication success phase
      */
     public void transitionToFastAuthSuccess() {
         this.currentPhase = AuthPhase.FAST_AUTH_SUCCESS;
     }
-    
+
     /**
      * Transition to full authentication required phase
      */
     public void transitionToFullAuth() {
         this.currentPhase = AuthPhase.FULL_AUTH_REQUIRED;
     }
-    
+
     /**
      * Transition to RSA key exchange phase
      *
@@ -134,7 +134,7 @@ public class CachingSha2Password implements Password {
         this.serverPublicKey = publicKey;
         this.currentPhase = AuthPhase.RSA_KEY_EXCHANGE;
     }
-    
+
     /**
      * Transition to password encrypted phase
      *
@@ -144,14 +144,14 @@ public class CachingSha2Password implements Password {
         this.encryptedPassword = encryptedPassword != null ? encryptedPassword.clone() : new byte[0];
         this.currentPhase = AuthPhase.PASSWORD_ENCRYPTED;
     }
-    
+
     /**
      * Transition to authentication complete phase
      */
     public void transitionToComplete() {
         this.currentPhase = AuthPhase.AUTH_COMPLETE;
     }
-    
+
     /**
      * Check if authentication is in initial phase
      *
@@ -160,7 +160,7 @@ public class CachingSha2Password implements Password {
     public boolean isInitialAuth() {
         return currentPhase == AuthPhase.INITIAL_AUTH;
     }
-    
+
     /**
      * Check if fast authentication was successful
      *
@@ -169,7 +169,7 @@ public class CachingSha2Password implements Password {
     public boolean isFastAuthSuccess() {
         return currentPhase == AuthPhase.FAST_AUTH_SUCCESS;
     }
-    
+
     /**
      * Check if full authentication is required
      *
@@ -178,7 +178,7 @@ public class CachingSha2Password implements Password {
     public boolean isFullAuthRequired() {
         return currentPhase == AuthPhase.FULL_AUTH_REQUIRED;
     }
-    
+
     /**
      * Check if RSA key exchange is required
      *
@@ -187,7 +187,7 @@ public class CachingSha2Password implements Password {
     public boolean isRSAExchangeRequired() {
         return currentPhase == AuthPhase.RSA_KEY_EXCHANGE;
     }
-    
+
     /**
      * Check if password has been encrypted
      *
@@ -196,7 +196,7 @@ public class CachingSha2Password implements Password {
     public boolean isPasswordEncrypted() {
         return currentPhase == AuthPhase.PASSWORD_ENCRYPTED;
     }
-    
+
     /**
      * Check if authentication is complete
      *
@@ -205,7 +205,7 @@ public class CachingSha2Password implements Password {
     public boolean isAuthComplete() {
         return currentPhase == AuthPhase.AUTH_COMPLETE;
     }
-    
+
     /**
      * Get RSA public key for encryption
      *
@@ -214,7 +214,7 @@ public class CachingSha2Password implements Password {
     public RSAPublicKey getServerPublicKey() {
         return serverPublicKey;
     }
-    
+
     /**
      * Get encrypted password bytes
      *
@@ -223,7 +223,7 @@ public class CachingSha2Password implements Password {
     public byte[] getEncryptedPassword() {
         return encryptedPassword != null ? encryptedPassword.clone() : new byte[0];
     }
-    
+
     /**
      * Get plain text password for full authentication
      *
@@ -232,7 +232,7 @@ public class CachingSha2Password implements Password {
     public String getPlainTextPassword() {
         return plainTextPassword;
     }
-    
+
     /**
      * Set plain text password for full authentication
      *
@@ -241,7 +241,7 @@ public class CachingSha2Password implements Password {
     public void setPlainTextPassword(String plainTextPassword) {
         this.plainTextPassword = plainTextPassword;
     }
-    
+
     /**
      * Validate that the password is in a consistent state
      *
@@ -265,7 +265,7 @@ public class CachingSha2Password implements Password {
                 return false;
         }
     }
-    
+
     /**
      * Clear sensitive data from memory
      */
@@ -283,29 +283,29 @@ public class CachingSha2Password implements Password {
             plainTextPassword = null;
         }
     }
-    
+
     @Override
     public String getAuthPluginName() {
         return "caching_sha2_password";
     }
-    
+
     @Override
     public boolean isAuthenticated() {
         return currentPhase == AuthPhase.FAST_AUTH_SUCCESS
                 || currentPhase == AuthPhase.AUTH_COMPLETE;
     }
-    
+
     @Override
     public void clearPassword() {
         clearSensitiveData();
     }
-    
+
     @Override
     public String toSafeString() {
         return String.format("CachingSha2Password{phase=%s, authenticated=%s}",
                 currentPhase, isAuthenticated());
     }
-    
+
     @Override
     public String toString() {
         return String.format("CachingSha2Password{phase=%s, hasScrambled=%s, hasNonce=%s, hasPublicKey=%s}",
@@ -314,7 +314,7 @@ public class CachingSha2Password implements Password {
                 nonce.length > 0,
                 serverPublicKey != null);
     }
-    
+
     @Override
     public boolean equals(Object obj) {
         if (this == obj) {
@@ -323,13 +323,13 @@ public class CachingSha2Password implements Password {
         if (obj == null || getClass() != obj.getClass()) {
             return false;
         }
-        
+
         CachingSha2Password that = (CachingSha2Password) obj;
         return currentPhase == that.currentPhase
                 && Arrays.equals(scrambledPassword, that.scrambledPassword)
                 && Arrays.equals(nonce, that.nonce);
     }
-    
+
     @Override
     public int hashCode() {
         int result = currentPhase != null ? currentPhase.hashCode() : 0;

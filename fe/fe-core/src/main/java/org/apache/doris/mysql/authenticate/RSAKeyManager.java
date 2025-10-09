@@ -33,7 +33,7 @@ import java.util.concurrent.locks.ReentrantReadWriteLock;
 
 /**
  * RSA key manager for caching_sha2_password authentication.
- * 
+ *
  * This class manages RSA key pairs used for secure password transmission
  * when SSL is not available. It provides:
  * - Automatic key generation and rotation
@@ -43,59 +43,59 @@ import java.util.concurrent.locks.ReentrantReadWriteLock;
  */
 public class RSAKeyManager {
     private static final Logger LOG = LogManager.getLogger(RSAKeyManager.class);
-    
+
     // Key rotation configuration
     private static final long DEFAULT_KEY_ROTATION_HOURS = 24; // Rotate keys daily
     private static final long MIN_KEY_ROTATION_HOURS = 1;
     private static final long MAX_KEY_ROTATION_HOURS = 168; // 1 week
-    
+
     // Thread configuration
     private static final String KEY_ROTATION_THREAD_NAME = "rsa-key-rotation";
-    
+
     // Current key pair
     private volatile RSAPublicKey currentPublicKey;
     private volatile RSAPrivateKey currentPrivateKey;
     private volatile long keyGenerationTime;
-    
+
     // Key rotation
     private final ScheduledExecutorService keyRotationExecutor;
     private final long keyRotationIntervalHours;
     private final int keySize;
-    
+
     // Thread safety
     private final ReentrantReadWriteLock keyLock = new ReentrantReadWriteLock();
-    
+
     // Singleton instance
     private static volatile RSAKeyManager instance;
     private static final Object instanceLock = new Object();
-    
+
     /**
      * Private constructor for singleton pattern
      */
     private RSAKeyManager() {
         this.keySize = Config.sha2_password_rsa_key_length;
         this.keyRotationIntervalHours = DEFAULT_KEY_ROTATION_HOURS;
-        
+
         // Create key rotation executor with daemon thread
         this.keyRotationExecutor = Executors.newSingleThreadScheduledExecutor(r -> {
             Thread t = new Thread(r, KEY_ROTATION_THREAD_NAME);
             t.setDaemon(true);
             return t;
         });
-        
+
         // Generate initial key pair
         generateNewKeyPair();
-        
+
         // Schedule periodic key rotation
         scheduleKeyRotation();
-        
+
         LOG.info("RSA key manager initialized: keySize={}, rotationInterval={}h",
                 keySize, keyRotationIntervalHours);
     }
-    
+
     /**
      * Get singleton instance of RSA key manager
-     * 
+     *
      * @return RSA key manager instance
      */
     public static RSAKeyManager getInstance() {
@@ -108,10 +108,10 @@ public class RSAKeyManager {
         }
         return instance;
     }
-    
+
     /**
      * Get current RSA public key for encryption
-     * 
+     *
      * @return Current RSA public key
      */
     public RSAPublicKey getPublicKey() {
@@ -122,10 +122,10 @@ public class RSAKeyManager {
             keyLock.readLock().unlock();
         }
     }
-    
+
     /**
      * Get current RSA private key for decryption
-     * 
+     *
      * @return Current RSA private key
      */
     public RSAPrivateKey getPrivateKey() {
@@ -136,10 +136,10 @@ public class RSAKeyManager {
             keyLock.readLock().unlock();
         }
     }
-    
+
     /**
      * Get public key in PEM format for transmission to client
-     * 
+     *
      * @return PEM-formatted public key
      */
     public String getPublicKeyPEM() {
@@ -148,7 +148,7 @@ public class RSAKeyManager {
             LOG.error("No RSA public key available");
             return "";
         }
-        
+
         try {
             return MysqlSha2Password.convertPublicKeyToPEM(publicKey);
         } catch (Exception e) {
@@ -156,10 +156,10 @@ public class RSAKeyManager {
             return "";
         }
     }
-    
+
     /**
      * Get key generation time
-     * 
+     *
      * @return Timestamp when current key was generated
      */
     public long getKeyGenerationTime() {
@@ -170,48 +170,48 @@ public class RSAKeyManager {
             keyLock.readLock().unlock();
         }
     }
-    
+
     /**
      * Get key age in milliseconds
-     * 
+     *
      * @return Age of current key in milliseconds
      */
     public long getKeyAge() {
         return System.currentTimeMillis() - getKeyGenerationTime();
     }
-    
+
     /**
      * Get key size in bits
-     * 
+     *
      * @return RSA key size in bits
      */
     public int getKeySize() {
         return keySize;
     }
-    
+
     /**
      * Check if key rotation is due
-     * 
+     *
      * @return true if key should be rotated
      */
     public boolean isKeyRotationDue() {
         long keyAgeHours = getKeyAge() / (1000 * 60 * 60);
         return keyAgeHours >= keyRotationIntervalHours;
     }
-    
+
     /**
      * Manually trigger key rotation
-     * 
+     *
      * @return true if key rotation was successful
      */
     public boolean rotateKeys() {
         LOG.info("Manually triggering RSA key rotation");
         return generateNewKeyPair();
     }
-    
+
     /**
      * Encrypt password using current public key
-     * 
+     *
      * @param password Plain text password to encrypt
      * @return Encrypted password bytes
      * @throws Exception if encryption fails
@@ -221,10 +221,10 @@ public class RSAKeyManager {
         if (publicKey == null) {
             throw new IllegalStateException("No RSA public key available for encryption");
         }
-        
+
         return MysqlSha2Password.encryptPasswordWithRSA(password, publicKey);
     }
-    
+
     /**
      * Decrypt password using current private key
      * 
@@ -237,16 +237,16 @@ public class RSAKeyManager {
         if (privateKey == null) {
             throw new IllegalStateException("No RSA private key available for decryption");
         }
-        
+
         return MysqlSha2Password.decryptPasswordWithRSA(encryptedPassword, privateKey);
     }
-    
+
     /**
      * Shutdown key manager and cleanup resources
      */
     public void shutdown() {
         LOG.info("Shutting down RSA key manager");
-        
+
         // Shutdown key rotation executor
         keyRotationExecutor.shutdown();
         try {
@@ -257,7 +257,7 @@ public class RSAKeyManager {
             keyRotationExecutor.shutdownNow();
             Thread.currentThread().interrupt();
         }
-        
+
         // Clear keys
         keyLock.writeLock().lock();
         try {
@@ -270,7 +270,7 @@ public class RSAKeyManager {
         
         LOG.info("RSA key manager shutdown complete");
     }
-    
+
     /**
      * Generate new RSA key pair
      * 
@@ -280,15 +280,15 @@ public class RSAKeyManager {
         try {
             LOG.info("Generating new RSA key pair (size: {} bits)", keySize);
             long startTime = System.currentTimeMillis();
-            
             KeyPair keyPair = MysqlSha2Password.generateRSAKeyPair(keySize);
-            
+
+
             keyLock.writeLock().lock();
             try {
                 // Clear old keys (if any)
                 currentPublicKey = null;
                 currentPrivateKey = null;
-                
+
                 // Set new keys
                 currentPublicKey = (RSAPublicKey) keyPair.getPublic();
                 currentPrivateKey = (RSAPrivateKey) keyPair.getPrivate();
@@ -296,18 +296,18 @@ public class RSAKeyManager {
             } finally {
                 keyLock.writeLock().unlock();
             }
-            
             long duration = System.currentTimeMillis() - startTime;
             LOG.info("RSA key pair generated successfully in {}ms", duration);
-            
+
             return true;
-            
+
+ 
         } catch (Exception e) {
             LOG.error("Failed to generate RSA key pair", e);
             return false;
         }
     }
-    
+
     /**
      * Schedule periodic key rotation
      */
@@ -318,31 +318,31 @@ public class RSAKeyManager {
                 keyRotationIntervalHours,
                 TimeUnit.HOURS
         );
-        
+
         LOG.info("Scheduled RSA key rotation every {} hours", keyRotationIntervalHours);
     }
-    
+
     /**
      * Perform scheduled key rotation
      */
     private void performScheduledKeyRotation() {
         try {
             LOG.info("Performing scheduled RSA key rotation");
-            
+
             if (generateNewKeyPair()) {
                 LOG.info("Scheduled RSA key rotation completed successfully");
             } else {
                 LOG.error("Scheduled RSA key rotation failed");
             }
-            
+
         } catch (Exception e) {
             LOG.error("Error during scheduled RSA key rotation", e);
         }
     }
-    
+
     /**
      * Get key manager statistics
-     * 
+     *
      * @return Key manager statistics as formatted string
      */
     public String getStatistics() {
@@ -352,7 +352,7 @@ public class RSAKeyManager {
             keySize, keyAgeHours, keyRotationIntervalHours, isKeyRotationDue()
         );
     }
-    
+
     /**
      * Validate key manager configuration
      *

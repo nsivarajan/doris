@@ -29,21 +29,21 @@ package org.apache.doris.mysql.authenticate.password;
  * thread safety and prevent tampering with authentication results.
  */
 public interface Password {
-    
+
     /**
      * Get the authentication plugin name that processed this password.
      *
      * @return The name of the authentication plugin (e.g., "caching_sha2_password", "mysql_native_password")
      */
     String getAuthPluginName();
-    
+
     /**
      * Check if the password authentication was successful.
      *
      * @return true if authentication succeeded, false otherwise
      */
     boolean isAuthenticated();
-    
+
     /**
      * Get the plain text password if available.
      *
@@ -54,21 +54,21 @@ public interface Password {
      * @return The plain text password, or null if not available or already cleared
      */
     String getPlainTextPassword();
-    
+
     /**
      * Get the scrambled/hashed password data.
      *
      * @return The scrambled password bytes, or null if not available
      */
     byte[] getScrambledPassword();
-    
+
     /**
      * Get the nonce/salt used for password scrambling.
      *
      * @return The nonce bytes used in authentication, or null if not applicable
      */
     byte[] getNonce();
-    
+
     /**
      * Clear sensitive password data from memory.
      *
@@ -77,7 +77,7 @@ public interface Password {
      * After calling this method, getPlainTextPassword() should return null.
      */
     void clearPassword();
-    
+
     /**
      * Get a string representation suitable for logging (without sensitive data).
      *
