@@ -74,6 +74,8 @@ else
 fi
 
 BUILD_AZURE="ON"
+BUILD_OSS="ON"
+BUILD_STS="ON"
 
 while true; do
     case "$1" in
@@ -1882,6 +1884,60 @@ build_azure() {
     fi
 }
 
+# AliCloud OSS C++ SDK
+build_oss() {
+    if [[ "${BUILD_OSS}" == "OFF" ]]; then
+        echo "Skip build OSS SDK"
+    else
+        check_if_source_exist "${OSS_SOURCE}"
+        cd "${TP_SOURCE_DIR}/${OSS_SOURCE}"
+
+        rm -rf "${BUILD_DIR}"
+        mkdir -p "${BUILD_DIR}"
+        cd "${BUILD_DIR}"
+
+        "${CMAKE_CMD}" -G "${GENERATOR}" \
+            -DCMAKE_INSTALL_PREFIX="${TP_INSTALL_DIR}" \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DBUILD_SHARED_LIBS=OFF \
+            -DBUILD_SAMPLE=OFF \
+            -DBUILD_TESTS=OFF \
+            ..
+
+        "${BUILD_SYSTEM}" -j "${PARALLEL}"
+        "${BUILD_SYSTEM}" install
+    fi
+}
+
+# AliCloud STS C++ SDK (API version 2015-04-01)
+# Required for OSS AssumeRole and RRSA support
+build_sts() {
+    if [[ "${BUILD_STS}" == "OFF" ]]; then
+        echo "Skip build STS SDK"
+    else
+        check_if_source_exist "${STS_SOURCE}"
+        cd "${TP_SOURCE_DIR}/${STS_SOURCE}"
+
+        # STS SDK has vendored dependencies in external/
+        # Build static library for Doris
+        rm -rf "${BUILD_DIR}"
+        mkdir -p "${BUILD_DIR}"
+        cd "${BUILD_DIR}"
+
+        "${CMAKE_CMD}" -G "${GENERATOR}" \
+            -DCMAKE_INSTALL_PREFIX="${TP_INSTALL_DIR}" \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_POSITION_INDEPENDENT_CODE=ON \
+            -DBUILD_SHARED_LIBS=OFF \
+            -DCMAKE_PREFIX_PATH="${TP_INSTALL_DIR}" \
+            -DBoost_USE_STATIC_LIBS=ON \
+            ..
+
+        "${BUILD_SYSTEM}" -j "${PARALLEL}"
+        "${BUILD_SYSTEM}" install
+    fi
+}
+
 # dragonbox
 build_dragonbox() {
     check_if_source_exist "${DRAGONBOX_SOURCE}"
@@ -2074,6 +2130,8 @@ if [[ "${#packages[@]}" -eq 0 ]]; then
         ali_sdk
         base64
         azure
+        oss
+        sts
         dragonbox
         brotli
         icu

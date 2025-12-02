@@ -69,6 +69,8 @@ Usage: $0 <options>
     DISABLE_BE_JAVA_EXTENSIONS  If set DISABLE_BE_JAVA_EXTENSIONS=ON, we will do not build binary with java-udf,hadoop-hudi-scanner,jdbc-scanner and so on Default is OFF.
     DISABLE_JAVA_CHECK_STYLE    If set DISABLE_JAVA_CHECK_STYLE=ON, it will skip style check of java code in FE.
     DISABLE_BUILD_AZURE         If set DISABLE_BUILD_AZURE=ON, it will not build azure into BE.
+    DISABLE_BUILD_OSS           If set DISABLE_BUILD_OSS=ON, it will not build OSS into BE.
+
   Eg.
     $0                                      build all
     $0 --be                                 build Backend
@@ -168,6 +170,8 @@ PARAMETER_COUNT="$#"
 PARAMETER_FLAG=0
 DENABLE_CLANG_COVERAGE='OFF'
 BUILD_AZURE='ON'
+BUILD_OSS='ON'
+BUILD_STS='ON'
 BUILD_UI=1
 if [[ "$#" == 1 ]]; then
     # default
@@ -447,6 +451,14 @@ if [[ -n "${DISABLE_BUILD_AZURE}" ]]; then
     BUILD_AZURE='OFF'
 fi
 
+if [[ -n "${DISABLE_BUILD_OSS}" ]]; then
+    BUILD_OSS='OFF'
+fi
+
+if [[ -n "${DISABLE_BUILD_STS}" ]]; then
+    BUILD_STS='OFF'
+fi
+
 if [[ -z "${ENABLE_INJECTION_POINT}" ]]; then
     ENABLE_INJECTION_POINT='OFF'
 fi
@@ -629,7 +641,8 @@ if [[ "${BUILD_BE}" -eq 1 ]]; then
         -DENABLE_CLANG_COVERAGE="${DENABLE_CLANG_COVERAGE}" \
         -DDORIS_JAVA_HOME="${JAVA_HOME}" \
         -DBUILD_AZURE="${BUILD_AZURE}" \
-        -DWITH_TDE_DIR="${WITH_TDE_DIR}" \
+        -DBUILD_OSS="${BUILD_OSS}" \
+        -DBUILD_STS="${BUILD_STS}" \
         "${DORIS_HOME}/be"
 
     if [[ "${OUTPUT_BE_BINARY}" -eq 1 ]]; then
@@ -671,6 +684,8 @@ if [[ "${BUILD_CLOUD}" -eq 1 ]]; then
         -DUSE_JEMALLOC="${USE_JEMALLOC}" \
         -DEXTRA_CXX_FLAGS="${EXTRA_CXX_FLAGS}" \
         -DBUILD_AZURE="${BUILD_AZURE}" \
+        -DBUILD_OSS="${BUILD_OSS}" \
+        -DBUILD_STS="${BUILD_STS}" \
         -DBUILD_CHECK_META="${BUILD_CHECK_META:-OFF}" \
         "${DORIS_HOME}/cloud/"
     "${BUILD_SYSTEM}" -j "${PARALLEL}"

@@ -35,6 +35,14 @@
 #include <azure/core/diagnostics/logger.hpp>
 #include <azure/storage/blobs/blob_container_client.hpp>
 #endif
+#ifdef USE_OSS
+#include "io/fs/oss_obj_storage_client.h"
+#include "util/oss_util.h"
+#include "util/oss_credential_provider.h"
+#include <alibabacloud/oss/OssClient.h>
+#include <alibabacloud/oss/auth/Credentials.h>
+#include <alibabacloud/oss/auth/CredentialsProvider.h>
+#endif
 #include <cstdlib>
 #include <filesystem>
 #include <functional>
@@ -52,6 +60,9 @@
 #include "cpp/util.h"
 #ifdef USE_AZURE
 #include "io/fs/azure_obj_storage_client.h"
+#endif
+#ifdef USE_OSS
+#include "io/fs/oss_obj_storage_client.h"
 #endif
 #include "io/fs/obj_storage_client.h"
 #include "io/fs/s3_obj_storage_client.h"
@@ -212,7 +223,9 @@ std::shared_ptr<io::ObjStorageClient> S3ClientFactory::create(const S3ClientConf
 
     auto obj_client = (s3_conf.provider == io::ObjStorageType::AZURE)
                               ? _create_azure_client(s3_conf)
-                              : _create_s3_client(s3_conf);
+                              : (s3_conf.provider == io::ObjStorageType::OSS)
+                                        ? _create_oss_client(s3_conf)
+                                        : _create_s3_client(s3_conf);
 
     {
         uint64_t hash = s3_conf.get_hash();
@@ -257,8 +270,129 @@ std::shared_ptr<io::ObjStorageClient> S3ClientFactory::_create_azure_client(
 #endif
 }
 
+std::string S3ClientFactory::_generate_oss_session_name() {
+    // Get BE IP address (already cached in BackendOptions, no syscall)
+    std::string be_ip = BackendOptions::get_localhost();
+
+    // Handle both IPv4 and IPv6
+    // IPv4: 192.168.1.10 → 192-168-1-10
+    // IPv6: 2001:0db8:85a3::8a2e:0370:7334 → 2001-0db8-85a3--8a2e-0370-7334
+    std::replace(be_ip.begin(), be_ip.end(), '.', '-');
+    std::replace(be_ip.begin(), be_ip.end(), ':', '-');
+
+    return "doris-be-" + be_ip;
+}
+
+std::shared_ptr<io::ObjStorageClient>
+S3ClientFactory::_create_oss_client(const S3ClientConf& s3_conf) {
+#ifdef USE_OSS
+    using namespace AlibabaCloud::OSS;
+
+    LOG_INFO("Creating OSS client with endpoint: {}, bucket: {}, role_arn: {}",
+             s3_conf.endpoint, s3_conf.bucket, s3_conf.role_arn);
+
+    ClientConfiguration config;
+    config.endpoint = s3_conf.endpoint;
+
+    if (s3_conf.max_connections > 0) {
+        config.maxConnections = s3_conf.max_connections;
+    }
+
+    if (s3_conf.request_timeout_ms > 0) {
+        config.requestTimeoutMs = s3_conf.request_timeout_ms;
+    }
+
+    if (s3_conf.connect_timeout_ms > 0) {
+        config.connectTimeoutMs = s3_conf.connect_timeout_ms;
+    }
+
+    std::shared_ptr<OssClient> oss_client;
+
+    // Method 1: Direct Access Key and Secret Key (takes precedence)
+    // If both Access Key and Role ARN are configured, Access Key mode takes precedence.
+    if (!s3_conf.ak.empty() && !s3_conf.sk.empty()) {
+        // Use direct credentials (with optional session token)
+        if (!s3_conf.token.empty()) {
+            oss_client = std::make_shared<OssClient>(
+                s3_conf.endpoint,
+                s3_conf.ak,
+                s3_conf.sk,
+                s3_conf.token,
+                config);
+        } else {
+            oss_client = std::make_shared<OssClient>(
+                s3_conf.endpoint,
+                s3_conf.ak,
+                s3_conf.sk,
+                config);
+        }
+    }
+    // Method 2: Assume Role Mode (only when no explicit AK/SK)
+    else if (s3_conf.cred_provider_type == CredProviderType::InstanceProfile) {
+
+        // Case 2a: ECS instance role + AssumeRole to another role
+        if (!s3_conf.role_arn.empty()) {
+            // Use ECS metadata to assume another role
+            auto ecsProvider = std::make_shared<EcsRamRoleCredentialsProvider>();
+
+            // Generate session name with BE IP (supports both IPv4 and IPv6)
+            std::string session_name = _generate_oss_session_name();
+
+            auto stsProvider = std::make_shared<StsAssumeRoleCredentialsProvider>(
+                ecsProvider,              // Get initial creds from ECS metadata
+                s3_conf.role_arn,
+                session_name,             // doris-be-{ip}
+                3600,
+                s3_conf.external_id
+            );
+
+            oss_client = std::make_shared<OssClient>(
+                s3_conf.endpoint, stsProvider, config);
+        }
+        // Case 2b: Just use ECS instance role directly
+        else {
+            // Security policy enforcement: require explicit config to enable instance profile
+            if (!config::oss_enable_instance_profile) {
+                LOG(ERROR) << "OSS catalog creation denied: Security policy violation. "
+                          << "OSS catalog without role_arn requires instance profile to be enabled. "
+                          << "Either provide 'oss.role_arn' in catalog properties for AssumeRole, "
+                          << "or set 'oss_enable_instance_profile=true' in be.conf to allow direct instance profile access.";
+                return nullptr;
+            }
+
+            LOG(INFO) << "Using ECS instance profile directly (oss_enable_instance_profile=true)";
+            auto ecsProvider = std::make_shared<EcsRamRoleCredentialsProvider>();
+
+            oss_client = std::make_shared<OssClient>(
+                s3_conf.endpoint, ecsProvider, config);
+        }
+    }
+    // Fallback: Default credential chain (includes RRSA for Kubernetes)
+    else {
+        // Falls back to environment variables, RRSA, ECS metadata, etc.
+        auto defaultProvider = std::make_shared<DefaultCredentialsProvider>();
+
+        oss_client = std::make_shared<OssClient>(
+            s3_conf.endpoint, defaultProvider, config);
+    }
+
+    auto obj_client = std::make_shared<io::OssObjStorageClient>(
+        std::move(oss_client),
+        s3_conf.bucket
+    );
+
+    LOG_INFO("Created OSS client successfully");
+    return obj_client;
+
+#else
+    LOG_FATAL("BE is not compiled with OSS support, export BUILD_OSS=ON before building");
+    return nullptr;
+#endif
+}
+
 std::shared_ptr<Aws::Auth::AWSCredentialsProvider>
-S3ClientFactory::_get_aws_credentials_provider_v1(const S3ClientConf& s3_conf) {
+S3ClientFactory::get_aws_credentials_provider(
+        const S3ClientConf& s3_conf) {
     if (!s3_conf.ak.empty() && !s3_conf.sk.empty()) {
         Aws::Auth::AWSCredentials aws_cred(s3_conf.ak, s3_conf.sk);
         DCHECK(!aws_cred.IsExpiredOrEmpty());

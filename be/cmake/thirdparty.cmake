@@ -152,6 +152,23 @@ if(BUILD_AZURE STREQUAL "ON")
     add_thirdparty(azure-storage-common)
 endif()
 
+if(BUILD_OSS STREQUAL "ON")
+    add_thirdparty(alibabacloud-oss-cpp-sdk)
+    add_thirdparty(apr-1)
+    add_thirdparty(aprutil-1)
+endif()
+
+if(BUILD_STS STREQUAL "ON")
+    # AliCloud STS SDK and its vendored dependencies
+    add_thirdparty(alibabacloud_sts_20150401)
+    add_thirdparty(darabonba_core)
+    add_thirdparty(darabonba_util)
+    add_thirdparty(alibabacloud_open_api)
+    add_thirdparty(alibabacloud_open_api_util)
+    add_thirdparty(alibabacloud_endpoint_util)
+    # Note: cpprest and boost are already included in Doris thirdparty
+endif()
+
 add_thirdparty(minizip LIB64)
 add_thirdparty(simdjson LIB64)
 add_thirdparty(idn LIB64)

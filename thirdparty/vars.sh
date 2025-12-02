@@ -522,6 +522,19 @@ AZURE_NAME="azure-core_1.16.0.tar.gz"
 AZURE_SOURCE="azure-sdk-for-cpp-azure-core_1.16.0"
 AZURE_MD5SUM="0fb23eab695dc24b94456bf461e6af3b"
 
+# AliCloud OSS C++ SDK
+OSS_DOWNLOAD="https://github.com/aliyun/aliyun-oss-cpp-sdk/archive/refs/tags/1.10.0.tar.gz"
+OSS_NAME="aliyun-oss-cpp-sdk-1.10.0.tar.gz"
+OSS_SOURCE="aliyun-oss-cpp-sdk-1.10.0"
+OSS_MD5SUM="9b8ca0e9ba3d5fc88f7ac154a6c02b96"
+
+# AliCloud STS C++ SDK (API version 2015-04-01)
+# Required for OSS AssumeRole and RRSA (Kubernetes) support
+STS_DOWNLOAD="https://github.com/alibabacloud-sdk-cpp/sts-20150401/archive/refs/tags/1.0.6.tar.gz"
+STS_NAME="sts-20150401-1.0.6.tar.gz"
+STS_SOURCE="sts-20150401-1.0.6"
+STS_MD5SUM="2a63b6ab3d4ec466bec41602f37c35be"
+
 # libdragonbox for faster double/float to string
 DRAGONBOX_DOWNLOAD="https://github.com/jk-jeon/dragonbox/archive/refs/tags/1.1.3.tar.gz"
 DRAGONBOX_NAME=dragonbox-1.1.3.tar.gz
@@ -636,6 +649,8 @@ export TP_ARCHIVES=(
     'ALI_SDK'
     'BASE64'
     'AZURE'
+    'OSS'
+    'STS'
     'DRAGONBOX'
     'ICU'
     'JINDOFS'

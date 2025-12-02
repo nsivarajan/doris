@@ -1484,6 +1484,12 @@ DECLARE_mInt32(s3_read_base_wait_time_ms);
 DECLARE_mInt32(s3_read_max_wait_time_ms);
 DECLARE_mBool(enable_s3_object_check_after_upload);
 
+// OSS (AliCloud Object Storage Service) configuration
+// Enable direct instance profile usage without AssumeRole
+// Default: false (secure by default - requires role_arn for AssumeRole)
+// Set to true to allow OSS catalogs without role_arn to use ECS instance profile directly
+DECLARE_mBool(oss_enable_instance_profile);
+
 // write as inverted index tmp directory
 DECLARE_String(tmp_file_dir);
 
