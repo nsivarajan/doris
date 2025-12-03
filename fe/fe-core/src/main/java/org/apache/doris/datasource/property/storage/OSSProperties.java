@@ -81,6 +81,24 @@ public class OSSProperties extends AbstractS3CompatibleProperties {
             description = "The session token of OSS.")
     protected String sessionToken = "";
 
+    @Getter
+    @ConnectorProperty(names = {"oss.role_arn", "s3.role_arn", "AWS_ROLE_ARN"},
+            required = false,
+            description = "The Role ARN for STS AssumeRole authentication. "
+                    + "When specified, the BE will use the ECS instance profile credentials "
+                    + "to assume this role via STS AssumeRole API, enabling cross-account access "
+                    + "and least-privilege security.")
+    protected String ossRoleArn = "";
+
+    @Getter
+    @ConnectorProperty(names = {"oss.external_id", "s3.external_id", "AWS_EXTERNAL_ID"},
+            required = false,
+            sensitive = true,
+            description = "The external ID for STS AssumeRole authentication. "
+                    + "Used to prevent the 'confused deputy' problem in cross-account scenarios. "
+                    + "This should match the external ID configured in the target role's trust policy.")
+    protected String ossExternalId = "";
+
     /**
      * The maximum number of concurrent connections that can be made to the object storage system.
      * This value is optional and can be configured by the user.
@@ -257,6 +275,9 @@ public class OSSProperties extends AbstractS3CompatibleProperties {
     @Override
     public void initNormalizeAndCheckProps() {
         super.initNormalizeAndCheckProps();
+        if (StringUtils.isNotBlank(ossExternalId) && StringUtils.isBlank(ossRoleArn)) {
+            throw new IllegalArgumentException("oss.external_id must be used with oss.role_arn");
+        }
         if (StringUtils.isBlank(endpoint) || !STANDARD_ENDPOINT_PATTERN.matcher(endpoint).matches()) {
             this.endpoint = getOssEndpoint(region, BooleanUtils.toBoolean(dlfAccessPublic));
         }
@@ -287,6 +308,19 @@ public class OSSProperties extends AbstractS3CompatibleProperties {
             return AnonymousCredentialsProvider.create();
         }
         return null;
+    }
+
+    @Override
+    public Map<String, String> getBackendConfigProperties() {
+        Map<String, String> backendProperties = generateBackendS3Configuration();
+
+        if (StringUtils.isNotBlank(ossRoleArn)) {
+            backendProperties.put("AWS_ROLE_ARN", ossRoleArn);
+        }
+        if (StringUtils.isNotBlank(ossExternalId)) {
+            backendProperties.put("AWS_EXTERNAL_ID", ossExternalId);
+        }
+        return backendProperties;
     }
 
     @Override
