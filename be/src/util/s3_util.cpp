@@ -391,7 +391,7 @@ S3ClientFactory::_create_oss_client(const S3ClientConf& s3_conf) {
 }
 
 std::shared_ptr<Aws::Auth::AWSCredentialsProvider>
-S3ClientFactory::get_aws_credentials_provider_v1(const S3ClientConf& s3_conf) {
+S3ClientFactory::_get_aws_credentials_provider_v1(const S3ClientConf& s3_conf) {
     if (!s3_conf.ak.empty() && !s3_conf.sk.empty()) {
         Aws::Auth::AWSCredentials aws_cred(s3_conf.ak, s3_conf.sk);
         DCHECK(!aws_cred.IsExpiredOrEmpty());
