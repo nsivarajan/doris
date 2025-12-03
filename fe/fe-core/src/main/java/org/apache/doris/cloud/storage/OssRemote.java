@@ -122,6 +122,11 @@ public class OssRemote extends DefaultRemote {
         assumeRoleRequest.setRoleArn(obj.getArn());
         assumeRoleRequest.setRoleSessionName(getNewRoleSessionName());
         assumeRoleRequest.setDurationSeconds((long) getDurationSeconds());
+
+        if (obj.getExternalId() != null && !obj.getExternalId().isEmpty()) {
+            assumeRoleRequest.setExternalId(obj.getExternalId());
+        }
+
         try {
             DefaultProfile profile = DefaultProfile.getProfile(obj.getRegion());
             if (Config.enable_sts_vpc) {
