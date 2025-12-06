@@ -522,17 +522,29 @@ AZURE_NAME="azure-core_1.16.0.tar.gz"
 AZURE_SOURCE="azure-sdk-for-cpp-azure-core_1.16.0"
 AZURE_MD5SUM="0fb23eab695dc24b94456bf461e6af3b"
 
+# Apache Portable Runtime (APR) - Required by OSS SDK
+APR_DOWNLOAD="https://archive.apache.org/dist/apr/apr-1.7.0.tar.gz"
+APR_NAME="apr-1.7.0.tar.gz"
+APR_SOURCE="apr-1.7.0"
+APR_MD5SUM="48e9dbf45ae3fdc7b491259ffb6ccf7d"
+
+# APR-Util - Required by OSS SDK
+APR_UTIL_DOWNLOAD="https://archive.apache.org/dist/apr/apr-util-1.6.1.tar.gz"
+APR_UTIL_NAME="apr-util-1.6.1.tar.gz"
+APR_UTIL_SOURCE="apr-util-1.6.1"
+APR_UTIL_MD5SUM="8ff5dc36fa39a2a3db1df196d3ed6086"
+
 # AliCloud OSS C++ SDK
 OSS_DOWNLOAD="https://github.com/aliyun/aliyun-oss-cpp-sdk/archive/refs/tags/1.10.0.tar.gz"
 OSS_NAME="aliyun-oss-cpp-sdk-1.10.0.tar.gz"
 OSS_SOURCE="aliyun-oss-cpp-sdk-1.10.0"
-OSS_MD5SUM="9b8ca0e9ba3d5fc88f7ac154a6c02b96"
+OSS_MD5SUM="beaf6da12afe626249efc9194d912572"
 
 # AliCloud v1 SDK (OpenAPI) - Core + STS modules
-ALICLOUD_SDK_DOWNLOAD="https://github.com/aliyun/aliyun-openapi-cpp-sdk/archive/refs/tags/1.36.2120.tar.gz"
-ALICLOUD_SDK_NAME="aliyun-openapi-cpp-sdk-1.36.2120.tar.gz"
-ALICLOUD_SDK_SOURCE="aliyun-openapi-cpp-sdk-1.36.2120"
-ALICLOUD_SDK_MD5SUM="1e497efafe60805cb83655bf9dcaf65e"
+STS_DOWNLOAD="https://github.com/aliyun/aliyun-openapi-cpp-sdk/archive/refs/tags/1.36.2120.tar.gz"
+STS_NAME="aliyun-openapi-cpp-sdk-1.36.2120.tar.gz"
+STS_SOURCE="aliyun-openapi-cpp-sdk-1.36.2120"
+STS_MD5SUM="1e497efafe60805cb83655bf9dcaf65e"
 
 # libdragonbox for faster double/float to string
 DRAGONBOX_DOWNLOAD="https://github.com/jk-jeon/dragonbox/archive/refs/tags/1.1.3.tar.gz"
@@ -648,6 +660,8 @@ export TP_ARCHIVES=(
     'ALI_SDK'
     'BASE64'
     'AZURE'
+    'APR'
+    'APR_UTIL'
     'OSS'
     'STS'
     'DRAGONBOX'

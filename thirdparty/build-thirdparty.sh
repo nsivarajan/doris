@@ -1884,11 +1884,37 @@ build_azure() {
     fi
 }
 
+# Apache Portable Runtime (APR) - Required by OSS SDK
+build_apr() {
+    check_if_source_exist "${APR_SOURCE}"
+    cd "${TP_SOURCE_DIR}/${APR_SOURCE}"
+
+    ./configure --prefix="${TP_INSTALL_DIR}" --enable-static --disable-shared
+    make -j "${PARALLEL}"
+    make install
+}
+
+# APR-Util - Required by OSS SDK
+build_apr_util() {
+    check_if_source_exist "${APR_UTIL_SOURCE}"
+    cd "${TP_SOURCE_DIR}/${APR_UTIL_SOURCE}"
+
+    ./configure --prefix="${TP_INSTALL_DIR}" \
+        --with-apr="${TP_INSTALL_DIR}" \
+        --enable-static --disable-shared
+    make -j "${PARALLEL}"
+    make install
+}
+
 # AliCloud OSS C++ SDK
 build_oss() {
     if [[ "${BUILD_OSS}" == "OFF" ]]; then
         echo "Skip build OSS SDK"
     else
+        # APR is required for OSS SDK
+        build_apr
+        build_apr_util
+
         check_if_source_exist "${OSS_SOURCE}"
         cd "${TP_SOURCE_DIR}/${OSS_SOURCE}"
 
@@ -1902,6 +1928,7 @@ build_oss() {
             -DBUILD_SHARED_LIBS=OFF \
             -DBUILD_SAMPLE=OFF \
             -DBUILD_TESTS=OFF \
+            -DCMAKE_PREFIX_PATH="${TP_INSTALL_DIR}" \
             ..
 
         "${BUILD_SYSTEM}" -j "${PARALLEL}"
