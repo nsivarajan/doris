@@ -1909,17 +1909,15 @@ build_oss() {
     fi
 }
 
-# AliCloud STS C++ SDK (API version 2015-04-01)
-# Required for OSS AssumeRole and RRSA support
+# AliCloud v1 SDK (OpenAPI) - Core + STS modules
+# Required for OSS AssumeRole and RRSA support with external_id
 build_sts() {
     if [[ "${BUILD_STS}" == "OFF" ]]; then
-        echo "Skip build STS SDK"
+        echo "Skip build AliCloud v1 SDK (core + sts)"
     else
-        check_if_source_exist "${STS_SOURCE}"
-        cd "${TP_SOURCE_DIR}/${STS_SOURCE}"
+        check_if_source_exist "${ALICLOUD_SDK_SOURCE}"
+        cd "${TP_SOURCE_DIR}/${ALICLOUD_SDK_SOURCE}"
 
-        # STS SDK has vendored dependencies in external/
-        # Build static library for Doris
         rm -rf "${BUILD_DIR}"
         mkdir -p "${BUILD_DIR}"
         cd "${BUILD_DIR}"
@@ -1930,11 +1928,18 @@ build_sts() {
             -DCMAKE_POSITION_INDEPENDENT_CODE=ON \
             -DBUILD_SHARED_LIBS=OFF \
             -DCMAKE_PREFIX_PATH="${TP_INSTALL_DIR}" \
-            -DBoost_USE_STATIC_LIBS=ON \
+            -DBUILD_PRODUCT="sts" \
+            -DBUILD_UNIT_TESTS=OFF \
+            -DBUILD_FUNCTION_TESTS=OFF \
+            -DTARGET_OUTPUT_NAME_PREFIX="alibabacloud-sdk-" \
+            -DCMAKE_CXX_FLAGS="-Wno-error -I${TP_INCLUDE_DIR}" \
             ..
 
         "${BUILD_SYSTEM}" -j "${PARALLEL}"
         "${BUILD_SYSTEM}" install
+
+        echo "Installed v1 SDK libraries:"
+        ls -lh "${TP_INSTALL_DIR}/lib/libalibabacloud-sdk-"*.a
     fi
 }
 

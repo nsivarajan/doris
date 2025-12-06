@@ -159,14 +159,10 @@ if(BUILD_OSS STREQUAL "ON")
 endif()
 
 if(BUILD_STS STREQUAL "ON")
-    # AliCloud STS SDK and its vendored dependencies
-    add_thirdparty(alibabacloud_sts_20150401)
-    add_thirdparty(darabonba_core)
-    add_thirdparty(darabonba_util)
-    add_thirdparty(alibabacloud_open_api)
-    add_thirdparty(alibabacloud_open_api_util)
-    add_thirdparty(alibabacloud_endpoint_util)
-    # Note: cpprest and boost are already included in Doris thirdparty
+    # AliCloud v1 SDK (OpenAPI) - simple and stable
+    add_thirdparty(alibabacloud-sdk-core)
+    add_thirdparty(alibabacloud-sdk-sts)
+    add_thirdparty(jsoncpp)
 endif()
 
 add_thirdparty(minizip LIB64)

@@ -528,12 +528,11 @@ OSS_NAME="aliyun-oss-cpp-sdk-1.10.0.tar.gz"
 OSS_SOURCE="aliyun-oss-cpp-sdk-1.10.0"
 OSS_MD5SUM="9b8ca0e9ba3d5fc88f7ac154a6c02b96"
 
-# AliCloud STS C++ SDK (API version 2015-04-01)
-# Required for OSS AssumeRole and RRSA (Kubernetes) support
-STS_DOWNLOAD="https://github.com/alibabacloud-sdk-cpp/sts-20150401/archive/refs/tags/1.0.6.tar.gz"
-STS_NAME="sts-20150401-1.0.6.tar.gz"
-STS_SOURCE="sts-20150401-1.0.6"
-STS_MD5SUM="2a63b6ab3d4ec466bec41602f37c35be"
+# AliCloud v1 SDK (OpenAPI) - Core + STS modules
+ALICLOUD_SDK_DOWNLOAD="https://github.com/aliyun/aliyun-openapi-cpp-sdk/archive/refs/tags/1.36.2120.tar.gz"
+ALICLOUD_SDK_NAME="aliyun-openapi-cpp-sdk-1.36.2120.tar.gz"
+ALICLOUD_SDK_SOURCE="aliyun-openapi-cpp-sdk-1.36.2120"
+ALICLOUD_SDK_MD5SUM="1e497efafe60805cb83655bf9dcaf65e"
 
 # libdragonbox for faster double/float to string
 DRAGONBOX_DOWNLOAD="https://github.com/jk-jeon/dragonbox/archive/refs/tags/1.1.3.tar.gz"

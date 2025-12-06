@@ -31,7 +31,10 @@
 #include "common/logging.h"
 
 #ifdef USE_STS
-#include <alibabacloud/sts_20150401.hpp>
+#include <alibabacloud/core/AlibabaCloud.h>
+#include <alibabacloud/sts/StsClient.h>
+#include <alibabacloud/sts/model/AssumeRoleRequest.h>
+#include <alibabacloud/sts/model/AssumeRoleResult.h>
 #endif
 
 namespace doris {
@@ -202,75 +205,71 @@ AlibabaCloud::OSS::Credentials StsAssumeRoleCredentialsProvider::assumeRole() {
 
 #ifdef USE_STS
     try {
-        // Create STS client configuration with base credentials
-        auto config = std::make_shared<Alibabacloud_OpenApi::Config>();
-        config->accessKeyId = std::make_shared<std::string>(base_creds.AccessKeyId());
-        config->accessKeySecret =
-                std::make_shared<std::string>(base_creds.AccessKeySecret());
+        // Initialize AliCloud SDK (v1/OpenAPI)
+        AlibabaCloud::InitializeSdk();
 
-        // If base credentials have a security token, include it
-        if (!base_creds.SecurityToken().empty()) {
-            config->securityToken =
-                    std::make_shared<std::string>(base_creds.SecurityToken());
-        }
+        // Create client configuration
+        AlibabaCloud::Sts::ClientConfiguration config;
+        config.endpoint = "sts.aliyuncs.com";
+        config.connectTimeout = 5000;
+        config.readTimeout = 10000;
 
-        // Set STS endpoint (region-specific)
-        config->endpoint = std::make_shared<std::string>("sts.aliyuncs.com");
+        // Create credentials from base provider
+        AlibabaCloud::Credentials credentials(base_creds.AccessKeyId(),
+                                              base_creds.AccessKeySecret(),
+                                              base_creds.SecurityToken());
 
         // Create STS client
-        Alibabacloud_Sts20150401::Client client(config);
+        AlibabaCloud::Sts::StsClient client(config, credentials);
 
         // Create AssumeRole request
-        auto request = std::make_shared<Alibabacloud_Sts20150401::AssumeRoleRequest>();
-        request->roleArn = std::make_shared<std::string>(_role_arn);
-        request->roleSessionName = std::make_shared<std::string>(_session_name);
-        request->durationSeconds = std::make_shared<long>(_duration_seconds);
+        AlibabaCloud::Sts::Model::AssumeRoleRequest request;
+        request.setRoleArn(_role_arn);
+        request.setRoleSessionName(_session_name);
+        request.setDurationSeconds(_duration_seconds);
 
+        // Set external_id if provided
         if (!_external_id.empty()) {
-            request->externalId = std::make_shared<std::string>(_external_id);
+            request.setExternalId(_external_id);
         }
 
         // Call STS AssumeRole API
-        Alibabacloud_Sts20150401::AssumeRoleResponse response = client.assumeRole(request);
+        auto outcome = client.assumeRole(request);
 
-        // Check response status
-        if (!response.statusCode || *response.statusCode != 200) {
-            LOG(WARNING) << "STS AssumeRole failed with status: "
-                         << (response.statusCode ? *response.statusCode : 0)
+        if (!outcome.isSuccess()) {
+            LOG(WARNING) << "STS AssumeRole failed: " << outcome.error().errorMessage()
+                         << ", Code: " << outcome.error().errorCode()
                          << ", Role ARN: " << _role_arn;
+            AlibabaCloud::ShutdownSdk();
             return AlibabaCloud::OSS::Credentials();
         }
 
-        // Extract credentials from response
-        if (!response.body || !response.body->credentials) {
-            LOG(WARNING) << "STS AssumeRole response missing credentials. Role ARN: "
-                         << _role_arn;
-            return AlibabaCloud::OSS::Credentials();
-        }
+        // Extract credentials from result
+        auto result = outcome.result();
+        auto creds = result.getCredentials();
 
-        auto creds = response.body->credentials;
-
-        if (!creds->accessKeyId || !creds->accessKeySecret || !creds->securityToken ||
-            !creds->expiration) {
-            LOG(WARNING) << "STS AssumeRole response has incomplete credentials";
-            return AlibabaCloud::OSS::Credentials();
-        }
+        std::string access_key = creds.getAccessKeyId();
+        std::string secret_key = creds.getAccessKeySecret();
+        std::string token = creds.getSecurityToken();
+        std::string expiration_str = creds.getExpiration();
 
         // Parse expiration time for auto-refresh
-        _expiration = parse_iso8601(*creds->expiration);
+        _expiration = parse_iso8601(expiration_str);
 
-        LOG(INFO) << "STS AssumeRole successful. Role: " << _role_arn
-                  << ", Expires at: " << *creds->expiration;
+        LOG(INFO) << "STS AssumeRole successful. Role: " << _role_arn << ", Session: "
+                  << _session_name << ", Expires at: " << expiration_str;
 
-        return AlibabaCloud::OSS::Credentials(*creds->accessKeyId, *creds->accessKeySecret,
-                                              *creds->securityToken);
+        AlibabaCloud::ShutdownSdk();
+
+        return AlibabaCloud::OSS::Credentials(access_key, secret_key, token);
 
     } catch (const std::exception& e) {
         LOG(WARNING) << "STS AssumeRole exception: " << e.what() << ", Role ARN: " << _role_arn;
+        AlibabaCloud::ShutdownSdk();
         return AlibabaCloud::OSS::Credentials();
     }
 #else
-    LOG(WARNING) << "STS AssumeRole requires AliCloud STS SDK (sts-20150401). "
+    LOG(WARNING) << "STS AssumeRole requires AliCloud STS SDK. "
                  << "Build with BUILD_STS=ON to enable this feature. "
                  << "Role ARN: " << _role_arn << ", Session: " << _session_name;
     return AlibabaCloud::OSS::Credentials();
