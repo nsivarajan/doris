@@ -292,7 +292,6 @@ S3ClientFactory::_create_oss_client(const S3ClientConf& s3_conf) {
              s3_conf.endpoint, s3_conf.bucket, s3_conf.role_arn);
 
     ClientConfiguration config;
-    config.endpoint = s3_conf.endpoint;
 
     if (s3_conf.max_connections > 0) {
         config.maxConnections = s3_conf.max_connections;

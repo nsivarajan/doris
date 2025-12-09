@@ -31,10 +31,11 @@
 #include "common/logging.h"
 
 #ifdef USE_STS
-#include <alibabacloud/core/AlibabaCloud.h>
 #include <alibabacloud/sts/StsClient.h>
 #include <alibabacloud/sts/model/AssumeRoleRequest.h>
 #include <alibabacloud/sts/model/AssumeRoleResult.h>
+#include <alibabacloud/sts/model/AssumeRoleWithOIDCRequest.h>
+#include <alibabacloud/sts/model/AssumeRoleWithOIDCResult.h>
 #endif
 
 namespace doris {
@@ -92,7 +93,7 @@ std::chrono::system_clock::time_point parse_iso8601(const std::string& datetime_
 // ==================== EcsRamRoleCredentialsProvider ====================
 
 EcsRamRoleCredentialsProvider::EcsRamRoleCredentialsProvider()
-        : _expiration(std::chrono::system_clock::now()) {}
+        : _cached_credentials("", ""), _expiration(std::chrono::system_clock::now()) {}
 
 std::string EcsRamRoleCredentialsProvider::fetchRoleName() {
     std::string role_name = http_get(ECS_METADATA_FETCH_ROLE_URL);
@@ -114,7 +115,7 @@ AlibabaCloud::OSS::Credentials EcsRamRoleCredentialsProvider::fetchCredentialsFr
     if (response.empty()) {
         LOG(WARNING) << "Failed to fetch credentials from ECS metadata service for role: "
                      << role_name;
-        return AlibabaCloud::OSS::Credentials();
+        return AlibabaCloud::OSS::Credentials("", "");
     }
 
     // Parse JSON response
@@ -124,13 +125,13 @@ AlibabaCloud::OSS::Credentials EcsRamRoleCredentialsProvider::fetchCredentialsFr
     if (doc.HasParseError()) {
         LOG(WARNING) << "Failed to parse ECS metadata JSON: "
                      << rapidjson::GetParseError_En(doc.GetParseError());
-        return AlibabaCloud::OSS::Credentials();
+        return AlibabaCloud::OSS::Credentials("", "");
     }
 
     if (!doc.HasMember("AccessKeyId") || !doc.HasMember("AccessKeySecret") ||
         !doc.HasMember("SecurityToken") || !doc.HasMember("Expiration")) {
         LOG(WARNING) << "Invalid ECS metadata response, missing required fields";
-        return AlibabaCloud::OSS::Credentials();
+        return AlibabaCloud::OSS::Credentials("", "");
     }
 
     std::string access_key_id = doc["AccessKeyId"].GetString();
@@ -162,7 +163,7 @@ AlibabaCloud::OSS::Credentials EcsRamRoleCredentialsProvider::getCredentials() {
         _role_name = fetchRoleName();
         if (_role_name.empty()) {
             LOG(WARNING) << "Failed to get ECS RAM role name";
-            return AlibabaCloud::OSS::Credentials();
+            return AlibabaCloud::OSS::Credentials("", "");
         }
     }
 
@@ -187,6 +188,7 @@ StsAssumeRoleCredentialsProvider::StsAssumeRoleCredentialsProvider(
           _session_name(session_name),
           _duration_seconds(duration_seconds),
           _external_id(external_id),
+          _cached_credentials("", ""),
           _expiration(std::chrono::system_clock::now()) {}
 
 bool StsAssumeRoleCredentialsProvider::needsRefresh() const {
@@ -200,27 +202,24 @@ AlibabaCloud::OSS::Credentials StsAssumeRoleCredentialsProvider::assumeRole() {
     auto base_creds = _base_provider->getCredentials();
     if (base_creds.AccessKeyId().empty()) {
         LOG(WARNING) << "Base credentials provider returned empty credentials";
-        return AlibabaCloud::OSS::Credentials();
+        return AlibabaCloud::OSS::Credentials("", "");
     }
 
 #ifdef USE_STS
     try {
-        // Initialize AliCloud SDK (v1/OpenAPI)
-        AlibabaCloud::InitializeSdk();
-
         // Create client configuration
-        AlibabaCloud::Sts::ClientConfiguration config;
-        config.endpoint = "sts.aliyuncs.com";
-        config.connectTimeout = 5000;
-        config.readTimeout = 10000;
+        AlibabaCloud::ClientConfiguration config;
+        config.setEndpoint("sts.aliyuncs.com");
+        config.setConnectTimeout(5000);
+        config.setReadTimeout(10000);
 
         // Create credentials from base provider
         AlibabaCloud::Credentials credentials(base_creds.AccessKeyId(),
                                               base_creds.AccessKeySecret(),
-                                              base_creds.SecurityToken());
+                                              base_creds.SessionToken());
 
         // Create STS client
-        AlibabaCloud::Sts::StsClient client(config, credentials);
+        AlibabaCloud::Sts::StsClient client(credentials, config);
 
         // Create AssumeRole request
         AlibabaCloud::Sts::Model::AssumeRoleRequest request;
@@ -240,18 +239,17 @@ AlibabaCloud::OSS::Credentials StsAssumeRoleCredentialsProvider::assumeRole() {
             LOG(WARNING) << "STS AssumeRole failed: " << outcome.error().errorMessage()
                          << ", Code: " << outcome.error().errorCode()
                          << ", Role ARN: " << _role_arn;
-            AlibabaCloud::ShutdownSdk();
-            return AlibabaCloud::OSS::Credentials();
+            return AlibabaCloud::OSS::Credentials("", "");
         }
 
         // Extract credentials from result
         auto result = outcome.result();
         auto creds = result.getCredentials();
 
-        std::string access_key = creds.getAccessKeyId();
-        std::string secret_key = creds.getAccessKeySecret();
-        std::string token = creds.getSecurityToken();
-        std::string expiration_str = creds.getExpiration();
+        std::string access_key = creds.accessKeyId;
+        std::string secret_key = creds.accessKeySecret;
+        std::string token = creds.securityToken;
+        std::string expiration_str = creds.expiration;
 
         // Parse expiration time for auto-refresh
         _expiration = parse_iso8601(expiration_str);
@@ -259,20 +257,17 @@ AlibabaCloud::OSS::Credentials StsAssumeRoleCredentialsProvider::assumeRole() {
         LOG(INFO) << "STS AssumeRole successful. Role: " << _role_arn << ", Session: "
                   << _session_name << ", Expires at: " << expiration_str;
 
-        AlibabaCloud::ShutdownSdk();
-
         return AlibabaCloud::OSS::Credentials(access_key, secret_key, token);
 
     } catch (const std::exception& e) {
         LOG(WARNING) << "STS AssumeRole exception: " << e.what() << ", Role ARN: " << _role_arn;
-        AlibabaCloud::ShutdownSdk();
-        return AlibabaCloud::OSS::Credentials();
+        return AlibabaCloud::OSS::Credentials("", "");
     }
 #else
     LOG(WARNING) << "STS AssumeRole requires AliCloud STS SDK. "
                  << "Build with BUILD_STS=ON to enable this feature. "
                  << "Role ARN: " << _role_arn << ", Session: " << _session_name;
-    return AlibabaCloud::OSS::Credentials();
+    return AlibabaCloud::OSS::Credentials("", "");
 #endif
 }
 
@@ -300,7 +295,7 @@ AlibabaCloud::OSS::Credentials DefaultCredentialsProvider::getCredentialsFromEnv
         return AlibabaCloud::OSS::Credentials(ak, sk, token ? token : "");
     }
 
-    return AlibabaCloud::OSS::Credentials();
+    return AlibabaCloud::OSS::Credentials("", "");
 }
 
 AlibabaCloud::OSS::Credentials DefaultCredentialsProvider::getCredentialsFromRRSA() {
@@ -308,14 +303,14 @@ AlibabaCloud::OSS::Credentials DefaultCredentialsProvider::getCredentialsFromRRS
     const char* role_arn = std::getenv("ALIBABA_CLOUD_ROLE_ARN");
 
     if (!oidc_token_file || !role_arn) {
-        return AlibabaCloud::OSS::Credentials();
+        return AlibabaCloud::OSS::Credentials("", "");
     }
 
     // Read OIDC token from file
     std::ifstream token_file(oidc_token_file);
     if (!token_file.is_open()) {
         LOG(WARNING) << "Failed to open OIDC token file: " << oidc_token_file;
-        return AlibabaCloud::OSS::Credentials();
+        return AlibabaCloud::OSS::Credentials("", "");
     }
 
     std::string oidc_token((std::istreambuf_iterator<char>(token_file)),
@@ -324,72 +319,62 @@ AlibabaCloud::OSS::Credentials DefaultCredentialsProvider::getCredentialsFromRRS
 
     if (oidc_token.empty()) {
         LOG(WARNING) << "OIDC token file is empty: " << oidc_token_file;
-        return AlibabaCloud::OSS::Credentials();
+        return AlibabaCloud::OSS::Credentials("", "");
     }
 
 #ifdef USE_STS
     try {
-        // Create STS client configuration (no credentials needed for OIDC)
-        auto config = std::make_shared<Alibabacloud_OpenApi::Config>();
-        config->endpoint = std::make_shared<std::string>("sts.aliyuncs.com");
+        // Create client configuration (OIDC doesn't need credentials)
+        AlibabaCloud::ClientConfiguration config;
+        config.setEndpoint("sts.aliyuncs.com");
+        config.setConnectTimeout(5000);
+        config.setReadTimeout(10000);
 
-        // Create STS client
-        Alibabacloud_Sts20150401::Client client(config);
+        // Create STS client with empty credentials for OIDC
+        AlibabaCloud::Credentials empty_creds("", "");
+        AlibabaCloud::Sts::StsClient client(empty_creds, config);
 
         // Create AssumeRoleWithOIDC request
-        auto request =
-                std::make_shared<Alibabacloud_Sts20150401::AssumeRoleWithOIDCRequest>();
-        request->roleArn = std::make_shared<std::string>(role_arn);
-        request->OIDCToken = std::make_shared<std::string>(oidc_token);
-        request->roleSessionName = std::make_shared<std::string>("doris-rrsa-session");
-        request->durationSeconds = std::make_shared<long>(3600);
+        AlibabaCloud::Sts::Model::AssumeRoleWithOIDCRequest request;
+        request.setRoleArn(role_arn);
+        request.setOIDCToken(oidc_token);
+        request.setRoleSessionName("doris-rrsa-session");
+        request.setDurationSeconds(3600);
 
         const char* oidc_provider_arn = std::getenv("ALIBABA_CLOUD_OIDC_PROVIDER_ARN");
         if (oidc_provider_arn) {
-            request->OIDCProviderArn = std::make_shared<std::string>(oidc_provider_arn);
+            request.setOIDCProviderArn(oidc_provider_arn);
         }
 
         // Call STS AssumeRoleWithOIDC API
-        Alibabacloud_Sts20150401::AssumeRoleWithOIDCResponse response =
-                client.assumeRoleWithOIDC(request);
+        auto outcome = client.assumeRoleWithOIDC(request);
 
-        // Check response status
-        if (!response.statusCode || *response.statusCode != 200) {
-            LOG(WARNING) << "RRSA AssumeRoleWithOIDC failed with status: "
-                         << (response.statusCode ? *response.statusCode : 0)
+        if (!outcome.isSuccess()) {
+            LOG(WARNING) << "RRSA AssumeRoleWithOIDC failed: " << outcome.error().errorMessage()
+                         << ", Code: " << outcome.error().errorCode()
                          << ", Role ARN: " << role_arn;
-            return AlibabaCloud::OSS::Credentials();
+            return AlibabaCloud::OSS::Credentials("", "");
         }
 
-        // Extract credentials from response
-        if (!response.body || !response.body->credentials) {
-            LOG(WARNING) << "RRSA AssumeRoleWithOIDC response missing credentials. Role ARN: "
-                         << role_arn;
-            return AlibabaCloud::OSS::Credentials();
-        }
-
-        auto creds = response.body->credentials;
-
-        if (!creds->accessKeyId || !creds->accessKeySecret || !creds->securityToken) {
-            LOG(WARNING) << "RRSA AssumeRoleWithOIDC response has incomplete credentials";
-            return AlibabaCloud::OSS::Credentials();
-        }
+        // Extract credentials from result
+        auto result = outcome.result();
+        auto creds = result.getCredentials();
 
         LOG(INFO) << "RRSA AssumeRoleWithOIDC successful. Role: " << role_arn;
 
-        return AlibabaCloud::OSS::Credentials(*creds->accessKeyId, *creds->accessKeySecret,
-                                              *creds->securityToken);
+        return AlibabaCloud::OSS::Credentials(creds.accessKeyId, creds.accessKeySecret,
+                                              creds.securityToken);
 
     } catch (const std::exception& e) {
         LOG(WARNING) << "RRSA AssumeRoleWithOIDC exception: " << e.what()
                      << ", Role ARN: " << role_arn;
-        return AlibabaCloud::OSS::Credentials();
+        return AlibabaCloud::OSS::Credentials("", "");
     }
 #else
     LOG(INFO) << "RRSA detected but AssumeRoleWithOIDC requires AliCloud STS SDK. "
               << "Build with BUILD_STS=ON to enable RRSA support. "
               << "Role ARN: " << role_arn << ", Token file: " << oidc_token_file;
-    return AlibabaCloud::OSS::Credentials();
+    return AlibabaCloud::OSS::Credentials("", "");
 #endif
 }
 
@@ -418,7 +403,7 @@ AlibabaCloud::OSS::Credentials DefaultCredentialsProvider::getCredentials() {
     }
 
     LOG(WARNING) << "Failed to get credentials from all sources (env, RRSA, ECS)";
-    return AlibabaCloud::OSS::Credentials();
+    return AlibabaCloud::OSS::Credentials("", "");
 }
 
 } // namespace doris

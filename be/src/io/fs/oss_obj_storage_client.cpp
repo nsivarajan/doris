@@ -48,11 +48,10 @@ OssObjStorageClient::OssObjStorageClient(std::shared_ptr<AlibabaCloud::OSS::OssC
 
 ObjectStorageResponse OssObjStorageClient::put_object(const ObjectStoragePathOptions& opts,
                                                       std::string_view stream) {
-    PutObjectRequest request(_bucket, opts.key);
-
     auto content = std::make_shared<std::stringstream>();
-    content->write(stream.data(), stream.size());
-    request.setContent(content);
+    content->write(stream.data(), static_cast<std::streamsize>(stream.size()));
+
+    PutObjectRequest request(_bucket, opts.key, content);
 
     auto outcome = _client->PutObject(request);
 
@@ -223,13 +222,10 @@ ObjectStorageUploadResponse OssObjStorageClient::create_multipart_upload(
 ObjectStorageUploadResponse OssObjStorageClient::upload_part(const ObjectStoragePathOptions& opts,
                                                              std::string_view stream,
                                                              int partNum) {
-    UploadPartRequest request(_bucket, opts.key, *opts.upload_id);
-    request.setPartNumber(partNum);
-
     auto content = std::make_shared<std::stringstream>();
-    content->write(stream.data(), stream.size());
-    request.setContent(content);
-    request.setContentLength(stream.size());
+    content->write(stream.data(), static_cast<std::streamsize>(stream.size()));
+
+    UploadPartRequest request(_bucket, opts.key, partNum, *opts.upload_id, content);
 
     auto outcome = _client->UploadPart(request);
 
@@ -249,16 +245,13 @@ ObjectStorageUploadResponse OssObjStorageClient::upload_part(const ObjectStorage
 ObjectStorageResponse OssObjStorageClient::complete_multipart_upload(
         const ObjectStoragePathOptions& opts,
         const std::vector<ObjectCompleteMultiPart>& completed_parts) {
-    CompleteMultipartUploadRequest request(_bucket, opts.key, *opts.upload_id);
-
     PartList parts;
     for (const auto& part : completed_parts) {
-        Part ossPart;
-        ossPart.setPartNumber(part.part_num);
-        ossPart.setETag(part.etag);
+        Part ossPart(part.part_num, part.etag);
         parts.push_back(ossPart);
     }
-    request.setPartList(parts);
+
+    CompleteMultipartUploadRequest request(_bucket, opts.key, parts, *opts.upload_id);
 
     auto outcome = _client->CompleteMultipartUpload(request);
 
@@ -279,9 +272,13 @@ std::string OssObjStorageClient::generate_presigned_url(const ObjectStoragePathO
     GeneratePresignedUrlRequest request(_bucket, opts.key, Http::Put);
     request.setExpires(expiration_secs);
 
-    auto url = _client->GeneratePresignedUrl(request);
+    auto outcome = _client->GeneratePresignedUrl(request);
 
-    return url;
+    if (!outcome.isSuccess()) {
+        return "";
+    }
+
+    return outcome.result();
 }
 
 } // namespace doris::io

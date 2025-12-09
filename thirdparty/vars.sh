@@ -523,16 +523,16 @@ AZURE_SOURCE="azure-sdk-for-cpp-azure-core_1.16.0"
 AZURE_MD5SUM="0fb23eab695dc24b94456bf461e6af3b"
 
 # Apache Portable Runtime (APR) - Required by OSS SDK
-APR_DOWNLOAD="https://archive.apache.org/dist/apr/apr-1.7.0.tar.gz"
-APR_NAME="apr-1.7.0.tar.gz"
-APR_SOURCE="apr-1.7.0"
-APR_MD5SUM="48e9dbf45ae3fdc7b491259ffb6ccf7d"
+APR_DOWNLOAD="https://archive.apache.org/dist/apr/apr-1.7.4.tar.gz"
+APR_NAME="apr-1.7.4.tar.gz"
+APR_SOURCE="apr-1.7.4"
+APR_MD5SUM="eb9b239f23598b746e82259797df5945"
 
 # APR-Util - Required by OSS SDK
-APR_UTIL_DOWNLOAD="https://archive.apache.org/dist/apr/apr-util-1.6.1.tar.gz"
-APR_UTIL_NAME="apr-util-1.6.1.tar.gz"
-APR_UTIL_SOURCE="apr-util-1.6.1"
-APR_UTIL_MD5SUM="8ff5dc36fa39a2a3db1df196d3ed6086"
+APR_UTIL_DOWNLOAD="https://archive.apache.org/dist/apr/apr-util-1.6.3.tar.gz"
+APR_UTIL_NAME="apr-util-1.6.3.tar.gz"
+APR_UTIL_SOURCE="apr-util-1.6.3"
+APR_UTIL_MD5SUM="4ce110b31c10158aaafb1b46ec818f96"
 
 # AliCloud OSS C++ SDK
 OSS_DOWNLOAD="https://github.com/aliyun/aliyun-oss-cpp-sdk/archive/refs/tags/1.10.0.tar.gz"

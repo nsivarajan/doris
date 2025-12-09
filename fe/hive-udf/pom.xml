@@ -105,6 +105,7 @@ under the License.
             <plugin>
                 <groupId>org.apache.maven.plugins</groupId>
                 <artifactId>maven-shade-plugin</artifactId>
+                <version>3.5.1</version>
                 <configuration>
                     <minimizeJar>true</minimizeJar>
                     <relocations>
@@ -128,6 +129,12 @@ under the License.
                             <artifact>org.awaitility:*</artifact>
                             <excludes>
                                 <exclude>**</exclude>
+                            </excludes>
+                        </filter>
+                        <filter>
+                            <artifact>org.bouncycastle:bcprov-jdk18on</artifact>
+                            <excludes>
+                                <exclude>META-INF/versions/21/**</exclude>
                             </excludes>
                         </filter>
                     </filters>

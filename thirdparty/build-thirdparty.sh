@@ -1886,20 +1886,60 @@ build_azure() {
 
 # Apache Portable Runtime (APR) - Required by OSS SDK
 build_apr() {
+    # Check if already built
+    if [[ -f "${TP_INSTALL_DIR}/lib/libapr-1.a" ]]; then
+        echo "APR already built, skipping"
+        return
+    fi
+
+    # Download if needed
+    if [[ ! -d "${TP_SOURCE_DIR}/${APR_SOURCE}" ]]; then
+        echo "Downloading APR..."
+        cd "${TP_SOURCE_DIR}"
+        if [[ ! -f "${APR_NAME}" ]]; then
+            wget --no-check-certificate "${APR_DOWNLOAD}" -O "${APR_NAME}"
+        fi
+        tar xzf "${APR_NAME}"
+    fi
+
     check_if_source_exist "${APR_SOURCE}"
     cd "${TP_SOURCE_DIR}/${APR_SOURCE}"
 
-    ./configure --prefix="${TP_INSTALL_DIR}" --enable-static --disable-shared
+    # Clean previous build
+    make clean || true
+
+    # Use gcc instead of clang for APR
+    CC=gcc ./configure --prefix="${TP_INSTALL_DIR}" --enable-static --disable-shared
     make -j "${PARALLEL}"
     make install
 }
 
 # APR-Util - Required by OSS SDK
 build_apr_util() {
+    # Check if already built
+    if [[ -f "${TP_INSTALL_DIR}/lib/libaprutil-1.a" ]]; then
+        echo "APR-Util already built, skipping"
+        return
+    fi
+
+    # Download if needed
+    if [[ ! -d "${TP_SOURCE_DIR}/${APR_UTIL_SOURCE}" ]]; then
+        echo "Downloading APR-Util..."
+        cd "${TP_SOURCE_DIR}"
+        if [[ ! -f "${APR_UTIL_NAME}" ]]; then
+            wget --no-check-certificate "${APR_UTIL_DOWNLOAD}" -O "${APR_UTIL_NAME}"
+        fi
+        tar xzf "${APR_UTIL_NAME}"
+    fi
+
     check_if_source_exist "${APR_UTIL_SOURCE}"
     cd "${TP_SOURCE_DIR}/${APR_UTIL_SOURCE}"
 
-    ./configure --prefix="${TP_INSTALL_DIR}" \
+    # Clean previous build
+    make clean || true
+
+    # Use gcc instead of clang for APR-Util
+    CC=gcc ./configure --prefix="${TP_INSTALL_DIR}" \
         --with-apr="${TP_INSTALL_DIR}" \
         --enable-static --disable-shared
     make -j "${PARALLEL}"
@@ -1912,6 +1952,7 @@ build_oss() {
         echo "Skip build OSS SDK"
     else
         # APR is required for OSS SDK
+        echo "Building APR dependencies for OSS SDK..."
         build_apr
         build_apr_util
 
@@ -1942,8 +1983,8 @@ build_sts() {
     if [[ "${BUILD_STS}" == "OFF" ]]; then
         echo "Skip build AliCloud v1 SDK (core + sts)"
     else
-        check_if_source_exist "${ALICLOUD_SDK_SOURCE}"
-        cd "${TP_SOURCE_DIR}/${ALICLOUD_SDK_SOURCE}"
+        check_if_source_exist "${STS_SOURCE}"
+        cd "${TP_SOURCE_DIR}/${STS_SOURCE}"
 
         rm -rf "${BUILD_DIR}"
         mkdir -p "${BUILD_DIR}"
