@@ -53,15 +53,22 @@ import com.aliyuncs.profile.DefaultProfile;
 import com.aliyuncs.profile.IClientProfile;
 import com.aliyuncs.sts.model.v20150401.AssumeRoleRequest;
 import com.aliyuncs.sts.model.v20150401.AssumeRoleResponse;
+import com.google.gson.Gson;
+import com.google.gson.JsonObject;
 import org.apache.commons.lang3.StringUtils;
 import org.apache.commons.lang3.tuple.Triple;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 import org.jetbrains.annotations.Nullable;
 
+import java.io.BufferedReader;
 import java.io.ByteArrayInputStream;
 import java.io.File;
+import java.io.IOException;
 import java.io.InputStream;
+import java.io.InputStreamReader;
+import java.net.HttpURLConnection;
+import java.net.URL;
 import java.nio.file.FileSystems;
 import java.nio.file.PathMatcher;
 import java.nio.file.Paths;
@@ -72,6 +79,10 @@ import java.util.stream.Collectors;
 
 public class OssObjStorage implements ObjStorage<OSS> {
     private static final Logger LOG = LogManager.getLogger(OssObjStorage.class);
+    private static final String ECS_METADATA_URL = "http://100.100.100.200/latest/meta-data/ram/security-credentials/";
+    private static final int ECS_METADATA_TIMEOUT_MS = 5000;
+    private static final Long STS_DURATION_SECONDS = 3600L;
+    private static final Gson GSON = new Gson();
 
     protected OSSProperties ossProperties;
     private OSS client;
@@ -87,144 +98,20 @@ public class OssObjStorage implements ObjStorage<OSS> {
     @Override
     public OSS getClient() throws UserException {
         if (client == null) {
-            String endpoint = ossProperties.getEndpoint();
-            String accessKey = ossProperties.getAccessKey();
-            String secretKey = ossProperties.getSecretKey();
-            String sessionToken = ossProperties.getSessionToken();
-            String roleArn = ossProperties.getOssRoleArn();
-            String externalId = ossProperties.getOssExternalId();
-
-            try {
-                // Priority 1: If role ARN is specified, use AssumeRole to get temporary credentials
-                if (StringUtils.isNotBlank(roleArn)) {
-                    LOG.info("Using AssumeRole authentication with role ARN: {}", roleArn);
-                    AssumeRoleCredentials assumedCreds = assumeRole(endpoint, accessKey, secretKey,
-                                                                     roleArn, externalId);
-                    CredentialsProvider credentialsProvider = new DefaultCredentialProvider(
-                            assumedCreds.accessKeyId,
-                            assumedCreds.accessKeySecret,
-                            assumedCreds.securityToken);
-                    client = new OSSClientBuilder().build(endpoint, credentialsProvider);
-                    LOG.info("Created OSS client with AssumeRole credentials for endpoint: {}", endpoint);
-                }
-                // Priority 2: If session token is provided, use it directly (STS temporary credentials)
-                else if (StringUtils.isNotBlank(sessionToken)) {
-                    LOG.info("Using direct session token authentication");
-                    CredentialsProvider credentialsProvider = new DefaultCredentialProvider(
-                            accessKey, secretKey, sessionToken);
-                    client = new OSSClientBuilder().build(endpoint, credentialsProvider);
-                    LOG.info("Created OSS client with session token for endpoint: {}", endpoint);
-                }
-                // Priority 3: Use permanent credentials (access key + secret key)
-                else if (StringUtils.isNotBlank(accessKey) && StringUtils.isNotBlank(secretKey)) {
-                    LOG.info("Using permanent credentials authentication");
-                    client = new OSSClientBuilder().build(endpoint, accessKey, secretKey);
-                    LOG.info("Created OSS client with permanent credentials for endpoint: {}", endpoint);
-                }
-                // Priority 4: No credentials provided - this will fail
-                else {
-                    throw new UserException("No valid OSS credentials provided. Please specify either: "
-                            + "(1) role_arn for AssumeRole, "
-                            + "(2) session_token for STS, or "
-                            + "(3) access_key + secret_key for permanent credentials");
-                }
-            } catch (ClientException e) {
-                LOG.error("Failed to assume role for OSS: {}", e.getMessage(), e);
-                throw new UserException("Failed to assume role for OSS: " + e.getMessage());
-            } catch (Exception e) {
-                LOG.error("Failed to create OSS client for endpoint: {}", endpoint, e);
-                throw new UserException("Failed to create OSS client: " + e.getMessage());
-            }
+            client = createOssClient();
         }
         return client;
     }
 
-    /**
-     * Assume a role using STS to get temporary credentials.
-     * This enables cross-account access and least-privilege security.
-     */
-    private AssumeRoleCredentials assumeRole(String endpoint, String accessKey, String secretKey,
-                                            String roleArn, String externalId) throws ClientException {
-        // Extract region from endpoint (e.g., "oss-cn-beijing.aliyuncs.com" -> "cn-beijing")
-        String region = extractRegionFromEndpoint(endpoint);
-        if (region == null) {
-            region = ossProperties.getRegion();
-        }
-        if (StringUtils.isBlank(region)) {
-            throw new ClientException("Cannot determine region for STS AssumeRole. "
-                    + "Please specify region explicitly via oss.region property");
-        }
-
-        // Create STS client
-        IClientProfile profile = DefaultProfile.getProfile(region, accessKey, secretKey);
-        DefaultAcsClient stsClient = new DefaultAcsClient(profile);
-
-        // Create AssumeRole request
-        AssumeRoleRequest request = new AssumeRoleRequest();
-        request.setSysMethod(MethodType.POST);
-        request.setRoleArn(roleArn);
-        request.setRoleSessionName("doris-fe-" + System.currentTimeMillis());
-        request.setDurationSeconds(3600L); // 1 hour
-
-        if (StringUtils.isNotBlank(externalId)) {
-            request.setExternalId(externalId);
-            LOG.info("AssumeRole with external ID for enhanced security");
-        }
-
-        // Call AssumeRole API
-        AssumeRoleResponse response = stsClient.getAcsResponse(request);
-        AssumeRoleResponse.Credentials credentials = response.getCredentials();
-
-        LOG.info("Successfully assumed role: {}, expiration: {}", roleArn, credentials.getExpiration());
-
-        return new AssumeRoleCredentials(
-                credentials.getAccessKeyId(),
-                credentials.getAccessKeySecret(),
-                credentials.getSecurityToken());
-    }
-
-    /**
-     * Extract region from OSS endpoint.
-     * Examples:
-     *   oss-cn-beijing.aliyuncs.com -> cn-beijing
-     *   oss-cn-shanghai-internal.aliyuncs.com -> cn-shanghai
-     */
-    private String extractRegionFromEndpoint(String endpoint) {
-        if (StringUtils.isBlank(endpoint)) {
-            return null;
-        }
-
-        // Remove protocol if present
-        String cleanEndpoint = endpoint.replaceFirst("^https?://", "");
-
-        // Pattern: oss-{region}[-internal].aliyuncs.com
-        if (cleanEndpoint.startsWith("oss-") && cleanEndpoint.contains(".aliyuncs.com")) {
-            String regionPart = cleanEndpoint.substring(4); // Remove "oss-"
-            int dashIndex = regionPart.indexOf("-internal");
-            if (dashIndex > 0) {
-                return regionPart.substring(0, dashIndex);
+    @Override
+    public synchronized void close() throws Exception {
+        if (client != null) {
+            try {
+                client.shutdown();
+            } catch (Exception e) {
+                LOG.warn("Failed to close OSS client: {}", e.getMessage(), e);
             }
-            int dotIndex = regionPart.indexOf(".");
-            if (dotIndex > 0) {
-                return regionPart.substring(0, dotIndex);
-            }
-        }
-
-        return null;
-    }
-
-    /**
-     * Helper class to hold AssumeRole credentials
-     */
-    private static class AssumeRoleCredentials {
-        final String accessKeyId;
-        final String accessKeySecret;
-        final String securityToken;
-
-        AssumeRoleCredentials(String accessKeyId, String accessKeySecret, String securityToken) {
-            this.accessKeyId = accessKeyId;
-            this.accessKeySecret = accessKeySecret;
-            this.securityToken = securityToken;
+            client = null;
         }
     }
 
@@ -237,20 +124,14 @@ public class OssObjStorage implements ObjStorage<OSS> {
     public Status headObject(String remotePath) {
         try {
             S3URI uri = S3URI.create(remotePath, isUsePathStyle, forceParsingByStandardUri);
-            ObjectMetadata metadata = getClient().getObjectMetadata(uri.getBucket(), uri.getKey());
-            if (LOG.isDebugEnabled()) {
-                LOG.debug("headObject success: {}, metadata: {}", remotePath, metadata);
-            }
+            getClient().getObjectMetadata(uri.getBucket(), uri.getKey());
             return Status.OK;
         } catch (OSSException e) {
             if (e.getErrorCode().equals("NoSuchKey")) {
                 return new Status(Status.ErrCode.NOT_FOUND, "remote path does not exist: " + remotePath);
-            } else {
-                LOG.warn("headObject failed:", e);
-                return new Status(Status.ErrCode.COMMON_ERROR, "headObject failed: " + Util.getRootCauseMessage(e));
             }
+            return new Status(Status.ErrCode.COMMON_ERROR, "headObject failed: " + Util.getRootCauseMessage(e));
         } catch (UserException ue) {
-            LOG.warn("connect to OSS failed: ", ue);
             return new Status(Status.ErrCode.COMMON_ERROR, "connect to OSS failed: " + Util.getRootCauseMessage(ue));
         }
     }
@@ -259,22 +140,14 @@ public class OssObjStorage implements ObjStorage<OSS> {
     public Status getObject(String remoteFilePath, File localFile) {
         try {
             S3URI uri = S3URI.create(remoteFilePath, isUsePathStyle, forceParsingByStandardUri);
-            GetObjectRequest request = new GetObjectRequest(uri.getBucket(), uri.getKey());
-            getClient().getObject(request, localFile);
-            if (LOG.isDebugEnabled()) {
-                LOG.debug("get file {} success", remoteFilePath);
-            }
+            getClient().getObject(new GetObjectRequest(uri.getBucket(), uri.getKey()), localFile);
             return Status.OK;
         } catch (OSSException e) {
-            LOG.warn("connect to OSS failed with OSS exception", e);
             return new Status(Status.ErrCode.COMMON_ERROR,
-                    "get file from OSS error: " + e.getErrorMessage()
-                            + ". Root cause: " + Util.getRootCauseMessage(e));
+                    "get file from OSS error: " + e.getErrorMessage() + ". Root cause: " + Util.getRootCauseMessage(e));
         } catch (UserException ue) {
-            LOG.warn("connect to OSS failed: ", ue);
             return new Status(Status.ErrCode.COMMON_ERROR, "connect to OSS failed: " + Util.getRootCauseMessage(ue));
         } catch (Exception e) {
-            LOG.warn("connect to OSS failed with unexpected exception", e);
             return new Status(Status.ErrCode.COMMON_ERROR, Util.getRootCauseMessage(e));
         }
     }
@@ -285,17 +158,11 @@ public class OssObjStorage implements ObjStorage<OSS> {
             S3URI uri = S3URI.create(remotePath, isUsePathStyle, forceParsingByStandardUri);
             ObjectMetadata metadata = new ObjectMetadata();
             metadata.setContentLength(contentLength);
-            PutObjectRequest request = new PutObjectRequest(uri.getBucket(), uri.getKey(), content, metadata);
-            getClient().putObject(request);
-            if (LOG.isDebugEnabled()) {
-                LOG.debug("put object success: {}", remotePath);
-            }
+            getClient().putObject(new PutObjectRequest(uri.getBucket(), uri.getKey(), content, metadata));
             return Status.OK;
         } catch (OSSException e) {
-            LOG.warn("put object failed: ", e);
             return new Status(Status.ErrCode.COMMON_ERROR, "put object failed: " + Util.getRootCauseMessage(e));
         } catch (Exception ue) {
-            LOG.warn("connect to OSS failed: ", ue);
             return new Status(Status.ErrCode.COMMON_ERROR, "connect to OSS failed: " + Util.getRootCauseMessage(ue));
         }
     }
@@ -305,18 +172,13 @@ public class OssObjStorage implements ObjStorage<OSS> {
         try {
             S3URI uri = S3URI.create(remotePath, isUsePathStyle, forceParsingByStandardUri);
             getClient().deleteObject(uri.getBucket(), uri.getKey());
-            if (LOG.isDebugEnabled()) {
-                LOG.debug("delete file {} success", remotePath);
-            }
             return Status.OK;
         } catch (OSSException e) {
-            LOG.warn("delete file failed: ", e);
             if (e.getErrorCode().equals("NoSuchKey")) {
                 return Status.OK;
             }
             return new Status(Status.ErrCode.COMMON_ERROR, "delete file failed: " + Util.getRootCauseMessage(e));
         } catch (UserException ue) {
-            LOG.warn("connect to OSS failed: ", ue);
             return new Status(Status.ErrCode.COMMON_ERROR, "connect to OSS failed: " + Util.getRootCauseMessage(ue));
         }
     }
@@ -326,8 +188,7 @@ public class OssObjStorage implements ObjStorage<OSS> {
         try {
             S3URI baseUri = S3URI.create(absolutePath, isUsePathStyle, forceParsingByStandardUri);
             String continuationToken = "";
-            boolean isTruncated = false;
-            long totalObjects = 0;
+            boolean isTruncated;
             do {
                 RemoteObjects objects = listObjects(absolutePath, continuationToken);
                 List<RemoteObject> objectList = objects.getObjectList();
@@ -335,32 +196,16 @@ public class OssObjStorage implements ObjStorage<OSS> {
                     List<String> keysToDelete = objectList.stream()
                             .map(RemoteObject::getKey)
                             .collect(Collectors.toList());
-
-                    DeleteObjectsRequest request = new DeleteObjectsRequest(baseUri.getBucket())
-                            .withKeys(keysToDelete);
-                    DeleteObjectsResult result = getClient().deleteObjects(request);
-
-                    if (LOG.isDebugEnabled()) {
-                        LOG.debug("{} of {} objects deleted for dir {}",
-                                result.getDeletedObjects().size(), objectList.size(), absolutePath);
-                        totalObjects += objectList.size();
-                    }
+                    getClient().deleteObjects(new DeleteObjectsRequest(baseUri.getBucket()).withKeys(keysToDelete));
                 }
-
                 isTruncated = objects.isTruncated();
                 continuationToken = objects.getContinuationToken();
             } while (isTruncated);
-
-            if (LOG.isDebugEnabled()) {
-                LOG.debug("total delete {} objects for dir {}", totalObjects, absolutePath);
-            }
             return Status.OK;
         } catch (DdlException e) {
-            LOG.warn("deleteObjects:", e);
             return new Status(Status.ErrCode.COMMON_ERROR,
-                    "list objects for delete objects failed: " + Util.getRootCauseMessage(e));
+                    "list objects for delete failed: " + Util.getRootCauseMessage(e));
         } catch (Exception e) {
-            LOG.warn(String.format("delete objects %s failed", absolutePath), e);
             return new Status(Status.ErrCode.COMMON_ERROR, "delete objects failed: " + Util.getRootCauseMessage(e));
         }
     }
@@ -370,19 +215,12 @@ public class OssObjStorage implements ObjStorage<OSS> {
         try {
             S3URI origUri = S3URI.create(origFilePath, isUsePathStyle, forceParsingByStandardUri);
             S3URI destUri = S3URI.create(destFilePath, isUsePathStyle, forceParsingByStandardUri);
-            CopyObjectRequest request = new CopyObjectRequest(
-                    origUri.getBucket(), origUri.getKey(),
-                    destUri.getBucket(), destUri.getKey());
-            getClient().copyObject(request);
-            if (LOG.isDebugEnabled()) {
-                LOG.debug("copy file from {} to {} success", origFilePath, destFilePath);
-            }
+            getClient().copyObject(new CopyObjectRequest(
+                    origUri.getBucket(), origUri.getKey(), destUri.getBucket(), destUri.getKey()));
             return Status.OK;
         } catch (OSSException e) {
-            LOG.warn("copy file failed: ", e);
             return new Status(Status.ErrCode.COMMON_ERROR, "copy file failed: " + Util.getRootCauseMessage(e));
         } catch (UserException ue) {
-            LOG.warn("copy to OSS failed: ", ue);
             return new Status(Status.ErrCode.COMMON_ERROR, "connect to OSS failed: " + Util.getRootCauseMessage(ue));
         }
     }
@@ -391,44 +229,38 @@ public class OssObjStorage implements ObjStorage<OSS> {
     public RemoteObjects listObjects(String absolutePath, String continuationToken) throws DdlException {
         try {
             S3URI uri = S3URI.create(absolutePath, isUsePathStyle, forceParsingByStandardUri);
-            String bucket = uri.getBucket();
-            String prefix = uri.getKey();
             ListObjectsV2Request request = new ListObjectsV2Request()
-                    .withBucketName(bucket)
-                    .withPrefix(normalizePrefix(prefix));
+                    .withBucketName(uri.getBucket())
+                    .withPrefix(normalizePrefix(uri.getKey()));
             if (!StringUtils.isEmpty(continuationToken)) {
                 request.setContinuationToken(continuationToken);
             }
             ListObjectsV2Result result = getClient().listObjectsV2(request);
             List<RemoteObject> remoteObjects = new ArrayList<>();
             for (OSSObjectSummary obj : result.getObjectSummaries()) {
-                String relativePath = getRelativePath(prefix, obj.getKey());
+                String relativePath = getRelativePath(uri.getKey(), obj.getKey());
                 remoteObjects.add(new RemoteObject(obj.getKey(), relativePath, obj.getETag(), obj.getSize()));
             }
             return new RemoteObjects(remoteObjects, result.isTruncated(), result.getNextContinuationToken());
         } catch (Exception e) {
-            LOG.warn(String.format("Failed to list objects for OSS: %s", absolutePath), e);
-            throw new DdlException("Failed to list objects for OSS, Error message: " + Util.getRootCauseMessage(e), e);
+            throw new DdlException("Failed to list objects for OSS: " + Util.getRootCauseMessage(e), e);
         }
     }
 
     public Status multipartUpload(String remotePath, @Nullable InputStream inputStream, long totalBytes) {
-        Status st = Status.OK;
-        long uploadedBytes = 0;
-        int bytesRead = 0;
-        byte[] buffer = new byte[CHUNK_SIZE];
-        int partNumber = 1;
-
         String uploadId = null;
         S3URI uri = null;
-        List<PartETag> partETags = new ArrayList<>();
-
         try {
             uri = S3URI.create(remotePath, isUsePathStyle, forceParsingByStandardUri);
-            InitiateMultipartUploadRequest initiateRequest = new InitiateMultipartUploadRequest(
-                    uri.getBucket(), uri.getKey());
-            InitiateMultipartUploadResult initiateResult = getClient().initiateMultipartUpload(initiateRequest);
+            InitiateMultipartUploadResult initiateResult = getClient().initiateMultipartUpload(
+                    new InitiateMultipartUploadRequest(uri.getBucket(), uri.getKey()));
             uploadId = initiateResult.getUploadId();
+
+            List<PartETag> partETags = new ArrayList<>();
+            byte[] buffer = new byte[CHUNK_SIZE];
+            int partNumber = 1;
+            long uploadedBytes = 0;
+            int bytesRead;
 
             while (uploadedBytes < totalBytes && (bytesRead = inputStream.read(buffer)) != -1) {
                 uploadedBytes += bytesRead;
@@ -436,73 +268,47 @@ public class OssObjStorage implements ObjStorage<OSS> {
                 uploadRequest.setBucketName(uri.getBucket());
                 uploadRequest.setKey(uri.getKey());
                 uploadRequest.setUploadId(uploadId);
-                uploadRequest.setPartNumber(partNumber);
+                uploadRequest.setPartNumber(partNumber++);
                 uploadRequest.setPartSize(bytesRead);
                 uploadRequest.setInputStream(new ByteArrayInputStream(buffer, 0, bytesRead));
-
-                UploadPartResult uploadResult = getClient().uploadPart(uploadRequest);
-                partETags.add(uploadResult.getPartETag());
-                partNumber++;
+                partETags.add(getClient().uploadPart(uploadRequest).getPartETag());
             }
 
-            CompleteMultipartUploadRequest completeRequest = new CompleteMultipartUploadRequest(
-                    uri.getBucket(), uri.getKey(), uploadId, partETags);
-            getClient().completeMultipartUpload(completeRequest);
+            getClient().completeMultipartUpload(
+                    new CompleteMultipartUploadRequest(uri.getBucket(), uri.getKey(), uploadId, partETags));
+            return Status.OK;
         } catch (Exception e) {
-            LOG.warn("remotePath:{}, ", remotePath, e);
-            st = new Status(Status.ErrCode.COMMON_ERROR, "Failed to multipartUpload " + remotePath
-                    + " reason: " + Util.getRootCauseMessage(e));
-
             if (uri != null && uploadId != null) {
                 try {
-                    AbortMultipartUploadRequest abortRequest = new AbortMultipartUploadRequest(
-                            uri.getBucket(), uri.getKey(), uploadId);
-                    getClient().abortMultipartUpload(abortRequest);
+                    getClient().abortMultipartUpload(
+                            new AbortMultipartUploadRequest(uri.getBucket(), uri.getKey(), uploadId));
                 } catch (Exception e1) {
                     LOG.warn("Failed to abort multipartUpload {}", remotePath, e1);
                 }
             }
+            return new Status(Status.ErrCode.COMMON_ERROR,
+                    "Failed to multipartUpload " + remotePath + " reason: " + Util.getRootCauseMessage(e));
         }
-        return st;
     }
 
-    /**
-     * List all files under the given path with glob pattern.
-     */
     public Status globList(String remotePath, List<RemoteFile> result, boolean fileNameOnly) {
-        long roundCnt = 0;
-        long elementCnt = 0;
-        long matchCnt = 0;
-        long startTime = System.nanoTime();
         try {
             S3URI uri = S3URI.create(remotePath, isUsePathStyle, forceParsingByStandardUri);
             String bucket = uri.getBucket();
             String globPath = uri.getKey();
-
-            if (LOG.isDebugEnabled()) {
-                LOG.debug("globList globPath:{}, remotePath:{}", globPath, remotePath);
-            }
-            java.nio.file.Path pathPattern = Paths.get(globPath);
-            PathMatcher matcher = FileSystems.getDefault().getPathMatcher("glob:" + pathPattern);
+            PathMatcher matcher = FileSystems.getDefault().getPathMatcher("glob:" + Paths.get(globPath));
             HashSet<String> directorySet = new HashSet<>();
-
             String listPrefix = getLongestPrefix(globPath);
-            if (LOG.isDebugEnabled()) {
-                LOG.debug("globList listPrefix: '{}' (from globPath: '{}')", listPrefix, globPath);
-            }
 
             ListObjectsV2Request request = new ListObjectsV2Request()
                     .withBucketName(bucket)
                     .withPrefix(listPrefix);
 
-            boolean isTruncated = false;
+            boolean isTruncated;
             do {
-                roundCnt++;
                 ListObjectsV2Result response = getClient().listObjectsV2(request);
                 for (OSSObjectSummary obj : response.getObjectSummaries()) {
-                    elementCnt++;
                     java.nio.file.Path objPath = Paths.get(obj.getKey());
-
                     boolean isPrefix = false;
                     while (objPath != null && objPath.normalize().toString().startsWith(listPrefix)) {
                         if (!matcher.matches(objPath)) {
@@ -516,50 +322,169 @@ public class OssObjStorage implements ObjStorage<OSS> {
                         if (isPrefix) {
                             directorySet.add(objPath.normalize().toString());
                         }
-
-                        matchCnt++;
-                        RemoteFile remoteFile = new RemoteFile(
-                                fileNameOnly ? objPath.getFileName().toString() :
-                                        "oss://" + bucket + "/" + objPath.toString(),
+                        result.add(new RemoteFile(
+                                fileNameOnly ? objPath.getFileName().toString() : "oss://" + bucket + "/" + objPath,
                                 !isPrefix,
                                 isPrefix ? -1 : obj.getSize(),
                                 isPrefix ? -1 : obj.getSize(),
-                                isPrefix ? 0 : obj.getLastModified().getTime()
-                        );
-                        result.add(remoteFile);
+                                isPrefix ? 0 : obj.getLastModified().getTime()));
                         objPath = objPath.getParent();
                         isPrefix = true;
                     }
                 }
-
                 isTruncated = response.isTruncated();
                 if (isTruncated) {
                     request.setContinuationToken(response.getNextContinuationToken());
                 }
             } while (isTruncated);
-
-            if (LOG.isDebugEnabled()) {
-                LOG.debug("remotePath:{}, result:{}", remotePath, result);
-            }
             return Status.OK;
         } catch (Exception e) {
-            LOG.warn("Errors while getting file status", e);
             return new Status(Status.ErrCode.COMMON_ERROR,
                     "Errors while getting file status " + Util.getRootCauseMessage(e));
-        } finally {
-            long endTime = System.nanoTime();
-            long duration = endTime - startTime;
-            if (LOG.isDebugEnabled()) {
-                LOG.debug("process {} elements under prefix {} for {} round, match {} elements, take {} ms",
-                        elementCnt, remotePath, roundCnt, matchCnt,
-                        duration / 1000 / 1000);
-            }
         }
     }
 
-    /**
-     * Get longest non-wildcard prefix from glob pattern.
-     */
+    private OSS createOssClient() throws UserException {
+        String endpoint = ossProperties.getEndpoint();
+        String accessKey = ossProperties.getAccessKey();
+        String secretKey = ossProperties.getSecretKey();
+        String sessionToken = ossProperties.getSessionToken();
+        String roleArn = ossProperties.getOssRoleArn();
+        String externalId = ossProperties.getOssExternalId();
+
+        try {
+            if (StringUtils.isNotBlank(roleArn)) {
+                return createClientWithAssumeRole(endpoint, accessKey, secretKey, sessionToken, roleArn, externalId);
+            } else if (StringUtils.isNotBlank(sessionToken)) {
+                return createClientWithSessionToken(endpoint, accessKey, secretKey, sessionToken);
+            } else if (StringUtils.isNotBlank(accessKey) && StringUtils.isNotBlank(secretKey)) {
+                return createClientWithPermanentCredentials(endpoint, accessKey, secretKey);
+            } else {
+                throw new UserException("No valid OSS credentials provided");
+            }
+        } catch (ClientException e) {
+            throw new UserException("Failed to create OSS client: " + e.getMessage());
+        }
+    }
+
+    private OSS createClientWithAssumeRole(String endpoint, String accessKey, String secretKey,
+            String sessionToken, String roleArn, String externalId) throws UserException, ClientException {
+        if (StringUtils.isBlank(accessKey) || StringUtils.isBlank(secretKey)) {
+            EcsCredentials ecsCreds = fetchEcsCredentials();
+            accessKey = ecsCreds.accessKeyId;
+            secretKey = ecsCreds.accessKeySecret;
+            sessionToken = ecsCreds.securityToken;
+        }
+
+        AssumeRoleCredentials creds = callAssumeRole(endpoint, accessKey, secretKey, sessionToken, roleArn, externalId);
+        return new OSSClientBuilder().build(endpoint,
+                new DefaultCredentialProvider(creds.accessKeyId, creds.accessKeySecret, creds.securityToken));
+    }
+
+    private OSS createClientWithSessionToken(String endpoint, String accessKey, String secretKey, String sessionToken) {
+        return new OSSClientBuilder().build(endpoint,
+                new DefaultCredentialProvider(accessKey, secretKey, sessionToken));
+    }
+
+    private OSS createClientWithPermanentCredentials(String endpoint, String accessKey, String secretKey) {
+        return new OSSClientBuilder().build(endpoint, accessKey, secretKey);
+    }
+
+    private AssumeRoleCredentials callAssumeRole(String endpoint, String accessKey, String secretKey,
+            String baseSessionToken, String roleArn, String externalId) throws ClientException {
+        String region = extractRegionFromEndpoint(endpoint);
+        if (region == null) {
+            region = ossProperties.getRegion();
+        }
+        if (StringUtils.isBlank(region)) {
+            throw new ClientException("Cannot determine region for STS AssumeRole");
+        }
+
+        DefaultAcsClient stsClient;
+        if (StringUtils.isNotBlank(baseSessionToken)) {
+            com.aliyuncs.auth.BasicSessionCredentials sessionCreds =
+                    new com.aliyuncs.auth.BasicSessionCredentials(accessKey, secretKey, baseSessionToken);
+            stsClient = new DefaultAcsClient(DefaultProfile.getProfile(region), sessionCreds);
+        } else {
+            stsClient = new DefaultAcsClient(DefaultProfile.getProfile(region, accessKey, secretKey));
+        }
+
+        AssumeRoleRequest request = new AssumeRoleRequest();
+        request.setSysMethod(MethodType.POST);
+        request.setRoleArn(roleArn);
+        request.setRoleSessionName("doris-fe-" + System.currentTimeMillis());
+        request.setDurationSeconds(STS_DURATION_SECONDS);
+        if (StringUtils.isNotBlank(externalId)) {
+            request.setExternalId(externalId);
+        }
+
+        AssumeRoleResponse.Credentials credentials = stsClient.getAcsResponse(request).getCredentials();
+        return new AssumeRoleCredentials(
+                credentials.getAccessKeyId(), credentials.getAccessKeySecret(), credentials.getSecurityToken());
+    }
+
+    private EcsCredentials fetchEcsCredentials() throws UserException {
+        try {
+            String roleName = fetchEcsMetadata(ECS_METADATA_URL);
+            if (StringUtils.isBlank(roleName)) {
+                throw new UserException("No RAM role attached to this ECS instance");
+            }
+            String credentialsJson = fetchEcsMetadata(ECS_METADATA_URL + roleName);
+
+            JsonObject jsonObject = GSON.fromJson(credentialsJson, JsonObject.class);
+            String accessKeyId = jsonObject.get("AccessKeyId").getAsString();
+            String accessKeySecret = jsonObject.get("AccessKeySecret").getAsString();
+            String securityToken = jsonObject.get("SecurityToken").getAsString();
+
+            if (StringUtils.isBlank(accessKeyId) || StringUtils.isBlank(accessKeySecret)
+                    || StringUtils.isBlank(securityToken)) {
+                throw new UserException("Invalid credentials from ECS metadata service");
+            }
+            return new EcsCredentials(accessKeyId, accessKeySecret, securityToken);
+        } catch (IOException e) {
+            throw new UserException("Failed to connect to ECS metadata service: " + e.getMessage());
+        } catch (Exception e) {
+            throw new UserException("Failed to parse ECS metadata response: " + e.getMessage());
+        }
+    }
+
+    private String fetchEcsMetadata(String url) throws IOException, UserException {
+        HttpURLConnection conn = (HttpURLConnection) new URL(url).openConnection();
+        conn.setConnectTimeout(ECS_METADATA_TIMEOUT_MS);
+        conn.setReadTimeout(ECS_METADATA_TIMEOUT_MS);
+        conn.setRequestMethod("GET");
+        if (conn.getResponseCode() != 200) {
+            throw new UserException("Failed to fetch from ECS metadata service: " + url);
+        }
+        BufferedReader reader = new BufferedReader(new InputStreamReader(conn.getInputStream()));
+        StringBuilder response = new StringBuilder();
+        String line;
+        while ((line = reader.readLine()) != null) {
+            response.append(line);
+        }
+        reader.close();
+        return response.toString();
+    }
+
+    private String extractRegionFromEndpoint(String endpoint) {
+        if (StringUtils.isBlank(endpoint)) {
+            return null;
+        }
+        String clean = endpoint.replaceFirst("^https?://", "");
+        if (clean.startsWith("oss-") && clean.contains(".aliyuncs.com")) {
+            String regionPart = clean.substring(4);
+            int dashIndex = regionPart.indexOf("-internal");
+            if (dashIndex > 0) {
+                return regionPart.substring(0, dashIndex);
+            }
+            int dotIndex = regionPart.indexOf(".");
+            if (dotIndex > 0) {
+                return regionPart.substring(0, dotIndex);
+            }
+        }
+        return null;
+    }
+
     private String getLongestPrefix(String globPath) {
         StringBuilder prefix = new StringBuilder();
         for (int i = 0; i < globPath.length(); i++) {
@@ -574,15 +499,27 @@ public class OssObjStorage implements ObjStorage<OSS> {
         return lastSlash >= 0 ? result.substring(0, lastSlash + 1) : "";
     }
 
-    @Override
-    public synchronized void close() throws Exception {
-        if (client != null) {
-            try {
-                client.shutdown();
-            } catch (Exception e) {
-                LOG.warn("Failed to close OSS client: {}", e.getMessage(), e);
-            }
-            client = null;
+    private static class AssumeRoleCredentials {
+        final String accessKeyId;
+        final String accessKeySecret;
+        final String securityToken;
+
+        AssumeRoleCredentials(String accessKeyId, String accessKeySecret, String securityToken) {
+            this.accessKeyId = accessKeyId;
+            this.accessKeySecret = accessKeySecret;
+            this.securityToken = securityToken;
+        }
+    }
+
+    private static class EcsCredentials {
+        final String accessKeyId;
+        final String accessKeySecret;
+        final String securityToken;
+
+        EcsCredentials(String accessKeyId, String accessKeySecret, String securityToken) {
+            this.accessKeyId = accessKeyId;
+            this.accessKeySecret = accessKeySecret;
+            this.securityToken = securityToken;
         }
     }
 }
