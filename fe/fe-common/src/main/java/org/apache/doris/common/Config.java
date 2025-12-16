@@ -3236,6 +3236,12 @@ public class Config extends ConfigBase {
             + "for example: s3_load_endpoint_white_list=a,b,c"})
     public static String[] s3_load_endpoint_white_list = {};
 
+    @ConfField(mutable = false, masterOnly = true, description = {
+            "是否允许 S3() TVF 使用 ECS 实例配置文件访问 OSS。默认 false（安全）。",
+            "Whether to allow S3() TVF to use ECS instance profile for OSS access. Default false (secure)."
+    })
+    public static boolean oss_enable_instance_profile = false;
+
     @ConfField(mutable = true, description = {
             "此参数控制是否强制使用 Azure global endpoint。默认值为 false，系统将使用用户指定的 endpoint。"
             + "如果设置为 true，系统将强制使用 {account}.blob.core.windows.net。",

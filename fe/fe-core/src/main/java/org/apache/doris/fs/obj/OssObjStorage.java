@@ -28,13 +28,13 @@ import org.apache.doris.fs.remote.RemoteFile;
 import com.aliyun.oss.OSS;
 import com.aliyun.oss.OSSClientBuilder;
 import com.aliyun.oss.OSSException;
-import com.aliyun.oss.common.auth.CredentialsProvider;
 import com.aliyun.oss.common.auth.DefaultCredentialProvider;
+import com.aliyun.oss.common.auth.InstanceProfileCredentialsProvider;
+import com.aliyun.oss.common.auth.STSAssumeRoleSessionCredentialsProvider;
 import com.aliyun.oss.model.AbortMultipartUploadRequest;
 import com.aliyun.oss.model.CompleteMultipartUploadRequest;
 import com.aliyun.oss.model.CopyObjectRequest;
 import com.aliyun.oss.model.DeleteObjectsRequest;
-import com.aliyun.oss.model.DeleteObjectsResult;
 import com.aliyun.oss.model.GetObjectRequest;
 import com.aliyun.oss.model.InitiateMultipartUploadRequest;
 import com.aliyun.oss.model.InitiateMultipartUploadResult;
@@ -45,12 +45,10 @@ import com.aliyun.oss.model.ObjectMetadata;
 import com.aliyun.oss.model.PartETag;
 import com.aliyun.oss.model.PutObjectRequest;
 import com.aliyun.oss.model.UploadPartRequest;
-import com.aliyun.oss.model.UploadPartResult;
 import com.aliyuncs.DefaultAcsClient;
 import com.aliyuncs.exceptions.ClientException;
 import com.aliyuncs.http.MethodType;
 import com.aliyuncs.profile.DefaultProfile;
-import com.aliyuncs.profile.IClientProfile;
 import com.aliyuncs.sts.model.v20150401.AssumeRoleRequest;
 import com.aliyuncs.sts.model.v20150401.AssumeRoleResponse;
 import com.google.gson.Gson;
@@ -60,7 +58,6 @@ import org.apache.commons.lang3.tuple.Triple;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 import org.jetbrains.annotations.Nullable;
-
 import java.io.BufferedReader;
 import java.io.ByteArrayInputStream;
 import java.io.File;
@@ -360,25 +357,92 @@ public class OssObjStorage implements ObjStorage<OSS> {
             } else if (StringUtils.isNotBlank(accessKey) && StringUtils.isNotBlank(secretKey)) {
                 return createClientWithPermanentCredentials(endpoint, accessKey, secretKey);
             } else {
-                throw new UserException("No valid OSS credentials provided");
+                return createClientWithEcsInstanceProfile(endpoint);
             }
         } catch (ClientException e) {
             throw new UserException("Failed to create OSS client: " + e.getMessage());
         }
     }
 
+    private OSS createClientWithEcsInstanceProfile(String endpoint) throws UserException {
+        // Security gate: prevent unauthorized OSS access via instance profile
+        if (!org.apache.doris.common.Config.oss_enable_instance_profile) {
+            throw new UserException(
+                    "OSS instance profile access is disabled for security. "
+                    + "S3() TVF requires explicit credentials. Please provide one of:\n"
+                    + "  1. 'oss.role_arn' for AssumeRole authentication (recommended for production)\n"
+                    + "  2. 'oss.access_key' + 'oss.secret_key' for permanent credentials\n"
+                    + "  3. 'oss.session_token' for temporary STS credentials\n"
+                    + "If you are an administrator and want to enable instance profile access, "
+                    + "set 'oss_enable_instance_profile=true' in fe.conf (not recommended).");
+        }
+
+        try {
+            String roleName = fetchEcsMetadata(ECS_METADATA_URL);
+            if (StringUtils.isBlank(roleName)) {
+                throw new UserException("No RAM role attached to this ECS instance");
+            }
+
+            LOG.info("Using ECS instance profile for OSS access. Role: {} (oss_enable_instance_profile=true)",
+                     roleName);
+
+            InstanceProfileCredentialsProvider provider = new InstanceProfileCredentialsProvider(roleName);
+            return new OSSClientBuilder().build(endpoint, provider);
+        } catch (Exception e) {
+            throw new UserException("Failed to create OSS client with ECS instance profile: " + e.getMessage());
+        }
+    }
+
     private OSS createClientWithAssumeRole(String endpoint, String accessKey, String secretKey,
             String sessionToken, String roleArn, String externalId) throws UserException, ClientException {
         if (StringUtils.isBlank(accessKey) || StringUtils.isBlank(secretKey)) {
-            EcsCredentials ecsCreds = fetchEcsCredentials();
-            accessKey = ecsCreds.accessKeyId;
-            secretKey = ecsCreds.accessKeySecret;
-            sessionToken = ecsCreds.securityToken;
+            return createClientWithAssumeRoleUsingEcsProfile(endpoint, roleArn, externalId);
         }
-
         AssumeRoleCredentials creds = callAssumeRole(endpoint, accessKey, secretKey, sessionToken, roleArn, externalId);
         return new OSSClientBuilder().build(endpoint,
                 new DefaultCredentialProvider(creds.accessKeyId, creds.accessKeySecret, creds.securityToken));
+    }
+
+    private OSS createClientWithAssumeRoleUsingEcsProfile(String endpoint, String roleArn, String externalId)
+            throws UserException {
+        try {
+            String region = extractRegionFromEndpoint(endpoint);
+            if (region == null) {
+                region = ossProperties.getRegion();
+            }
+            if (StringUtils.isBlank(region)) {
+                throw new UserException("Cannot determine region for STS AssumeRole");
+            }
+
+            if (StringUtils.isNotBlank(externalId)) {
+                // External ID not supported by SDK provider, use manual implementation
+                EcsCredentials ecsCreds = fetchEcsCredentials();
+                AssumeRoleCredentials creds = callAssumeRole(endpoint, ecsCreds.accessKeyId,
+                        ecsCreds.accessKeySecret, ecsCreds.securityToken, roleArn, externalId);
+                return new OSSClientBuilder().build(endpoint,
+                        new DefaultCredentialProvider(creds.accessKeyId, creds.accessKeySecret, creds.securityToken));
+            }
+
+            // Fetch ECS role name for the base credentials provider
+            String roleName = fetchEcsMetadata(ECS_METADATA_URL);
+            if (StringUtils.isBlank(roleName)) {
+                throw new UserException("No RAM role attached to this ECS instance");
+            }
+
+            // Use STSAssumeRoleSessionCredentialsProvider with AlibabaCloud SDK credentials provider
+            com.aliyuncs.auth.InstanceProfileCredentialsProvider baseCredsProvider =
+                    new com.aliyuncs.auth.InstanceProfileCredentialsProvider(roleName);
+            com.aliyuncs.profile.IClientProfile profile =
+                    com.aliyuncs.profile.DefaultProfile.getProfile(region);
+
+            STSAssumeRoleSessionCredentialsProvider stsProvider = new STSAssumeRoleSessionCredentialsProvider(
+                    baseCredsProvider, roleArn, profile);
+            stsProvider.withRoleSessionName("doris-fe-" + System.currentTimeMillis());
+            return new OSSClientBuilder().build(endpoint, stsProvider);
+        } catch (Exception e) {
+            throw new UserException("Failed to create OSS client with AssumeRole using ECS profile: "
+                    + e.getMessage());
+        }
     }
 
     private OSS createClientWithSessionToken(String endpoint, String accessKey, String secretKey, String sessionToken) {
