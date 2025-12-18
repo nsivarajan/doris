@@ -3510,13 +3510,15 @@ public class Config extends ConfigBase {
     public static String aws_credentials_provider_version = "v2";
 
     @ConfField(mutable = true, description = {
-        "是否允许 OSS 在没有提供任何凭证参数时使用 ECS 实例配置文件进行身份验证。默认为 false（安全策略）。"
-        + "此配置仅在 SQL 中未提供 access_key、secret_key、session_token 或 role_arn 时生效。"
-        + "如果提供了任何凭证参数或 role_arn，此配置将被忽略。",
-        "Whether to allow OSS to use ECS instance profile for authentication when no credential parameters are provided. "
-        + "Default is false (security policy). "
-        + "This config only applies when access_key, secret_key, session_token, or role_arn are NOT provided in SQL. "
-        + "If any credential parameter or role_arn is provided, this config is ignored."
+            "是否允许 OSS 在没有提供任何凭证参数时使用 ECS 实例配置文件进行身份验证。默认为 false（安全策略）。"
+                    + "此配置仅在 SQL 中未提供 access_key、secret_key、session_token 或 role_arn 时生效。"
+                    + "如果提供了任何凭证参数或 role_arn，此配置将被忽略。",
+            "Whether to allow OSS to use ECS instance profile for authentication "
+                    + "when no credential parameters are provided. "
+                    + "Default is false (security policy). "
+                    + "This config only applies when access_key, secret_key, session_token, "
+                    + "or role_arn are NOT provided in SQL. "
+                    + "If any credential parameter or role_arn is provided, this config is ignored."
     })
     public static boolean oss_enable_instance_profile = false;
 }
