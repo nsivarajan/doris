@@ -25,7 +25,6 @@ import lombok.Getter;
 import lombok.Setter;
 import org.apache.commons.lang3.BooleanUtils;
 import org.apache.commons.lang3.StringUtils;
-import software.amazon.awssdk.auth.credentials.AnonymousCredentialsProvider;
 import software.amazon.awssdk.auth.credentials.AwsCredentialsProvider;
 
 import java.util.Arrays;
@@ -299,14 +298,38 @@ public class OSSProperties extends AbstractS3CompatibleProperties {
 
     @Override
     public AwsCredentialsProvider getAwsCredentialsProvider() {
+        if (StringUtils.isNotBlank(ossRoleArn)) {
+            if (StringUtils.isBlank(getRegion())) {
+                throw new IllegalArgumentException("OSS AssumeRole requires 'oss.region' to be set");
+            }
+
+            if (StringUtils.isNotBlank(accessKey) && StringUtils.isNotBlank(secretKey)) {
+                return new org.apache.doris.fs.obj.OSSAssumeRoleCredentialsProvider(
+                    ossRoleArn, getRegion(), accessKey, secretKey, sessionToken, ossExternalId
+                );
+            }
+
+            return new org.apache.doris.fs.obj.OSSInstanceProfileAssumeRoleCredentialsProvider(
+                ossRoleArn, getRegion(), ossExternalId
+            );
+        }
+
         AwsCredentialsProvider credentialsProvider = super.getAwsCredentialsProvider();
         if (credentialsProvider != null) {
             return credentialsProvider;
         }
+
         if (StringUtils.isBlank(accessKey) && StringUtils.isBlank(secretKey)) {
-            // For anonymous access (no credentials required)
-            return AnonymousCredentialsProvider.create();
+            if (org.apache.doris.common.Config.oss_enable_instance_profile) {
+                return new org.apache.doris.fs.obj.OSSInstanceProfileCredentialsProvider();
+            } else {
+                throw new IllegalArgumentException(
+                    "OSS credentials not provided. Either provide 'oss.access_key' and 'oss.secret_key', "
+                    + "or enable instance profile by setting 'oss_enable_instance_profile=true' in fe.conf"
+                );
+            }
         }
+
         return null;
     }
 
@@ -314,11 +337,25 @@ public class OSSProperties extends AbstractS3CompatibleProperties {
     public Map<String, String> getBackendConfigProperties() {
         Map<String, String> backendProperties = generateBackendS3Configuration();
 
+        // Set provider to route BE to native OSS client (uses Alibaba OSS SDK + Alibaba STS)
+        backendProperties.put("provider", "OSS");
+
+        // For AssumeRole: Let BE handle it (for long-lived connections like catalogs)
+        // Don't send credentials when role_arn is present
         if (StringUtils.isNotBlank(ossRoleArn)) {
             backendProperties.put("AWS_ROLE_ARN", ossRoleArn);
-        }
-        if (StringUtils.isNotBlank(ossExternalId)) {
-            backendProperties.put("AWS_EXTERNAL_ID", ossExternalId);
+            if (StringUtils.isNotBlank(ossExternalId)) {
+                backendProperties.put("AWS_EXTERNAL_ID", ossExternalId);
+            }
+            // Remove any credentials - BE will use instance profile + AssumeRole
+            backendProperties.remove("AWS_ACCESS_KEY");
+            backendProperties.remove("AWS_SECRET_KEY");
+            backendProperties.remove("AWS_TOKEN");
+        } else {
+            // No role_arn: Send credentials as-is (if any)
+            if (StringUtils.isNotBlank(ossExternalId)) {
+                backendProperties.put("AWS_EXTERNAL_ID", ossExternalId);
+            }
         }
         return backendProperties;
     }

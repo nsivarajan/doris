@@ -119,6 +119,7 @@ bool to_int(std::string_view str, int& res) {
 constexpr char USE_PATH_STYLE[] = "use_path_style";
 
 constexpr char AZURE_PROVIDER_STRING[] = "AZURE";
+constexpr char OSS_PROVIDER_STRING[] = "OSS";
 constexpr char S3_PROVIDER[] = "provider";
 constexpr char S3_AK[] = "AWS_ACCESS_KEY";
 constexpr char S3_SK[] = "AWS_SECRET_KEY";
@@ -579,6 +580,8 @@ Status S3ClientFactory::convert_properties_to_s3_conf(
         // S3 Provider properties should be case insensitive.
         if (0 == strcasecmp(it->second.c_str(), AZURE_PROVIDER_STRING)) {
             s3_conf->client_conf.provider = io::ObjStorageType::AZURE;
+        } else if (0 == strcasecmp(it->second.c_str(), OSS_PROVIDER_STRING)) {
+            s3_conf->client_conf.provider = io::ObjStorageType::OSS;
         }
     }
 
