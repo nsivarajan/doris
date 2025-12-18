@@ -49,8 +49,8 @@ public class OSSAssumeRoleCredentialsProvider implements AwsCredentialsProvider 
     private final String sessionToken;
     private final String externalId;
 
-    private AwsSessionCredentials cachedCredentials;
-    private Instant expirationTime;
+    private volatile AwsSessionCredentials cachedCredentials;
+    private volatile Instant expirationTime;
 
     public OSSAssumeRoleCredentialsProvider(String roleArn, String region,
                                            String accessKey, String secretKey,
@@ -81,9 +81,9 @@ public class OSSAssumeRoleCredentialsProvider implements AwsCredentialsProvider 
     }
 
     private void refreshCredentials() {
+        IAcsClient stsClient = null;
         try {
             // Create STS client with base credentials
-            IAcsClient stsClient;
             if (StringUtils.isNotBlank(sessionToken)) {
                 com.aliyuncs.auth.BasicSessionCredentials baseCreds =
                         new com.aliyuncs.auth.BasicSessionCredentials(accessKey, secretKey, sessionToken);
@@ -120,6 +120,15 @@ public class OSSAssumeRoleCredentialsProvider implements AwsCredentialsProvider 
         } catch (Exception e) {
             LOG.error("Failed to refresh AssumeRole credentials", e);
             throw new RuntimeException("Failed to refresh AssumeRole credentials", e);
+        } finally {
+            // CRITICAL: Clean up STS client resources to prevent leaks
+            if (stsClient != null) {
+                try {
+                    stsClient.shutdown();
+                } catch (Exception e) {
+                    LOG.warn("Failed to shutdown STS client, may leak resources", e);
+                }
+            }
         }
     }
 }

@@ -217,7 +217,7 @@ public class OSSProperties extends AbstractS3CompatibleProperties {
                 .filter(Objects::nonNull)
                 .filter(OSSProperties::isKnownObjectStorage)
                 .findFirst();
-        return uriValue.filter(OSSProperties::isKnownObjectStorage).isPresent();
+        return uriValue.isPresent();  // Already filtered by isKnownObjectStorage above
     }
 
     private static boolean isKnownObjectStorage(String value) {
@@ -277,8 +277,12 @@ public class OSSProperties extends AbstractS3CompatibleProperties {
         if (StringUtils.isNotBlank(ossExternalId) && StringUtils.isBlank(ossRoleArn)) {
             throw new IllegalArgumentException("oss.external_id must be used with oss.role_arn");
         }
-        if (StringUtils.isBlank(endpoint) || !STANDARD_ENDPOINT_PATTERN.matcher(endpoint).matches()) {
-            this.endpoint = getOssEndpoint(region, BooleanUtils.toBoolean(dlfAccessPublic));
+        // Only generate default endpoint if user didn't provide one
+        // Trust custom endpoints (proxy, PrivateLink, global acceleration, etc.)
+        if (StringUtils.isBlank(endpoint)) {
+            if (StringUtils.isNotBlank(region)) {
+                this.endpoint = getOssEndpoint(region, BooleanUtils.toBoolean(dlfAccessPublic));
+            }
         }
     }
 
@@ -369,8 +373,36 @@ public class OSSProperties extends AbstractS3CompatibleProperties {
     public void initializeHadoopStorageConfig() {
         super.initializeHadoopStorageConfig();
         hadoopStorageConfig.set("fs.oss.impl", "org.apache.hadoop.fs.aliyun.oss.AliyunOSSFileSystem");
-        hadoopStorageConfig.set("fs.oss.accessKeyId", accessKey);
-        hadoopStorageConfig.set("fs.oss.accessKeySecret", secretKey);
         hadoopStorageConfig.set("fs.oss.endpoint", endpoint);
+
+        // Configure credential provider based on authentication method
+        if (StringUtils.isNotBlank(ossRoleArn)) {
+            // AssumeRole authentication (instance profile + AssumeRole or static credentials + AssumeRole)
+            hadoopStorageConfig.set("fs.oss.credentials.provider",
+                    "com.aliyun.oss.common.auth.STSAssumeRoleSessionCredentialsProvider");
+            hadoopStorageConfig.set("fs.oss.roleArn", ossRoleArn);
+            if (StringUtils.isNotBlank(ossExternalId)) {
+                hadoopStorageConfig.set("fs.oss.externalId", ossExternalId);
+            }
+            // Set base credentials only if provided (for static credentials + AssumeRole)
+            if (StringUtils.isNotBlank(accessKey)) {
+                hadoopStorageConfig.set("fs.oss.accessKeyId", accessKey);
+                hadoopStorageConfig.set("fs.oss.accessKeySecret", secretKey);
+                if (StringUtils.isNotBlank(sessionToken)) {
+                    hadoopStorageConfig.set("fs.oss.securityToken", sessionToken);
+                }
+            }
+        } else if (StringUtils.isNotBlank(accessKey)) {
+            // Static credentials (ak/sk or ak/sk/st)
+            hadoopStorageConfig.set("fs.oss.accessKeyId", accessKey);
+            hadoopStorageConfig.set("fs.oss.accessKeySecret", secretKey);
+            if (StringUtils.isNotBlank(sessionToken)) {
+                hadoopStorageConfig.set("fs.oss.securityToken", sessionToken);
+            }
+        } else if (org.apache.doris.common.Config.oss_enable_instance_profile) {
+            // Instance profile authentication (ECS RAM role)
+            hadoopStorageConfig.set("fs.oss.credentials.provider",
+                    "com.aliyun.oss.common.auth.InstanceProfileCredentialsProvider");
+        }
     }
 }

@@ -22,6 +22,7 @@ import com.aliyun.oss.common.auth.EcsRamRoleCredentialsProvider;
 import com.aliyuncs.DefaultAcsClient;
 import com.aliyuncs.IAcsClient;
 import com.aliyuncs.exceptions.ClientException;
+import com.aliyuncs.http.HttpClientConfig;
 import com.aliyuncs.http.HttpRequest;
 import com.aliyuncs.http.HttpResponse;
 import com.aliyuncs.http.MethodType;
@@ -36,6 +37,7 @@ import software.amazon.awssdk.auth.credentials.AwsCredentials;
 import software.amazon.awssdk.auth.credentials.AwsCredentialsProvider;
 import software.amazon.awssdk.auth.credentials.AwsSessionCredentials;
 
+import java.nio.charset.StandardCharsets;
 import java.time.Instant;
 
 /**
@@ -52,9 +54,9 @@ public class OSSInstanceProfileAssumeRoleCredentialsProvider implements AwsCrede
     private final String region;
     private final String externalId;
 
-    private EcsRamRoleCredentialsProvider baseProvider;
-    private AwsSessionCredentials cachedCredentials;
-    private Instant expirationTime;
+    private volatile EcsRamRoleCredentialsProvider baseProvider;
+    private volatile AwsSessionCredentials cachedCredentials;
+    private volatile Instant expirationTime;
 
     public OSSInstanceProfileAssumeRoleCredentialsProvider(String roleArn, String region, String externalId) {
         this.roleArn = roleArn;
@@ -86,12 +88,20 @@ public class OSSInstanceProfileAssumeRoleCredentialsProvider implements AwsCrede
         try {
             HttpRequest request = new HttpRequest(METADATA_URL);
             request.setMethod(MethodType.GET);
-            request.setConnectTimeout(5000);
-            request.setReadTimeout(5000);
+            request.setConnectTimeout(3000);
+            request.setReadTimeout(2000);
 
-            CompatibleUrlConnClient client = new CompatibleUrlConnClient();
+            HttpClientConfig clientConfig = HttpClientConfig.getDefault();
+            CompatibleUrlConnClient client = new CompatibleUrlConnClient(clientConfig);
             HttpResponse response = client.syncInvoke(request);
-            String roleName = new String(response.getHttpContent(), "UTF-8").trim();
+            String responseContent = new String(response.getHttpContent(), StandardCharsets.UTF_8);
+            String[] roles = responseContent.split("\n");
+
+            if (roles.length > 1) {
+                LOG.warn("OSS: Multiple roles found in instance metadata ({}), using first: {}",
+                         roles.length, roles[0].trim());
+            }
+            String roleName = roles[0].trim();
 
             baseProvider = new EcsRamRoleCredentialsProvider(roleName);
             LOG.info("OSS: Using instance profile + AssumeRole, role: {}, region: {}", roleArn, region);

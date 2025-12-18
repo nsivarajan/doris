@@ -19,6 +19,7 @@ package org.apache.doris.fs.obj;
 
 import com.aliyun.oss.common.auth.Credentials;
 import com.aliyun.oss.common.auth.EcsRamRoleCredentialsProvider;
+import com.aliyuncs.http.HttpClientConfig;
 import com.aliyuncs.http.HttpRequest;
 import com.aliyuncs.http.HttpResponse;
 import com.aliyuncs.http.clients.CompatibleUrlConnClient;
@@ -28,6 +29,8 @@ import software.amazon.awssdk.auth.credentials.AwsCredentials;
 import software.amazon.awssdk.auth.credentials.AwsCredentialsProvider;
 import software.amazon.awssdk.auth.credentials.AwsSessionCredentials;
 
+import java.nio.charset.StandardCharsets;
+
 /**
  * Credentials provider using ECS RAM role (instance profile).
  * Wraps OSS SDK's EcsRamRoleCredentialsProvider.
@@ -36,7 +39,7 @@ public class OSSInstanceProfileCredentialsProvider implements AwsCredentialsProv
     private static final Logger LOG = LogManager.getLogger(OSSInstanceProfileCredentialsProvider.class);
     private static final String METADATA_URL = "http://100.100.100.200/latest/meta-data/ram/security-credentials/";
 
-    private EcsRamRoleCredentialsProvider ossProvider;
+    private volatile EcsRamRoleCredentialsProvider ossProvider;
 
     @Override
     public AwsCredentials resolveCredentials() {
@@ -61,12 +64,20 @@ public class OSSInstanceProfileCredentialsProvider implements AwsCredentialsProv
             // Fetch role name from metadata service
             HttpRequest request = new HttpRequest(METADATA_URL);
             request.setMethod(com.aliyuncs.http.MethodType.GET);
-            request.setConnectTimeout(5000);
-            request.setReadTimeout(5000);
+            request.setConnectTimeout(3000);
+            request.setReadTimeout(2000);
 
-            CompatibleUrlConnClient client = new CompatibleUrlConnClient();
+            HttpClientConfig clientConfig = HttpClientConfig.getDefault();
+            CompatibleUrlConnClient client = new CompatibleUrlConnClient(clientConfig);
             HttpResponse response = client.syncInvoke(request);
-            String roleName = new String(response.getHttpContent(), "UTF-8").trim();
+            String responseContent = new String(response.getHttpContent(), StandardCharsets.UTF_8);
+            String[] roles = responseContent.split("\n");
+
+            if (roles.length > 1) {
+                LOG.warn("OSS: Multiple roles found in instance metadata ({}), using first: {}",
+                         roles.length, roles[0].trim());
+            }
+            String roleName = roles[0].trim();
 
             // Use OSS SDK's provider (handles refresh automatically)
             ossProvider = new EcsRamRoleCredentialsProvider(roleName);
