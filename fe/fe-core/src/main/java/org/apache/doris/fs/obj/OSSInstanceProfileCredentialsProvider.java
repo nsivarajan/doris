@@ -22,6 +22,7 @@ import com.aliyun.oss.common.auth.EcsRamRoleCredentialsProvider;
 import com.aliyuncs.http.HttpClientConfig;
 import com.aliyuncs.http.HttpRequest;
 import com.aliyuncs.http.HttpResponse;
+import com.aliyuncs.http.MethodType;
 import com.aliyuncs.http.clients.CompatibleUrlConnClient;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
@@ -63,13 +64,14 @@ public class OSSInstanceProfileCredentialsProvider implements AwsCredentialsProv
         try {
             // Fetch role name from metadata service
             HttpRequest request = new HttpRequest(METADATA_URL);
-            request.setMethod(com.aliyuncs.http.MethodType.GET);
+            request.setMethod(MethodType.GET);
             request.setConnectTimeout(3000);
             request.setReadTimeout(2000);
 
             HttpClientConfig clientConfig = HttpClientConfig.getDefault();
             CompatibleUrlConnClient client = new CompatibleUrlConnClient(clientConfig);
             HttpResponse response = client.syncInvoke(request);
+
             String responseContent = new String(response.getHttpContent(), StandardCharsets.UTF_8);
             String[] roles = responseContent.split("\n");
 
@@ -77,10 +79,14 @@ public class OSSInstanceProfileCredentialsProvider implements AwsCredentialsProv
                 LOG.warn("OSS: Multiple roles found in instance metadata ({}), using first: {}",
                          roles.length, roles[0].trim());
             }
+
             String roleName = roles[0].trim();
 
-            // Use OSS SDK's provider (handles refresh automatically)
-            ossProvider = new EcsRamRoleCredentialsProvider(roleName);
+            // CRITICAL: Must pass full URL to constructor, not just role name
+            // The constructor parameter is used directly in new URL(parameter)
+            String fullUrl = METADATA_URL + roleName;
+            ossProvider = new EcsRamRoleCredentialsProvider(fullUrl);
+
             LOG.info("OSS: Using ECS instance profile directly, role: {}", roleName);
         } catch (Exception e) {
             throw new RuntimeException("Failed to initialize ECS instance profile provider", e);

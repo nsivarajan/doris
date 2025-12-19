@@ -86,6 +86,7 @@ public class OSSInstanceProfileAssumeRoleCredentialsProvider implements AwsCrede
 
     private void initializeBaseProvider() {
         try {
+            // Fetch role name from metadata service
             HttpRequest request = new HttpRequest(METADATA_URL);
             request.setMethod(MethodType.GET);
             request.setConnectTimeout(3000);
@@ -94,6 +95,7 @@ public class OSSInstanceProfileAssumeRoleCredentialsProvider implements AwsCrede
             HttpClientConfig clientConfig = HttpClientConfig.getDefault();
             CompatibleUrlConnClient client = new CompatibleUrlConnClient(clientConfig);
             HttpResponse response = client.syncInvoke(request);
+
             String responseContent = new String(response.getHttpContent(), StandardCharsets.UTF_8);
             String[] roles = responseContent.split("\n");
 
@@ -101,10 +103,16 @@ public class OSSInstanceProfileAssumeRoleCredentialsProvider implements AwsCrede
                 LOG.warn("OSS: Multiple roles found in instance metadata ({}), using first: {}",
                          roles.length, roles[0].trim());
             }
+
             String roleName = roles[0].trim();
 
-            baseProvider = new EcsRamRoleCredentialsProvider(roleName);
-            LOG.info("OSS: Using instance profile + AssumeRole, role: {}, region: {}", roleArn, region);
+            // CRITICAL: Must pass full URL to constructor, not just role name
+            // The constructor parameter is used directly in new URL(parameter)
+            String fullUrl = METADATA_URL + roleName;
+            baseProvider = new EcsRamRoleCredentialsProvider(fullUrl);
+
+            LOG.info("OSS: Using instance profile + AssumeRole, base role: {}, target role: {}, region: {}",
+                     roleName, roleArn, region);
         } catch (Exception e) {
             throw new RuntimeException("Failed to initialize base credentials provider", e);
         }
