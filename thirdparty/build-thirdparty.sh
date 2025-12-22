@@ -127,6 +127,14 @@ if [[ -n "${DISABLE_BUILD_AZURE}" ]]; then
     BUILD_AZURE='OFF'
 fi
 
+if [[ -n "${DISABLE_BUILD_OSS}" ]]; then
+    BUILD_OSS='OFF'
+fi
+
+if [[ -n "${DISABLE_BUILD_STS}" ]]; then
+    BUILD_STS='OFF'
+fi
+
 echo "Get params:
     PARALLEL            -- ${PARALLEL}
     CLEAN               -- ${CLEAN}
@@ -1946,7 +1954,46 @@ build_apr_util() {
     make install
 }
 
-# AliCloud OSS C++ SDK
+# Microsoft CPPRestSDK - Required by STS v2
+build_cpprestsdk() {
+    if [[ "${BUILD_CPPRESTSDK}" == "OFF" ]]; then
+        echo "Skip build CPPRestSDK"
+    else
+        echo "Building CPPRestSDK for STS v2 SDK..."
+        check_if_source_exist "${CPPRESTSDK_SOURCE}"
+        cd "${TP_SOURCE_DIR}/${CPPRESTSDK_SOURCE}"
+
+        rm -rf "${BUILD_DIR}"
+        mkdir -p "${BUILD_DIR}"
+        cd "${BUILD_DIR}"
+
+        # Configure CPPRestSDK with minimal features
+        "${CMAKE_CMD}" -G "${GENERATOR}" \
+            -DCMAKE_INSTALL_PREFIX="${TP_INSTALL_DIR}" \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DBUILD_SHARED_LIBS=OFF \
+            -DCPPREST_EXCLUDE_WEBSOCKETS=ON \
+            -DCPPREST_EXCLUDE_COMPRESSION=OFF \
+            -DCPPREST_EXCLUDE_BROTLI=ON \
+            -DBUILD_TESTS=OFF \
+            -DBUILD_SAMPLES=OFF \
+            -DCMAKE_PREFIX_PATH="${TP_INSTALL_DIR}" \
+            -DBoost_INCLUDE_DIR="${TP_INCLUDE_DIR}" \
+            -DOPENSSL_ROOT_DIR="${TP_INSTALL_DIR}" \
+            -DOPENSSL_INCLUDE_DIR="${TP_INCLUDE_DIR}" \
+            -DOPENSSL_CRYPTO_LIBRARY="${TP_INSTALL_DIR}/lib/libcrypto.a" \
+            -DOPENSSL_SSL_LIBRARY="${TP_INSTALL_DIR}/lib/libssl.a" \
+            -DCMAKE_CXX_FLAGS="-fvisibility=hidden" \
+            ../Release
+
+        "${BUILD_SYSTEM}" -j "${PARALLEL}"
+        "${BUILD_SYSTEM}" install
+
+        echo "CPPRestSDK installed to ${TP_INSTALL_DIR}"
+    fi
+}
+
+# AliCloud OSS C++ SDK 1.10.1 (V1 only - no V2 exists)
 build_oss() {
     if [[ "${BUILD_OSS}" == "OFF" ]]; then
         echo "Skip build OSS SDK"
@@ -1970,6 +2017,7 @@ build_oss() {
             -DBUILD_SAMPLE=OFF \
             -DBUILD_TESTS=OFF \
             -DCMAKE_PREFIX_PATH="${TP_INSTALL_DIR}" \
+            -DCMAKE_CXX_FLAGS="-fvisibility=hidden" \
             ..
 
         "${BUILD_SYSTEM}" -j "${PARALLEL}"
@@ -1977,12 +2025,15 @@ build_oss() {
     fi
 }
 
-# AliCloud v1 SDK (OpenAPI) - Core + STS modules
-# Required for OSS AssumeRole and RRSA support with external_id
+# AliCloud STS v2 SDK
 build_sts() {
     if [[ "${BUILD_STS}" == "OFF" ]]; then
-        echo "Skip build AliCloud v1 SDK (core + sts)"
+        echo "Skip build AliCloud STS v2 SDK"
     else
+        # CPPRestSDK is required for STS v2 SDK
+        echo "Building STS v2 SDK dependencies..."
+        build_cpprestsdk
+
         check_if_source_exist "${STS_SOURCE}"
         cd "${TP_SOURCE_DIR}/${STS_SOURCE}"
 
@@ -1990,24 +2041,27 @@ build_sts() {
         mkdir -p "${BUILD_DIR}"
         cd "${BUILD_DIR}"
 
+        # Build STS v2 SDK with Darabonba
         "${CMAKE_CMD}" -G "${GENERATOR}" \
             -DCMAKE_INSTALL_PREFIX="${TP_INSTALL_DIR}" \
             -DCMAKE_BUILD_TYPE=Release \
             -DCMAKE_POSITION_INDEPENDENT_CODE=ON \
             -DBUILD_SHARED_LIBS=OFF \
             -DCMAKE_PREFIX_PATH="${TP_INSTALL_DIR}" \
-            -DBUILD_PRODUCT="sts" \
-            -DBUILD_UNIT_TESTS=OFF \
-            -DBUILD_FUNCTION_TESTS=OFF \
-            -DTARGET_OUTPUT_NAME_PREFIX="alibabacloud-sdk-" \
-            -DCMAKE_CXX_FLAGS="-Wno-error -I${TP_INCLUDE_DIR}" \
+            -DCMAKE_MODULE_PATH="${TP_INSTALL_DIR}/lib/cmake" \
+            -DBoost_INCLUDE_DIR="${TP_INCLUDE_DIR}" \
+            -DOPENSSL_ROOT_DIR="${TP_INSTALL_DIR}" \
+            -DCPPREST_INCLUDE_DIR="${TP_INCLUDE_DIR}" \
+            -DCPPREST_LIB="${TP_INSTALL_DIR}/lib/libcpprest.a" \
+            -DCMAKE_CXX_FLAGS="-Wno-error -fvisibility=hidden -I${TP_INCLUDE_DIR}" \
             ..
 
         "${BUILD_SYSTEM}" -j "${PARALLEL}"
         "${BUILD_SYSTEM}" install
 
-        echo "Installed v1 SDK libraries:"
-        ls -lh "${TP_INSTALL_DIR}/lib/libalibabacloud-sdk-"*.a
+        echo "Installed STS v2 SDK libraries:"
+        ls -lh "${TP_INSTALL_DIR}/lib/libalibabacloud_sts_"*.a 2>/dev/null || \
+        ls -lh "${TP_INSTALL_DIR}/lib/libalibabacloud"*.a
     fi
 }
 

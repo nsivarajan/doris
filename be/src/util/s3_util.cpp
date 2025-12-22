@@ -349,22 +349,22 @@ S3ClientFactory::_create_oss_client(const S3ClientConf& s3_conf) {
             oss_client = std::make_shared<OssClient>(
                 s3_conf.endpoint, stsProvider, config);
         }
-        // Case 2b: Just use ECS instance role directly
+        // Case 2b: Use credential fallback chain (env vars → RRSA → ECS)
         else {
             // Security policy enforcement: require explicit config to enable instance profile
             if (!config::oss_enable_instance_profile) {
                 LOG(ERROR) << "OSS catalog creation denied: Security policy violation. "
                           << "OSS catalog without role_arn requires instance profile to be enabled. "
                           << "Either provide 'oss.role_arn' in catalog properties for AssumeRole, "
-                          << "or set 'oss_enable_instance_profile=true' in be.conf to allow direct instance profile access.";
+                          << "or set 'oss_enable_instance_profile=true' in be.conf to allow credential fallback chain.";
                 return nullptr;
             }
 
-            LOG(INFO) << "Using ECS instance profile directly (oss_enable_instance_profile=true)";
-            auto ecsProvider = std::make_shared<EcsRamRoleCredentialsProvider>();
+            LOG(INFO) << "Using credential fallback chain: env vars → RRSA → ECS instance profile";
+            auto defaultProvider = std::make_shared<DefaultCredentialsProvider>();
 
             oss_client = std::make_shared<OssClient>(
-                s3_conf.endpoint, ecsProvider, config);
+                s3_conf.endpoint, defaultProvider, config);
         }
     }
     // Fallback: Default credential chain (includes RRSA for Kubernetes)

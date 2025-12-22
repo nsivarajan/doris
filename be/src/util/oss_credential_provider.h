@@ -22,6 +22,11 @@
 #include <alibabacloud/oss/auth/Credentials.h>
 #include <alibabacloud/oss/auth/CredentialsProvider.h>
 
+// STS v2 SDK
+#include <alibabacloud/sts_20150401.hpp>
+#include <alibabacloud/open_api.hpp>
+#include <darabonba/core.hpp>
+
 #include <chrono>
 #include <memory>
 #include <mutex>
@@ -51,7 +56,7 @@ private:
     static constexpr const char* ECS_METADATA_SERVICE_HOST = "100.100.100.200";
     static constexpr const char* ECS_METADATA_FETCH_ROLE_URL =
             "http://100.100.100.200/latest/meta-data/ram/security-credentials/";
-    static constexpr int REFRESH_THRESHOLD_SECONDS = 180; // Refresh 3 minutes before expiration
+    static constexpr int REFRESH_THRESHOLD_SECONDS = 180;
 };
 
 // STS AssumeRole Credentials Provider
@@ -84,10 +89,7 @@ private:
 };
 
 // Default Credentials Provider with RRSA support
-// Checks multiple sources in order:
-// 1. Environment variables (ALIBABA_CLOUD_ACCESS_KEY_ID, ALIBABA_CLOUD_ACCESS_KEY_SECRET)
-// 2. RRSA OIDC Token (if ALIBABA_CLOUD_OIDC_TOKEN_FILE exists)
-// 3. ECS RAM Role (Instance Metadata Service)
+// Checks sources in order: Environment variables → RRSA OIDC → ECS RAM Role
 class DefaultCredentialsProvider : public AlibabaCloud::OSS::CredentialsProvider {
 public:
     DefaultCredentialsProvider();

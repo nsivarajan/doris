@@ -534,17 +534,25 @@ APR_UTIL_NAME="apr-util-1.6.3.tar.gz"
 APR_UTIL_SOURCE="apr-util-1.6.3"
 APR_UTIL_MD5SUM="4ce110b31c10158aaafb1b46ec818f96"
 
-# AliCloud OSS C++ SDK
-OSS_DOWNLOAD="https://github.com/aliyun/aliyun-oss-cpp-sdk/archive/refs/tags/1.10.0.tar.gz"
-OSS_NAME="aliyun-oss-cpp-sdk-1.10.0.tar.gz"
-OSS_SOURCE="aliyun-oss-cpp-sdk-1.10.0"
-OSS_MD5SUM="beaf6da12afe626249efc9194d912572"
+# CPPRestSDK (Microsoft C++ REST SDK) - Required by STS v2 SDK
+CPPRESTSDK_VERSION="2.10.18"
+CPPRESTSDK_DOWNLOAD="https://github.com/microsoft/cpprestsdk/archive/refs/tags/v${CPPRESTSDK_VERSION}.tar.gz"
+CPPRESTSDK_NAME="cpprestsdk-${CPPRESTSDK_VERSION}.tar.gz"
+CPPRESTSDK_SOURCE="cpprestsdk-${CPPRESTSDK_VERSION}"
+CPPRESTSDK_MD5SUM="e8aafb4870f6f75da35b2f62d00f1b65"
 
-# AliCloud v1 SDK (OpenAPI) - Core + STS modules
-STS_DOWNLOAD="https://github.com/aliyun/aliyun-openapi-cpp-sdk/archive/refs/tags/1.36.2120.tar.gz"
-STS_NAME="aliyun-openapi-cpp-sdk-1.36.2120.tar.gz"
-STS_SOURCE="aliyun-openapi-cpp-sdk-1.36.2120"
-STS_MD5SUM="1e497efafe60805cb83655bf9dcaf65e"
+# AliCloud OSS C++ SDK 1.10.1 (V1 only - no V2 exists)
+OSS_DOWNLOAD="https://github.com/aliyun/aliyun-oss-cpp-sdk/archive/refs/tags/1.10.1.tar.gz"
+OSS_NAME="aliyun-oss-cpp-sdk-1.10.1.tar.gz"
+OSS_SOURCE="aliyun-oss-cpp-sdk-1.10.1"
+OSS_MD5SUM="7b1628a678a47148e6c25c88ecf2b5f6"
+
+# AliCloud STS v2 SDK
+STS_VERSION="1.0.6"
+STS_DOWNLOAD="https://github.com/alibabacloud-sdk-cpp/sts-20150401/archive/refs/tags/${STS_VERSION}.tar.gz"
+STS_NAME="sts-20150401-${STS_VERSION}.tar.gz"
+STS_SOURCE="sts-20150401-${STS_VERSION}"
+STS_MD5SUM="74c6bc1321f893430124dd7d58a8dffc"
 
 # libdragonbox for faster double/float to string
 DRAGONBOX_DOWNLOAD="https://github.com/jk-jeon/dragonbox/archive/refs/tags/1.1.3.tar.gz"
@@ -662,6 +670,7 @@ export TP_ARCHIVES=(
     'AZURE'
     'APR'
     'APR_UTIL'
+    'CPPRESTSDK'
     'OSS'
     'STS'
     'DRAGONBOX'

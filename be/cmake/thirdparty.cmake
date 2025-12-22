@@ -159,19 +159,20 @@ if(BUILD_OSS STREQUAL "ON")
 endif()
 
 if(BUILD_STS STREQUAL "ON")
-    # AliCloud v1 SDK (OpenAPI)
-    # Both libraries needed but have duplicate symbols:
-    # - core: Credentials, ClientConfiguration, assumeRole (duplicated)
-    # - sts: assumeRoleWithOIDC (unique), assumeRole (duplicated)
-    # Link both libraries for complete functionality
-    add_thirdparty(alibabacloud-sdk-core)
-    add_thirdparty(alibabacloud-sdk-sts)
-    add_thirdparty(jsoncpp)
-    add_thirdparty(uuid LIB64)  # Required by core SDK's UUID generation
+    # STS v2 SDK
+    add_thirdparty(alibabacloud_sts_20150401 LIB64)
 
-    # Allow duplicate symbols from these libraries
-    # The duplicate symbols are identical implementations, safe to use either
-    set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -Wl,--allow-multiple-definition")
+    # Darabonba dependencies
+    add_thirdparty(darabonba_core LIB64)
+    add_thirdparty(darabonba_util LIB64)
+
+    # OpenAPI dependencies
+    add_thirdparty(alibabacloud_open_api LIB64)
+    add_thirdparty(alibabacloud_open_api_util LIB64)
+    add_thirdparty(alibabacloud_endpoint_util LIB64)
+
+    # CPPRestSDK
+    add_thirdparty(cpprest LIB64)
 endif()
 
 add_thirdparty(minizip LIB64)

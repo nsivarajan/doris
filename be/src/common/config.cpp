@@ -1396,9 +1396,7 @@ DEFINE_mInt32(s3_read_base_wait_time_ms, "100");
 DEFINE_mInt32(s3_read_max_wait_time_ms, "800");
 DEFINE_mBool(enable_s3_object_check_after_upload, "true");
 
-// OSS (AliCloud Object Storage Service) security configuration
-// Default: false (secure by default - requires AssumeRole with role_arn)
-// Set to true only if you need to allow direct ECS instance profile access
+// OSS security: enable credential fallback chain (env vars → RRSA → ECS instance profile)
 DEFINE_mBool(oss_enable_instance_profile, "false");
 
 DEFINE_mBool(enable_s3_rate_limiter, "false");
