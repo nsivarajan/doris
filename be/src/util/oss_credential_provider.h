@@ -76,7 +76,7 @@ private:
     int _duration_seconds;
     std::string _external_id;
 
-    mutable std::mutex _mutex;
+    mutable std::recursive_mutex _mutex;  // Recursive to allow safe nested locking
     AlibabaCloud::OSS::Credentials _cached_credentials;
     std::chrono::system_clock::time_point _expiration;
 

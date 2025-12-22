@@ -23,10 +23,15 @@
 #include <rapidjson/document.h>
 #include <rapidjson/error/en.h>
 #include <rapidjson/stringbuffer.h>
+#include <openssl/hmac.h>
+#include <openssl/sha.h>
 
 #include <chrono>
 #include <fstream>
 #include <sstream>
+#include <iomanip>
+#include <random>
+#include <algorithm>
 
 #include "common/logging.h"
 
@@ -40,12 +45,143 @@
 
 namespace doris {
 
+// ============================================================================
+// WORKAROUND: Manual STS AssumeRole Implementation
+// ============================================================================
+// Why: aliyun-openapi-cpp-sdk v1 has JSON parsing bug (empty Expiration field)
+//      aliyun-openapi-cpp-sdk v2 (Darabonba) causes build dependency conflicts
+// When: Can be removed when either:
+//       1. v1 SDK bug is fixed upstream, OR
+//       2. v2 SDK build issues are resolved
+// See: sts_assumerole_implementation_summary.md for details
+// ============================================================================
+
 namespace {
 
 // Callback for libcurl to write response data
 size_t write_callback(void* contents, size_t size, size_t nmemb, std::string* userp) {
-    userp->append((char*)contents, size * nmemb);
+    userp->append(static_cast<const char*>(contents), size * nmemb);
     return size * nmemb;
+}
+
+// URL encode function (RFC 3986)
+std::string url_encode(const std::string& str) {
+    std::ostringstream escaped;
+    escaped.fill('0');
+    escaped << std::hex;
+
+    for (char c : str) {
+        if (isalnum(c) || c == '-' || c == '_' || c == '.' || c == '~') {
+            escaped << c;
+        } else {
+            escaped << std::uppercase;
+            escaped << '%' << std::setw(2) << int((unsigned char)c);
+            escaped << std::nouppercase;
+        }
+    }
+
+    return escaped.str();
+}
+
+// Base64 encode
+std::string base64_encode(const unsigned char* buffer, size_t length) {
+    static const char base64_chars[] =
+            "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+
+    std::string result;
+    int i = 0;
+    int j = 0;
+    unsigned char char_array_3[3];
+    unsigned char char_array_4[4];
+
+    while (length--) {
+        char_array_3[i++] = *(buffer++);
+        if (i == 3) {
+            char_array_4[0] = (char_array_3[0] & 0xfc) >> 2;
+            char_array_4[1] = ((char_array_3[0] & 0x03) << 4) + ((char_array_3[1] & 0xf0) >> 4);
+            char_array_4[2] = ((char_array_3[1] & 0x0f) << 2) + ((char_array_3[2] & 0xc0) >> 6);
+            char_array_4[3] = char_array_3[2] & 0x3f;
+
+            for (i = 0; i < 4; i++) {
+                result += base64_chars[char_array_4[i]];
+            }
+            i = 0;
+        }
+    }
+
+    if (i) {
+        for (j = i; j < 3; j++) {
+            char_array_3[j] = '\0';
+        }
+
+        char_array_4[0] = (char_array_3[0] & 0xfc) >> 2;
+        char_array_4[1] = ((char_array_3[0] & 0x03) << 4) + ((char_array_3[1] & 0xf0) >> 4);
+        char_array_4[2] = ((char_array_3[1] & 0x0f) << 2) + ((char_array_3[2] & 0xc0) >> 6);
+
+        for (j = 0; j < i + 1; j++) {
+            result += base64_chars[char_array_4[j]];
+        }
+
+        while (i++ < 3) {
+            result += '=';
+        }
+    }
+
+    return result;
+}
+
+// HMAC-SHA1 signature
+std::string hmac_sha1(const std::string& key, const std::string& data) {
+    unsigned char* digest = HMAC(EVP_sha1(), key.c_str(), key.length(),
+                                  reinterpret_cast<const unsigned char*>(data.c_str()),
+                                  data.length(), nullptr, nullptr);
+    if (!digest) {
+        LOG(WARNING) << "HMAC-SHA1 signature generation failed";
+        return "";
+    }
+    return base64_encode(digest, SHA_DIGEST_LENGTH);
+}
+
+// Generate UUID for nonce
+std::string generate_uuid() {
+    // Thread-local to ensure thread safety in concurrent BE operations
+    thread_local static std::random_device rd;
+    thread_local static std::mt19937 gen(rd());
+    thread_local static std::uniform_int_distribution<> dis(0, 15);
+    thread_local static std::uniform_int_distribution<> dis2(8, 11);
+
+    std::stringstream ss;
+    ss << std::hex;
+    for (int i = 0; i < 8; i++) {
+        ss << dis(gen);
+    }
+    ss << "-";
+    for (int i = 0; i < 4; i++) {
+        ss << dis(gen);
+    }
+    ss << "-4";
+    for (int i = 0; i < 3; i++) {
+        ss << dis(gen);
+    }
+    ss << "-";
+    ss << dis2(gen);
+    for (int i = 0; i < 3; i++) {
+        ss << dis(gen);
+    }
+    ss << "-";
+    for (int i = 0; i < 12; i++) {
+        ss << dis(gen);
+    }
+    return ss.str();
+}
+
+// Get current UTC timestamp in ISO 8601 format
+std::string get_iso8601_timestamp() {
+    auto now = std::chrono::system_clock::now();
+    auto itt = std::chrono::system_clock::to_time_t(now);
+    std::ostringstream ss;
+    ss << std::put_time(gmtime(&itt), "%Y-%m-%dT%H:%M:%SZ");
+    return ss.str();
 }
 
 // Perform HTTP GET request using libcurl
@@ -58,14 +194,28 @@ std::string http_get(const std::string& url) {
 
     std::string response_string;
     curl_easy_setopt(curl, CURLOPT_URL, url.c_str());
+    curl_easy_setopt(curl, CURLOPT_SSL_VERIFYPEER, 1L);  // Verify SSL certificate
+    curl_easy_setopt(curl, CURLOPT_SSL_VERIFYHOST, 2L);  // Verify hostname matches cert
     curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, write_callback);
     curl_easy_setopt(curl, CURLOPT_WRITEDATA, &response_string);
     curl_easy_setopt(curl, CURLOPT_TIMEOUT, 10L); // 10 second timeout
 
     CURLcode res = curl_easy_perform(curl);
+    long http_code = 0;
+    curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, &http_code);
+
     if (res != CURLE_OK) {
         LOG(WARNING) << "curl_easy_perform() failed: " << curl_easy_strerror(res) << " for URL: "
                      << url;
+        curl_easy_cleanup(curl);
+        return "";
+    }
+
+    if (http_code != 200) {
+        LOG(WARNING) << "STS API returned HTTP " << http_code << ", response: "
+                     << response_string.substr(0, 200);
+        curl_easy_cleanup(curl);
+        return "";
     }
 
     curl_easy_cleanup(curl);
@@ -86,6 +236,87 @@ std::chrono::system_clock::time_point parse_iso8601(const std::string& datetime_
 
     std::time_t time = timegm(&tm);
     return std::chrono::system_clock::from_time_t(time);
+}
+
+// Manual STS AssumeRole API call to work around buggy SDK
+// Returns JSON response as string, or empty string on error
+std::string call_sts_assume_role(const std::string& access_key, const std::string& secret_key,
+                                  const std::string& security_token, const std::string& role_arn,
+                                  const std::string& session_name, int duration_seconds,
+                                  const std::string& external_id, const std::string& region) {
+    try {
+        // Build request parameters
+        std::map<std::string, std::string> params;
+        params["Action"] = "AssumeRole";
+        params["RoleArn"] = role_arn;
+        params["RoleSessionName"] = session_name;
+        params["DurationSeconds"] = std::to_string(duration_seconds);
+        params["Format"] = "JSON";
+        params["Version"] = "2015-04-01";
+        params["AccessKeyId"] = access_key;
+        params["SignatureMethod"] = "HMAC-SHA1";
+        params["Timestamp"] = get_iso8601_timestamp();
+        params["SignatureVersion"] = "1.0";
+        params["SignatureNonce"] = generate_uuid();
+
+        if (!security_token.empty()) {
+            params["SecurityToken"] = security_token;
+        }
+
+        if (!external_id.empty()) {
+            params["ExternalId"] = external_id;
+        }
+
+        // Sort parameters for canonical query string
+        std::vector<std::pair<std::string, std::string>> sorted_params(params.begin(),
+                                                                        params.end());
+        std::sort(sorted_params.begin(), sorted_params.end());
+
+        // Build canonical query string
+        std::ostringstream canonical_query;
+        for (size_t i = 0; i < sorted_params.size(); i++) {
+            if (i > 0) canonical_query << "&";
+            canonical_query << url_encode(sorted_params[i].first) << "="
+                            << url_encode(sorted_params[i].second);
+        }
+
+        // Build string to sign
+        std::string string_to_sign =
+                "GET&" + url_encode("/") + "&" + url_encode(canonical_query.str());
+
+        // Sign the request
+        std::string signature = hmac_sha1(secret_key + "&", string_to_sign);
+        if (signature.empty()) {
+            LOG(WARNING) << "Failed to generate HMAC-SHA1 signature for STS request";
+            return "";
+        }
+
+        // Build final URL
+        std::ostringstream url;
+        // Use regional endpoint for better reliability
+        if (!region.empty()) {
+            url << "https://sts." << region << ".aliyuncs.com/?";
+        } else {
+            url << "https://sts.aliyuncs.com/?";
+        }
+
+        url << canonical_query.str() << "&Signature=" << url_encode(signature);
+
+        // Make HTTP request
+        LOG(INFO) << "Calling STS AssumeRole API for role: " << role_arn;
+        std::string response = http_get(url.str());
+
+        if (response.empty()) {
+            LOG(WARNING) << "STS AssumeRole API returned empty response";
+            return "";
+        }
+
+        return response;
+
+    } catch (const std::exception& e) {
+        LOG(WARNING) << "Exception in STS AssumeRole API call: " << e.what();
+        return "";
+    }
 }
 
 } // anonymous namespace
@@ -205,74 +436,82 @@ AlibabaCloud::OSS::Credentials StsAssumeRoleCredentialsProvider::assumeRole() {
         return AlibabaCloud::OSS::Credentials("", "");
     }
 
-#ifdef USE_STS
-    try {
-        // Create client configuration
-        AlibabaCloud::ClientConfiguration config;
-        config.setEndpoint("sts.aliyuncs.com");
-        config.setConnectTimeout(5000);
-        config.setReadTimeout(10000);
+    // Manual STS AssumeRole API call to work around SDK JSON parsing bug
+    // See: https://github.com/aliyun/aliyun-openapi-cpp-sdk/issues/xxx
+    std::string response_json = call_sts_assume_role(
+            base_creds.AccessKeyId(), base_creds.AccessKeySecret(), base_creds.SessionToken(),
+            _role_arn, _session_name, _duration_seconds, _external_id, "");
 
-        // Create credentials from base provider
-        AlibabaCloud::Credentials credentials(base_creds.AccessKeyId(),
-                                              base_creds.AccessKeySecret(),
-                                              base_creds.SessionToken());
-
-        // Create STS client
-        AlibabaCloud::Sts::StsClient client(credentials, config);
-
-        // Create AssumeRole request
-        AlibabaCloud::Sts::Model::AssumeRoleRequest request;
-        request.setRoleArn(_role_arn);
-        request.setRoleSessionName(_session_name);
-        request.setDurationSeconds(_duration_seconds);
-
-        // Set external_id if provided
-        if (!_external_id.empty()) {
-            request.setExternalId(_external_id);
-        }
-
-        // Call STS AssumeRole API
-        auto outcome = client.assumeRole(request);
-
-        if (!outcome.isSuccess()) {
-            LOG(WARNING) << "STS AssumeRole failed: " << outcome.error().errorMessage()
-                         << ", Code: " << outcome.error().errorCode()
-                         << ", Role ARN: " << _role_arn;
-            return AlibabaCloud::OSS::Credentials("", "");
-        }
-
-        // Extract credentials from result
-        auto result = outcome.result();
-        auto creds = result.getCredentials();
-
-        std::string access_key = creds.accessKeyId;
-        std::string secret_key = creds.accessKeySecret;
-        std::string token = creds.securityToken;
-        std::string expiration_str = creds.expiration;
-
-        // Parse expiration time for auto-refresh
-        _expiration = parse_iso8601(expiration_str);
-
-        LOG(INFO) << "STS AssumeRole successful. Role: " << _role_arn << ", Session: "
-                  << _session_name << ", Expires at: " << expiration_str;
-
-        return AlibabaCloud::OSS::Credentials(access_key, secret_key, token);
-
-    } catch (const std::exception& e) {
-        LOG(WARNING) << "STS AssumeRole exception: " << e.what() << ", Role ARN: " << _role_arn;
+    if (response_json.empty()) {
+        LOG(WARNING) << "STS AssumeRole API call failed, empty response";
         return AlibabaCloud::OSS::Credentials("", "");
     }
-#else
-    LOG(WARNING) << "STS AssumeRole requires AliCloud STS SDK. "
-                 << "Build with BUILD_STS=ON to enable this feature. "
-                 << "Role ARN: " << _role_arn << ", Session: " << _session_name;
-    return AlibabaCloud::OSS::Credentials("", "");
-#endif
+
+    // Parse JSON response using rapidjson
+    rapidjson::Document doc;
+    doc.Parse(response_json.c_str());
+
+    if (doc.HasParseError()) {
+        LOG(WARNING) << "Failed to parse STS response JSON: "
+                     << rapidjson::GetParseError_En(doc.GetParseError())
+                     << ", response: " << response_json.substr(0, 200);
+        return AlibabaCloud::OSS::Credentials("", "");
+    }
+
+    // Check for error response
+    if (doc.HasMember("Code") && doc.HasMember("Message")) {
+        LOG(WARNING) << "STS AssumeRole failed: " << doc["Message"].GetString()
+                     << ", Code: " << doc["Code"].GetString() << ", Role: " << _role_arn;
+        return AlibabaCloud::OSS::Credentials("", "");
+    }
+
+    // Extract credentials from response
+    if (!doc.HasMember("Credentials")) {
+        LOG(WARNING) << "STS response missing Credentials field, response: "
+                     << response_json.substr(0, 200);
+        return AlibabaCloud::OSS::Credentials("", "");
+    }
+
+    auto& creds = doc["Credentials"];
+
+    if (!creds.HasMember("AccessKeyId") || !creds.HasMember("AccessKeySecret") ||
+        !creds.HasMember("SecurityToken") || !creds.HasMember("Expiration")) {
+        LOG(WARNING) << "STS Credentials missing required fields";
+        return AlibabaCloud::OSS::Credentials("", "");
+    }
+
+    // Validate JSON field types before calling GetString()
+    if (!creds["AccessKeyId"].IsString() || !creds["AccessKeySecret"].IsString() ||
+        !creds["SecurityToken"].IsString() || !creds["Expiration"].IsString()) {
+        LOG(WARNING) << "STS Credentials have invalid field types";
+        return AlibabaCloud::OSS::Credentials("", "");
+    }
+
+    std::string access_key = creds["AccessKeyId"].GetString();
+    std::string secret_key = creds["AccessKeySecret"].GetString();
+    std::string token = creds["SecurityToken"].GetString();
+    std::string expiration_str = creds["Expiration"].GetString();
+
+    if (access_key.empty() || secret_key.empty() || token.empty() || expiration_str.empty()) {
+        LOG(WARNING) << "STS Credentials contain empty fields: "
+                     << "AK=" << (access_key.empty() ? "empty" : "ok") << ", "
+                     << "SK=" << (secret_key.empty() ? "empty" : "ok") << ", "
+                     << "Token=" << (token.empty() ? "empty" : "ok") << ", "
+                     << "Expiration=" << (expiration_str.empty() ? "empty" : "ok");
+        return AlibabaCloud::OSS::Credentials("", "");
+    }
+
+    // Parse expiration time for auto-refresh
+    _expiration = parse_iso8601(expiration_str);
+
+    LOG(INFO) << "STS AssumeRole successful (manual API). Role: " << _role_arn << ", Session: "
+              << _session_name << ", Expires at: " << expiration_str;
+
+    return AlibabaCloud::OSS::Credentials(access_key, secret_key, token);
 }
 
 AlibabaCloud::OSS::Credentials StsAssumeRoleCredentialsProvider::getCredentials() {
-    std::lock_guard<std::mutex> lock(_mutex);
+    std::lock_guard<std::recursive_mutex> lock(_mutex);
 
     if (!needsRefresh() && !_cached_credentials.AccessKeyId().empty()) {
         return _cached_credentials;
