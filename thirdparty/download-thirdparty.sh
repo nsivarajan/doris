@@ -440,19 +440,6 @@ if [[ " ${TP_ARCHIVES[*]} " =~ " BRPC " ]]; then
     echo "Finished patching ${BRPC_SOURCE}"
 fi
 
-# patch ali sdk
-if [[ " ${TP_ARCHIVES[*]} " =~ " ALI_SDK " ]]; then
-    if [[ "${ALI_SDK_SOURCE}" = "aliyun-openapi-cpp-sdk-1.36.1586" ]]; then
-        cd "${TP_SOURCE_DIR}/${ALI_SDK_SOURCE}"
-        if [[ ! -f "${PATCHED_MARK}" ]]; then
-            patch -p1 <"${TP_PATCH_DIR}/ali-sdk-1.36.1586.patch"
-            touch "${PATCHED_MARK}"
-        fi
-        cd -
-    fi
-    echo "Finished patching ${ALI_SDK_SOURCE}"
-fi
-
 # patch base64
 if [[ " ${TP_ARCHIVES[*]} " =~ " BASE64 " ]]; then
     if [[ "${BASE64_SOURCE}" = "base64-0.5.2" ]]; then
@@ -464,19 +451,6 @@ if [[ " ${TP_ARCHIVES[*]} " =~ " BASE64 " ]]; then
         cd -
     fi
     echo "Finished patching ${BASE64_SOURCE}"
-fi
-
-# patch libuuid
-if [[ " ${TP_ARCHIVES[*]} " =~ " LIBUUID " ]]; then
-    if [[ "${LIBUUID_SOURCE}" = "libuuid-1.0.3" ]]; then
-        cd "${TP_SOURCE_DIR}/${LIBUUID_SOURCE}"
-        if [[ ! -f "${PATCHED_MARK}" ]]; then
-            patch -p1 <"${TP_PATCH_DIR}/libuuid-1.0.3.patch"
-            touch "${PATCHED_MARK}"
-        fi
-        cd -
-    fi
-    echo "Finished patching ${LIBUUID_SOURCE}"
 fi
 
 # patch libdivide
