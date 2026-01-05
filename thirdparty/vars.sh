@@ -521,7 +521,7 @@ CPPRESTSDK_VERSION="2.10.18"
 CPPRESTSDK_DOWNLOAD="https://github.com/microsoft/cpprestsdk/archive/refs/tags/v${CPPRESTSDK_VERSION}.tar.gz"
 CPPRESTSDK_NAME="cpprestsdk-${CPPRESTSDK_VERSION}.tar.gz"
 CPPRESTSDK_SOURCE="cpprestsdk-${CPPRESTSDK_VERSION}"
-CPPRESTSDK_MD5SUM="e8aafb4870f6f75da35b2f62d00f1b65"
+CPPRESTSDK_MD5SUM="c4cd1d36aa3156026bd396a21a4fdb74"
 
 # AliCloud OSS C++ SDK 1.10.1 (V1 only - no V2 exists)
 OSS_DOWNLOAD="https://github.com/aliyun/aliyun-oss-cpp-sdk/archive/refs/tags/1.10.1.tar.gz"

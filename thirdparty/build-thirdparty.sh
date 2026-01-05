@@ -1937,11 +1937,13 @@ build_cpprestsdk() {
             -DBUILD_SAMPLES=OFF \
             -DCMAKE_PREFIX_PATH="${TP_INSTALL_DIR}" \
             -DBoost_INCLUDE_DIR="${TP_INCLUDE_DIR}" \
+            -DBoost_USE_STATIC_LIBS=ON \
+            -DBoost_USE_STATIC_RUNTIME=ON \
             -DOPENSSL_ROOT_DIR="${TP_INSTALL_DIR}" \
             -DOPENSSL_INCLUDE_DIR="${TP_INCLUDE_DIR}" \
             -DOPENSSL_CRYPTO_LIBRARY="${TP_INSTALL_DIR}/lib/libcrypto.a" \
             -DOPENSSL_SSL_LIBRARY="${TP_INSTALL_DIR}/lib/libssl.a" \
-            -DCMAKE_CXX_FLAGS="-fvisibility=hidden" \
+            -DCMAKE_CXX_FLAGS="-fvisibility=hidden -Wno-error=unused-but-set-parameter" \
             ../Release
 
         "${BUILD_SYSTEM}" -j "${PARALLEL}"
@@ -2008,6 +2010,8 @@ build_sts() {
             -DCMAKE_PREFIX_PATH="${TP_INSTALL_DIR}" \
             -DCMAKE_MODULE_PATH="${TP_INSTALL_DIR}/lib/cmake" \
             -DBoost_INCLUDE_DIR="${TP_INCLUDE_DIR}" \
+            -DBoost_USE_STATIC_LIBS=ON \
+            -DBoost_USE_STATIC_RUNTIME=ON \
             -DOPENSSL_ROOT_DIR="${TP_INSTALL_DIR}" \
             -DCPPREST_INCLUDE_DIR="${TP_INCLUDE_DIR}" \
             -DCPPREST_LIB="${TP_INSTALL_DIR}/lib/libcpprest.a" \

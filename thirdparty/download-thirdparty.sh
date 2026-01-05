@@ -453,6 +453,19 @@ if [[ " ${TP_ARCHIVES[*]} " =~ " BASE64 " ]]; then
     echo "Finished patching ${BASE64_SOURCE}"
 fi
 
+# patch sts
+if [[ " ${TP_ARCHIVES[*]} " =~ " STS " ]]; then
+    if [[ "${STS_SOURCE}" = "sts-20150401-1.0.6" ]]; then
+        cd "${TP_SOURCE_DIR}/${STS_SOURCE}"
+        if [[ ! -f "${PATCHED_MARK}" ]]; then
+            patch -p1 <"${TP_PATCH_DIR}/sts-20150401-1.0.6.patch"
+            touch "${PATCHED_MARK}"
+        fi
+        cd -
+    fi
+    echo "Finished patching ${STS_SOURCE}"
+fi
+
 # patch libdivide
 if [[ " ${TP_ARCHIVES[*]} " =~ " LIBDIVIDE " ]]; then
     if [[ "${LIBDIVIDE_SOURCE}" = "libdivide-5.0" ]]; then
