@@ -455,29 +455,19 @@ fi
 
 # patch sts
 if [[ " ${TP_ARCHIVES[*]} " =~ " STS " ]]; then
-    case "${STS_SOURCE}" in
-        "sts-20150401-1.0.6")
-            cd "${TP_SOURCE_DIR}/${STS_SOURCE}"
-            if [[ ! -f "${PATCHED_MARK}" ]]; then
-                patch -p1 <"${TP_PATCH_DIR}/sts-20150401-1.0.6.patch"
-                touch "${PATCHED_MARK}"
-            fi
-            cd -
-            ;;
-        "sts-20150401-1.0.7")
-            cd "${TP_SOURCE_DIR}/${STS_SOURCE}"
-            if [[ ! -f "${PATCHED_MARK}" ]]; then
-                patch -p1 <"${TP_PATCH_DIR}/sts-20150401-1.0.7.patch"
-                touch "${PATCHED_MARK}"
-            fi
-            cd -
-            ;;
-        *)
-            echo "Warning: No patch available for STS version ${STS_SOURCE}"
-            echo "Supported versions: sts-20150401-1.0.6, sts-20150401-1.0.7"
-            ;;
-    esac
-    echo "Finished processing ${STS_SOURCE}"
+    if [[ "${STS_SOURCE}" == "sts-20150401-1.0.7" ]]; then
+        cd "${TP_SOURCE_DIR}/${STS_SOURCE}"
+        if [[ ! -f "${PATCHED_MARK}" ]]; then
+            patch -p1 <"${TP_PATCH_DIR}/sts-20150401-1.0.7.patch"
+            touch "${PATCHED_MARK}"
+        fi
+        cd -
+        echo "Finished patching ${STS_SOURCE}"
+    else
+        echo "Error: Unsupported STS version ${STS_SOURCE}"
+        echo "Only STS v2 1.0.7 is supported (sts-20150401-1.0.7)"
+        exit 1
+    fi
 fi
 
 # patch libdivide
