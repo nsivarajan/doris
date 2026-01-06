@@ -41,7 +41,6 @@ public:
 private:
     std::string fetchRoleName();
     AlibabaCloud::OSS::Credentials fetchCredentialsFromMetadata(const std::string& role_name);
-    bool needsRefresh() const;
 
     mutable std::mutex _mutex;
     AlibabaCloud::OSS::Credentials _cached_credentials;
@@ -68,7 +67,6 @@ public:
 
 private:
     AlibabaCloud::OSS::Credentials assumeRole();
-    bool needsRefresh() const;
 
     std::shared_ptr<AlibabaCloud::OSS::CredentialsProvider> _base_provider;
     std::string _role_arn;

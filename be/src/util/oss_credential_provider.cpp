@@ -58,6 +58,79 @@ namespace doris {
 
 namespace {
 
+// Credential redaction utility functions for secure logging
+std::string redact_url(const std::string& url) {
+    // Find and redact Signature parameter
+    std::string redacted = url;
+    size_t sig_pos = redacted.find("Signature=");
+    if (sig_pos != std::string::npos) {
+        size_t sig_end = redacted.find("&", sig_pos);
+        if (sig_end == std::string::npos) {
+            sig_end = redacted.length();
+        }
+        redacted.replace(sig_pos + 10, sig_end - sig_pos - 10, "[REDACTED]");
+    }
+
+    // Find and redact SecurityToken parameter
+    size_t token_pos = redacted.find("SecurityToken=");
+    if (token_pos != std::string::npos) {
+        size_t token_end = redacted.find("&", token_pos);
+        if (token_end == std::string::npos) {
+            token_end = redacted.length();
+        }
+        redacted.replace(token_pos + 14, token_end - token_pos - 14, "[REDACTED]");
+    }
+
+    return redacted;
+}
+
+std::string redact_json_response(const std::string& response) {
+    std::string redacted = response;
+
+    // List of sensitive fields to redact
+    std::vector<std::string> sensitive_fields = {
+        "AccessKeyId", "AccessKeySecret", "SecurityToken",
+        "accessKeyId", "accessKeySecret", "securityToken"
+    };
+
+    for (const auto& field : sensitive_fields) {
+        std::string pattern = "\"" + field + "\":\"";
+        size_t pos = 0;
+        while ((pos = redacted.find(pattern, pos)) != std::string::npos) {
+            size_t value_start = pos + pattern.length();
+            size_t value_end = redacted.find("\"", value_start);
+            if (value_end != std::string::npos) {
+                redacted.replace(value_start, value_end - value_start, "[REDACTED]");
+                pos = value_start + 10; // length of "[REDACTED]"
+            } else {
+                break;
+            }
+        }
+    }
+
+    return redacted;
+}
+
+// Curl initialization verification
+bool verify_curl_initialized() {
+    static bool checked = false;
+    static bool initialized = false;
+
+    if (!checked) {
+        // Test if curl is initialized by checking if we can get version info
+        curl_version_info_data* version_info = curl_version_info(CURLVERSION_NOW);
+        initialized = (version_info != nullptr);
+        checked = true;
+
+        if (!initialized) {
+            LOG(ERROR) << "libcurl is not properly initialized. "
+                       << "Ensure curl_global_init() was called during application startup.";
+        }
+    }
+
+    return initialized;
+}
+
 // Callback for libcurl to write response data
 size_t write_callback(void* contents, size_t size, size_t nmemb, std::string* userp) {
     userp->append(static_cast<const char*>(contents), size * nmemb);
@@ -184,11 +257,16 @@ std::string get_iso8601_timestamp() {
     return ss.str();
 }
 
-// Perform HTTP GET request using libcurl
+// Perform HTTP GET request using libcurl with secure logging
 std::string http_get(const std::string& url) {
+    if (!verify_curl_initialized()) {
+        LOG(ERROR) << "Cannot perform HTTP request: libcurl not initialized";
+        return "";
+    }
+
     CURL* curl = curl_easy_init();
     if (!curl) {
-        LOG(WARNING) << "Failed to initialize curl for URL: " << url;
+        LOG(WARNING) << "Failed to initialize curl for URL: " << redact_url(url);
         return "";
     }
 
@@ -206,14 +284,14 @@ std::string http_get(const std::string& url) {
 
     if (res != CURLE_OK) {
         LOG(WARNING) << "curl_easy_perform() failed: " << curl_easy_strerror(res) << " for URL: "
-                     << url;
+                     << redact_url(url);
         curl_easy_cleanup(curl);
         return "";
     }
 
     if (http_code != 200) {
         LOG(WARNING) << "STS API returned HTTP " << http_code << ", response: "
-                     << response_string.substr(0, 200);
+                     << redact_json_response(response_string.substr(0, 200));
         curl_easy_cleanup(curl);
         return "";
     }
@@ -375,17 +453,16 @@ AlibabaCloud::OSS::Credentials EcsRamRoleCredentialsProvider::fetchCredentialsFr
     return AlibabaCloud::OSS::Credentials(access_key_id, access_key_secret, security_token);
 }
 
-bool EcsRamRoleCredentialsProvider::needsRefresh() const {
-    auto now = std::chrono::system_clock::now();
-    auto time_until_expiration =
-            std::chrono::duration_cast<std::chrono::seconds>(_expiration - now).count();
-    return time_until_expiration < REFRESH_THRESHOLD_SECONDS;
-}
-
 AlibabaCloud::OSS::Credentials EcsRamRoleCredentialsProvider::getCredentials() {
     std::lock_guard<std::mutex> lock(_mutex);
 
-    if (!needsRefresh() && !_cached_credentials.AccessKeyId().empty()) {
+    // Move needsRefresh check inside the lock to prevent race conditions
+    auto now = std::chrono::system_clock::now();
+    auto time_until_expiration =
+            std::chrono::duration_cast<std::chrono::seconds>(_expiration - now).count();
+    bool needs_refresh = time_until_expiration < REFRESH_THRESHOLD_SECONDS;
+
+    if (!needs_refresh && !_cached_credentials.AccessKeyId().empty()) {
         return _cached_credentials;
     }
 
@@ -422,13 +499,6 @@ StsAssumeRoleCredentialsProvider::StsAssumeRoleCredentialsProvider(
           _cached_credentials("", ""),
           _expiration(std::chrono::system_clock::now()) {}
 
-bool StsAssumeRoleCredentialsProvider::needsRefresh() const {
-    auto now = std::chrono::system_clock::now();
-    auto time_until_expiration =
-            std::chrono::duration_cast<std::chrono::seconds>(_expiration - now).count();
-    return time_until_expiration < REFRESH_THRESHOLD_SECONDS;
-}
-
 AlibabaCloud::OSS::Credentials StsAssumeRoleCredentialsProvider::assumeRole() {
     auto base_creds = _base_provider->getCredentials();
     if (base_creds.AccessKeyId().empty()) {
@@ -454,7 +524,7 @@ AlibabaCloud::OSS::Credentials StsAssumeRoleCredentialsProvider::assumeRole() {
     if (doc.HasParseError()) {
         LOG(WARNING) << "Failed to parse STS response JSON: "
                      << rapidjson::GetParseError_En(doc.GetParseError())
-                     << ", response: " << response_json.substr(0, 200);
+                     << ", response: " << redact_json_response(response_json.substr(0, 200));
         return AlibabaCloud::OSS::Credentials("", "");
     }
 
@@ -468,7 +538,7 @@ AlibabaCloud::OSS::Credentials StsAssumeRoleCredentialsProvider::assumeRole() {
     // Extract credentials from response
     if (!doc.HasMember("Credentials")) {
         LOG(WARNING) << "STS response missing Credentials field, response: "
-                     << response_json.substr(0, 200);
+                     << redact_json_response(response_json.substr(0, 200));
         return AlibabaCloud::OSS::Credentials("", "");
     }
 
@@ -513,7 +583,13 @@ AlibabaCloud::OSS::Credentials StsAssumeRoleCredentialsProvider::assumeRole() {
 AlibabaCloud::OSS::Credentials StsAssumeRoleCredentialsProvider::getCredentials() {
     std::lock_guard<std::recursive_mutex> lock(_mutex);
 
-    if (!needsRefresh() && !_cached_credentials.AccessKeyId().empty()) {
+    // Move needsRefresh check inside the lock to prevent race conditions
+    auto now = std::chrono::system_clock::now();
+    auto time_until_expiration =
+            std::chrono::duration_cast<std::chrono::seconds>(_expiration - now).count();
+    bool needs_refresh = time_until_expiration < REFRESH_THRESHOLD_SECONDS;
+
+    if (!needs_refresh && !_cached_credentials.AccessKeyId().empty()) {
         return _cached_credentials;
     }
 
