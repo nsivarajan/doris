@@ -530,11 +530,11 @@ OSS_SOURCE="aliyun-oss-cpp-sdk-1.10.1"
 OSS_MD5SUM="7b1628a678a47148e6c25c88ecf2b5f6"
 
 # AliCloud STS v2 SDK
-STS_VERSION="1.0.6"
+STS_VERSION="1.0.7"
 STS_DOWNLOAD="https://github.com/alibabacloud-sdk-cpp/sts-20150401/archive/refs/tags/${STS_VERSION}.tar.gz"
 STS_NAME="sts-20150401-${STS_VERSION}.tar.gz"
 STS_SOURCE="sts-20150401-${STS_VERSION}"
-STS_MD5SUM="74c6bc1321f893430124dd7d58a8dffc"
+STS_MD5SUM="151b9e215a08fe4e2fd275b2b19b6198"
 
 # libdragonbox for faster double/float to string
 DRAGONBOX_DOWNLOAD="https://github.com/jk-jeon/dragonbox/archive/refs/tags/1.1.3.tar.gz"

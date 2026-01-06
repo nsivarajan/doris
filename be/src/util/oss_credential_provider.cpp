@@ -210,8 +210,8 @@ AlibabaCloud::OSS::Credentials StsAssumeRoleCredentialsProvider::assumeRole() {
     }
 
     try {
-        // Create STS v2 config
-        auto config = std::make_shared<Alibabacloud_OpenApi::Config>();
+        // Create STS v2 config for 1.0.7
+        auto config = std::make_shared<AlibabaCloud::OpenApi::Utils::Models::Config>();
         config->accessKeyId = std::make_shared<std::string>(base_creds.AccessKeyId());
         config->accessKeySecret = std::make_shared<std::string>(base_creds.AccessKeySecret());
 
@@ -223,37 +223,36 @@ AlibabaCloud::OSS::Credentials StsAssumeRoleCredentialsProvider::assumeRole() {
         config->endpoint = std::make_shared<std::string>("sts.aliyuncs.com");
         config->protocol = std::make_shared<std::string>("https");
 
-        Alibabacloud_Sts20150401::Client client(config);
+        AlibabaCloud::Sts20150401::Client client(*config);
 
-        auto request = std::make_shared<Alibabacloud_Sts20150401::AssumeRoleRequest>();
-        request->roleArn = std::make_shared<std::string>(_role_arn);
-        request->roleSessionName = std::make_shared<std::string>(_session_name);
-        request->durationSeconds = std::make_shared<long>(_duration_seconds);
+        AlibabaCloud::Sts20150401::Models::AssumeRoleRequest request;
+        request.setRoleArn(_role_arn);
+        request.setRoleSessionName(_session_name);
+        request.setDurationSeconds(_duration_seconds);
 
         if (!_external_id.empty()) {
-            request->externalId = std::make_shared<std::string>(_external_id);
+            request.setExternalId(_external_id);
         }
 
         LOG(INFO) << "Calling STS AssumeRole for role: " << _role_arn;
         auto response = client.assumeRole(request);
 
-        if (!response.body || !response.body->credentials) {
+        if (!response.hasBody()) {
+            LOG(WARNING) << "STS AssumeRole returned empty response body. Role: " << _role_arn;
+            return AlibabaCloud::OSS::Credentials("", "");
+        }
+
+        auto& body = response.getBody();
+        if (!body.hasCredentials()) {
             LOG(WARNING) << "STS AssumeRole returned empty credentials. Role: " << _role_arn;
             return AlibabaCloud::OSS::Credentials("", "");
         }
 
-        auto creds = response.body->credentials;
-
-        if (!creds->accessKeyId || !creds->accessKeySecret ||
-            !creds->securityToken || !creds->expiration) {
-            LOG(WARNING) << "STS credentials missing required fields. Role: " << _role_arn;
-            return AlibabaCloud::OSS::Credentials("", "");
-        }
-
-        std::string access_key = *creds->accessKeyId;
-        std::string secret_key = *creds->accessKeySecret;
-        std::string token = *creds->securityToken;
-        std::string expiration_str = *creds->expiration;
+        auto& creds = body.getCredentials();
+        std::string access_key = creds.getAccessKeyId();
+        std::string secret_key = creds.getAccessKeySecret();
+        std::string token = creds.getSecurityToken();
+        std::string expiration_str = creds.getExpiration();
 
         if (access_key.empty() || secret_key.empty() || token.empty() || expiration_str.empty()) {
             LOG(WARNING) << "STS credentials contain empty fields. Role: " << _role_arn;
@@ -327,42 +326,42 @@ AlibabaCloud::OSS::Credentials DefaultCredentialsProvider::getCredentialsFromRRS
     }
 
     try {
-        // Create STS v2 config
-        auto config = std::make_shared<Alibabacloud_OpenApi::Config>();
+        // Create STS v2 config for 1.0.7
+        auto config = std::make_shared<AlibabaCloud::OpenApi::Utils::Models::Config>();
         config->endpoint = std::make_shared<std::string>("sts.aliyuncs.com");
         config->protocol = std::make_shared<std::string>("https");
 
-        Alibabacloud_Sts20150401::Client client(config);
+        AlibabaCloud::Sts20150401::Client client(*config);
 
-        auto request = std::make_shared<Alibabacloud_Sts20150401::AssumeRoleWithOIDCRequest>();
-        request->roleArn = std::make_shared<std::string>(role_arn);
-        request->OIDCToken = std::make_shared<std::string>(oidc_token);
-        request->roleSessionName = std::make_shared<std::string>("doris-rrsa-session");
-        request->durationSeconds = std::make_shared<long>(3600);
+        AlibabaCloud::Sts20150401::Models::AssumeRoleWithOIDCRequest request;
+        request.setRoleArn(role_arn);
+        request.setOIDCToken(oidc_token);
+        request.setRoleSessionName("doris-rrsa-session");
+        request.setDurationSeconds(3600);
 
         const char* oidc_provider_arn = std::getenv("ALIBABA_CLOUD_OIDC_PROVIDER_ARN");
         if (oidc_provider_arn) {
-            request->OIDCProviderArn = std::make_shared<std::string>(oidc_provider_arn);
+            request.setOIDCProviderArn(oidc_provider_arn);
         }
 
         LOG(INFO) << "Calling STS AssumeRoleWithOIDC for role: " << role_arn;
         auto response = client.assumeRoleWithOIDC(request);
 
-        if (!response.body || !response.body->credentials) {
+        if (!response.hasBody()) {
+            LOG(WARNING) << "RRSA AssumeRoleWithOIDC returned empty response body. Role: " << role_arn;
+            return AlibabaCloud::OSS::Credentials("", "");
+        }
+
+        auto& body = response.getBody();
+        if (!body.hasCredentials()) {
             LOG(WARNING) << "RRSA AssumeRoleWithOIDC returned empty credentials. Role: " << role_arn;
             return AlibabaCloud::OSS::Credentials("", "");
         }
 
-        auto creds = response.body->credentials;
-
-        if (!creds->accessKeyId || !creds->accessKeySecret || !creds->securityToken) {
-            LOG(WARNING) << "RRSA credentials missing required fields. Role: " << role_arn;
-            return AlibabaCloud::OSS::Credentials("", "");
-        }
-
-        std::string access_key = *creds->accessKeyId;
-        std::string secret_key = *creds->accessKeySecret;
-        std::string token = *creds->securityToken;
+        auto& creds = body.getCredentials();
+        std::string access_key = creds.getAccessKeyId();
+        std::string secret_key = creds.getAccessKeySecret();
+        std::string token = creds.getSecurityToken();
 
         if (access_key.empty() || secret_key.empty() || token.empty()) {
             LOG(WARNING) << "RRSA credentials contain empty fields. Role: " << role_arn;

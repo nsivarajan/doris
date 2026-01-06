@@ -1,0 +1,47 @@
+--- a/CMakeLists.txt
++++ b/CMakeLists.txt
+@@ -28,7 +28,7 @@ include_directories(${CMAKE_SOURCE_DIR}/include)
+ set(SOURCE_FILES
+         src/Client.cpp)
+
+-add_library(${PROJECT_NAME} SHARED ${SOURCE_FILES})
++add_library(${PROJECT_NAME} STATIC ${SOURCE_FILES})
+
+ target_include_directories(${PROJECT_NAME}
+         PRIVATE
+--- a/external/darabonba_core/CMakeLists.txt
++++ b/external/darabonba_core/CMakeLists.txt
+@@ -13,6 +13,9 @@ else()
+     GIT_TAG master
+     CMAKE_ARGS
+       -DENABLE_UNIT_TESTS:BOOL="0")
++
++  # Force static linking for Doris build compatibility
++  set(BUILD_SHARED_LIBS OFF CACHE BOOL "Build static libraries" FORCE)
+
+   FetchContent_MakeAvailable(_darabonba_core)
+   message(STATUS "Added darabonba_core source : ${_darabonba_core_SOURCE_DIR}")
+--- a/external/alibabacloud_credential/CMakeLists.txt
++++ b/external/alibabacloud_credential/CMakeLists.txt
+@@ -13,6 +13,9 @@ else()
+     GIT_TAG master
+     CMAKE_ARGS
+       -DENABLE_UNIT_TESTS:BOOL="0")
++
++  # Force static linking for Doris build compatibility
++  set(BUILD_SHARED_LIBS OFF CACHE BOOL "Build static libraries" FORCE)
+
+   FetchContent_MakeAvailable(_alibabacloud_credential)
+   message(STATUS "Added alibabacloud_credential source : ${_alibabacloud_credential_SOURCE_DIR}")
+--- a/external/alibabacloud_open_api_v2/CMakeLists.txt
++++ b/external/alibabacloud_open_api_v2/CMakeLists.txt
+@@ -13,6 +13,9 @@ else()
+     GIT_TAG master
+     CMAKE_ARGS
+       -DENABLE_UNIT_TESTS:BOOL="0")
++
++  # Force static linking for Doris build compatibility
++  set(BUILD_SHARED_LIBS OFF CACHE BOOL "Build static libraries" FORCE)
+
+   FetchContent_MakeAvailable(_alibabacloud_open_api_v2)
+   message(STATUS "Added alibabacloud_open_api_v2 source : ${_alibabacloud_open_api_v2_SOURCE_DIR}")

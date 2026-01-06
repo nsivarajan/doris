@@ -22,10 +22,10 @@
 #include <alibabacloud/oss/auth/Credentials.h>
 #include <alibabacloud/oss/auth/CredentialsProvider.h>
 
-// STS v2 SDK
-#include <alibabacloud/sts_20150401.hpp>
-#include <alibabacloud/open_api.hpp>
-#include <darabonba/core.hpp>
+// STS v2 SDK 1.0.7
+#include <alibabacloud/Sts20150401.hpp>
+#include <alibabacloud/Openapi.hpp>
+#include <darabonba/Core.hpp>
 
 #include <chrono>
 #include <memory>
