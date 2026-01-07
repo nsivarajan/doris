@@ -75,7 +75,6 @@ fi
 
 BUILD_AZURE="ON"
 BUILD_OSS="ON"
-BUILD_STS="ON"
 
 while true; do
     case "$1" in
@@ -131,9 +130,6 @@ if [[ -n "${DISABLE_BUILD_OSS}" ]]; then
     BUILD_OSS='OFF'
 fi
 
-if [[ -n "${DISABLE_BUILD_STS}" ]]; then
-    BUILD_STS='OFF'
-fi
 
 echo "Get params:
     PARALLEL            -- ${PARALLEL}
@@ -1985,47 +1981,8 @@ build_oss() {
     fi
 }
 
-# AliCloud STS v2 SDK
-build_sts() {
-    if [[ "${BUILD_STS}" == "OFF" ]]; then
-        echo "Skip build AliCloud STS v2 SDK"
-    else
-        # CPPRestSDK is required for STS v2 SDK
-        echo "Building STS v2 SDK dependencies..."
-        build_cpprestsdk
-
-        check_if_source_exist "${STS_SOURCE}"
-        cd "${TP_SOURCE_DIR}/${STS_SOURCE}"
-
-        rm -rf "${BUILD_DIR}"
-        mkdir -p "${BUILD_DIR}"
-        cd "${BUILD_DIR}"
-
-        # Build STS v2 SDK with Darabonba
-        "${CMAKE_CMD}" -G "${GENERATOR}" \
-            -DCMAKE_INSTALL_PREFIX="${TP_INSTALL_DIR}" \
-            -DCMAKE_BUILD_TYPE=Release \
-            -DCMAKE_POSITION_INDEPENDENT_CODE=ON \
-            -DBUILD_SHARED_LIBS=OFF \
-            -DCMAKE_PREFIX_PATH="${TP_INSTALL_DIR}" \
-            -DCMAKE_MODULE_PATH="${TP_INSTALL_DIR}/lib/cmake" \
-            -DBoost_INCLUDE_DIR="${TP_INCLUDE_DIR}" \
-            -DBoost_USE_STATIC_LIBS=ON \
-            -DBoost_USE_STATIC_RUNTIME=ON \
-            -DOPENSSL_ROOT_DIR="${TP_INSTALL_DIR}" \
-            -DCPPREST_INCLUDE_DIR="${TP_INCLUDE_DIR}" \
-            -DCPPREST_LIB="${TP_INSTALL_DIR}/lib/libcpprest.a" \
-            -DCMAKE_CXX_FLAGS="-Wno-error -fvisibility=hidden -I${TP_INCLUDE_DIR}" \
-            ..
-
-        "${BUILD_SYSTEM}" -j "${PARALLEL}"
-        "${BUILD_SYSTEM}" install
-
-        echo "Installed STS v2 SDK libraries:"
-        ls -lh "${TP_INSTALL_DIR}/lib/libalibabacloud_sts_"*.a 2>/dev/null || \
-        ls -lh "${TP_INSTALL_DIR}/lib/libalibabacloud"*.a
-    fi
-}
+# STS SDK functions removed - using direct REST API calls
+# STS functionality now implemented using existing libcurl + rapidjson dependencies
 
 # dragonbox
 build_dragonbox() {
@@ -2219,7 +2176,6 @@ if [[ "${#packages[@]}" -eq 0 ]]; then
         base64
         azure
         oss
-        sts
         dragonbox
         brotli
         icu

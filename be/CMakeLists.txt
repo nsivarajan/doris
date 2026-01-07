@@ -176,19 +176,13 @@ if(BUILD_AZURE STREQUAL "ON")
     add_definitions(-DUSE_AZURE)
 endif()
 
-# Set if use OSS or not
+# Set if use OSS support (includes AssumeRole/RRSA via direct STS REST API calls)
 option(BUILD_OSS "ON for building OSS support for BE or OFF for not" ON)
 message(STATUS "build oss: ${BUILD_OSS}")
 if(BUILD_OSS STREQUAL "ON")
     add_definitions(-DUSE_OSS)
 endif()
 
-# Set if use STS for OSS AssumeRole/RRSA or not
-option(BUILD_STS "ON for building STS support (required for OSS AssumeRole/RRSA) or OFF for not" ON)
-message(STATUS "build sts: ${BUILD_STS}")
-if(BUILD_STS STREQUAL "ON")
-    add_definitions(-DUSE_STS)
-endif()
 
 
 set(GPERFTOOLS_HOME "${THIRDPARTY_DIR}/gperftools")

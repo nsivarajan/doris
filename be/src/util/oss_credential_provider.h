@@ -22,10 +22,8 @@
 #include <alibabacloud/oss/auth/Credentials.h>
 #include <alibabacloud/oss/auth/CredentialsProvider.h>
 
-// STS v2 SDK 1.0.7
-#include <alibabacloud/Sts20150401.hpp>
-#include <alibabacloud/Openapi.hpp>
-#include <darabonba/Core.hpp>
+// Direct STS API implementation - no problematic SDK dependencies
+#include "util/sts_direct_api.h"
 
 #include <chrono>
 #include <memory>
@@ -60,7 +58,7 @@ private:
 };
 
 // STS AssumeRole Credentials Provider
-// Uses base credentials to assume another role via STS
+// Uses base credentials to assume another role via direct STS API calls
 class StsAssumeRoleCredentialsProvider : public AlibabaCloud::OSS::CredentialsProvider {
 public:
     StsAssumeRoleCredentialsProvider(
@@ -84,6 +82,7 @@ private:
     mutable std::recursive_mutex _mutex;  // Recursive to allow safe nested locking
     AlibabaCloud::OSS::Credentials _cached_credentials;
     std::chrono::system_clock::time_point _expiration;
+    StsDirectApi _sts_api;  // Direct STS API client
 
     static constexpr int REFRESH_THRESHOLD_SECONDS = 180;
 };
@@ -103,6 +102,7 @@ private:
     AlibabaCloud::OSS::Credentials getCredentialsFromECS();
 
     std::shared_ptr<AlibabaCloud::OSS::CredentialsProvider> _provider;
+    StsDirectApi _sts_api;  // Direct STS API client for RRSA
 };
 
 } // namespace doris

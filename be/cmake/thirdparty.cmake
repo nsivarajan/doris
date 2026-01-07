@@ -158,22 +158,6 @@ if(BUILD_OSS STREQUAL "ON")
     add_thirdparty(aprutil-1)
 endif()
 
-if(BUILD_STS STREQUAL "ON")
-    # STS v2 SDK
-    add_thirdparty(alibabacloud_sts_20150401 LIB64)
-
-    # Darabonba dependencies
-    add_thirdparty(darabonba_core LIB64)
-    add_thirdparty(darabonba_util LIB64)
-
-    # OpenAPI dependencies
-    add_thirdparty(alibabacloud_open_api LIB64)
-    add_thirdparty(alibabacloud_open_api_util LIB64)
-    add_thirdparty(alibabacloud_endpoint_util LIB64)
-
-    # CPPRestSDK
-    add_thirdparty(cpprest LIB64)
-endif()
 
 add_thirdparty(minizip LIB64)
 add_thirdparty(simdjson LIB64)

@@ -70,6 +70,14 @@ while [[ $# -gt 0 ]]; do
         "${SPEC_ARCHIVES[@]}"
         "${SPEC_LIB}"
     )
+
+    # Auto-add dependencies for specific packages
+    if [[ "${SPEC_LIB}" == "STS" ]]; then
+        # Add CPPRestSDK (required by STS v2)
+        if [[ ! " ${SPEC_ARCHIVES[*]} " =~ " CPPRESTSDK " ]]; then
+            SPEC_ARCHIVES=("${SPEC_ARCHIVES[@]}" "CPPRESTSDK")
+        fi
+    fi
 done
 if [[ "${SPEC_LIB}" != "" ]]; then
     TP_ARCHIVES=("${SPEC_ARCHIVES[@]}")
@@ -453,22 +461,7 @@ if [[ " ${TP_ARCHIVES[*]} " =~ " BASE64 " ]]; then
     echo "Finished patching ${BASE64_SOURCE}"
 fi
 
-# patch sts
-if [[ " ${TP_ARCHIVES[*]} " =~ " STS " ]]; then
-    if [[ "${STS_SOURCE}" == "sts-20150401-1.0.7" ]]; then
-        cd "${TP_SOURCE_DIR}/${STS_SOURCE}"
-        if [[ ! -f "${PATCHED_MARK}" ]]; then
-            patch -p1 <"${TP_PATCH_DIR}/sts-20150401-1.0.7.patch"
-            touch "${PATCHED_MARK}"
-        fi
-        cd -
-        echo "Finished patching ${STS_SOURCE}"
-    else
-        echo "Error: Unsupported STS version ${STS_SOURCE}"
-        echo "Only STS v2 1.0.7 is supported (sts-20150401-1.0.7)"
-        exit 1
-    fi
-fi
+# STS SDK patching removed - using direct REST API calls instead
 
 # patch libdivide
 if [[ " ${TP_ARCHIVES[*]} " =~ " LIBDIVIDE " ]]; then
