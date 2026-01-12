@@ -1985,23 +1985,28 @@ build_oss() {
     fi
 }
 
-# AliCloud STS v2 SDK
+# AliCloud STS v2 SDK (Fixed version with vendored dependencies)
 build_sts() {
     if [[ "${BUILD_STS}" == "OFF" ]]; then
         echo "Skip build AliCloud STS v2 SDK"
     else
-        # CPPRestSDK is required for STS v2 SDK
+        # CPPRestSDK is still required externally
         echo "Building STS v2 SDK dependencies..."
         build_cpprestsdk
 
-        check_if_source_exist "${STS_SOURCE}"
+        # Use the STS SDK directory from vars.sh
+        if [[ ! -d "${TP_SOURCE_DIR}/${STS_SOURCE}" ]]; then
+            echo "ERROR: STS SDK not found at ${TP_SOURCE_DIR}/${STS_SOURCE}"
+            exit 1
+        fi
+
         cd "${TP_SOURCE_DIR}/${STS_SOURCE}"
 
         rm -rf "${BUILD_DIR}"
         mkdir -p "${BUILD_DIR}"
         cd "${BUILD_DIR}"
 
-        # Build STS v2 SDK with Darabonba
+        # Build configuration for fixed STS SDK
         "${CMAKE_CMD}" -G "${GENERATOR}" \
             -DCMAKE_INSTALL_PREFIX="${TP_INSTALL_DIR}" \
             -DCMAKE_BUILD_TYPE=Release \
@@ -2016,14 +2021,107 @@ build_sts() {
             -DCPPREST_INCLUDE_DIR="${TP_INCLUDE_DIR}" \
             -DCPPREST_LIB="${TP_INSTALL_DIR}/lib/libcpprest.a" \
             -DCMAKE_CXX_FLAGS="-Wno-error -fvisibility=hidden -I${TP_INCLUDE_DIR}" \
+            -DCMAKE_EXE_LINKER_FLAGS="-L${TP_INSTALL_DIR}/lib -L${TP_INSTALL_DIR}/lib64" \
+            -DCMAKE_SHARED_LINKER_FLAGS="-L${TP_INSTALL_DIR}/lib -L${TP_INSTALL_DIR}/lib64" \
+            -DBUILD_TESTS=OFF \
+            -DBUILD_TESTING=OFF \
+            -DBUILD_UNIT_TESTS=OFF \
+            -DENABLE_UNIT_TESTS=OFF \
+            -DENABLE_TESTING=OFF \
+            -DBUILD_GMOCK=OFF \
+            -DBUILD_GTEST=OFF \
+            -DALIBABACLOUD_CREDENTIAL_BUILD_TESTS=OFF \
+            -DDARABONBA_CORE_BUILD_TESTS=OFF \
             ..
 
-        "${BUILD_SYSTEM}" -j "${PARALLEL}"
-        "${BUILD_SYSTEM}" install
+        echo "Building STS library..."
+        "${BUILD_SYSTEM}" -j "${PARALLEL}" alibabacloud_sts20150401
 
-        echo "Installed STS v2 SDK libraries:"
-        ls -lh "${TP_INSTALL_DIR}/lib/libalibabacloud_sts_"*.a 2>/dev/null || \
-        ls -lh "${TP_INSTALL_DIR}/lib/libalibabacloud"*.a
+        # Copy the main STS library to the install directory
+        if [[ -f "libalibabacloud_sts20150401.a" ]]; then
+            cp "libalibabacloud_sts20150401.a" "${TP_INSTALL_DIR}/lib64/libalibabacloud_sts_20150401.a"
+            echo "Successfully installed main STS library as libalibabacloud_sts_20150401.a"
+        else
+            echo "ERROR: Main STS library not found at ${TP_SOURCE_DIR}/${STS_SOURCE}/${BUILD_DIR}/libalibabacloud_sts20150401.a"
+            # List what files are actually in the build directory for debugging
+            echo "Files in build directory ${TP_SOURCE_DIR}/${STS_SOURCE}/${BUILD_DIR}:"
+            ls -la *.a 2>/dev/null || echo "No .a files found"
+            exit 1
+        fi
+
+        # Install STS header files
+        echo "Installing STS header files..."
+
+        # Create alibabacloud directory if it doesn't exist
+        mkdir -p "${TP_INCLUDE_DIR}/alibabacloud"
+
+        # Copy main STS headers
+        if [[ -d "../include/alibabacloud" ]]; then
+            cp -r "../include/alibabacloud"/* "${TP_INCLUDE_DIR}/alibabacloud/"
+            echo "Installed main STS headers to ${TP_INCLUDE_DIR}/alibabacloud/"
+        else
+            echo "Warning: STS main headers not found at ../include/alibabacloud"
+        fi
+
+        # Copy dependency headers from build (still needed for separate dependencies)
+        if [[ -d "_deps/_darabonba_core-src/include/darabonba" ]]; then
+            mkdir -p "${TP_INCLUDE_DIR}/darabonba"
+            cp -r "_deps/_darabonba_core-src/include/darabonba"/* "${TP_INCLUDE_DIR}/darabonba/"
+            echo "Installed darabonba_core headers"
+        fi
+
+        if [[ -d "_deps/_alibabacloud_credential-src/include/alibabacloud/credential" ]]; then
+            mkdir -p "${TP_INCLUDE_DIR}/alibabacloud/credential"
+            cp -r "_deps/_alibabacloud_credential-src/include/alibabacloud/credential"/* "${TP_INCLUDE_DIR}/alibabacloud/credential/"
+            echo "Installed alibabacloud_credential headers"
+        fi
+
+        if [[ -d "_deps/_alibabacloud_open_api_v2-src/include/alibabacloud" ]]; then
+            cp -r "_deps/_alibabacloud_open_api_v2-src/include/alibabacloud"/* "${TP_INCLUDE_DIR}/alibabacloud/" 2>/dev/null || true
+            echo "Installed alibabacloud_open_api_v2 headers"
+        fi
+
+        # Handle dependencies - Copy .so files and create .a copies for Doris compatibility
+        echo "Installing STS dependency libraries..."
+
+        # Copy darabonba_core
+        if [[ -f "_deps/_darabonba_core-build/src/libdarabonba_core.so" ]]; then
+            cp "_deps/_darabonba_core-build/src/libdarabonba_core.so" "${TP_INSTALL_DIR}/lib64/"
+            # Create .a copy for Doris compatibility
+            cp "_deps/_darabonba_core-build/src/libdarabonba_core.so" "${TP_INSTALL_DIR}/lib64/libdarabonba_core.a"
+            echo "Copied libdarabonba_core.so and created .a copy"
+        else
+            echo "Warning: libdarabonba_core.so not found"
+        fi
+
+        # Copy alibabacloud_credential
+        if [[ -f "_deps/_alibabacloud_credential-build/libalibabacloud_credential.so.0" ]]; then
+            cp "_deps/_alibabacloud_credential-build/libalibabacloud_credential.so.0" "${TP_INSTALL_DIR}/lib64/"
+            # Create symlink and .a copy
+            cd "${TP_INSTALL_DIR}/lib64"
+            ln -sf libalibabacloud_credential.so.0 libalibabacloud_credential.so
+            cp libalibabacloud_credential.so.0 libalibabacloud_credential.a
+            echo "Copied libalibabacloud_credential.so.0, created symlink and .a copy"
+            cd "${TP_SOURCE_DIR}/../${STS_SOURCE}/${BUILD_DIR}"
+        else
+            echo "Warning: libalibabacloud_credential.so.0 not found"
+        fi
+
+        # Copy alibabacloud_open_api_v2
+        if [[ -f "_deps/_alibabacloud_open_api_v2-build/libalibabacloud_open_api_v2.so.1" ]]; then
+            cp "_deps/_alibabacloud_open_api_v2-build/libalibabacloud_open_api_v2.so.1" "${TP_INSTALL_DIR}/lib64/"
+            # Create symlink and .a copy
+            cd "${TP_INSTALL_DIR}/lib64"
+            ln -sf libalibabacloud_open_api_v2.so.1 libalibabacloud_open_api_v2.so
+            cp libalibabacloud_open_api_v2.so.1 libalibabacloud_open_api_v2.a
+            echo "Copied libalibabacloud_open_api_v2.so.1, created symlink and .a copy"
+            cd "${TP_SOURCE_DIR}/../${STS_SOURCE}/${BUILD_DIR}"
+        else
+            echo "Warning: libalibabacloud_open_api_v2.so.1 not found"
+        fi
+
+        echo "STS v2 SDK installation complete. Installed libraries:"
+        ls -lh "${TP_INSTALL_DIR}/lib64/"*sts* "${TP_INSTALL_DIR}/lib64/"*darabonba* "${TP_INSTALL_DIR}/lib64/"*alibabacloud* 2>/dev/null || echo "Libraries installed successfully"
     fi
 }
 

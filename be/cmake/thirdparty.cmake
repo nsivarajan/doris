@@ -159,19 +159,17 @@ if(BUILD_OSS STREQUAL "ON")
 endif()
 
 if(BUILD_STS STREQUAL "ON")
-    # STS v2 SDK
+    # STS v2 SDK (main library)
     add_thirdparty(alibabacloud_sts_20150401 LIB64)
 
-    # Darabonba dependencies
-    add_thirdparty(darabonba_core LIB64)
-    add_thirdparty(darabonba_util LIB64)
+    # Darabonba dependencies (still separate libraries)
+    add_thirdparty(darabonba_core WHOLELIBPATH ${THIRDPARTY_DIR}/installed/lib64/libdarabonba_core.so)
 
-    # OpenAPI dependencies
-    add_thirdparty(alibabacloud_open_api LIB64)
-    add_thirdparty(alibabacloud_open_api_util LIB64)
-    add_thirdparty(alibabacloud_endpoint_util LIB64)
+    # OpenAPI dependencies (still separate libraries)
+    add_thirdparty(alibabacloud_open_api_v2 WHOLELIBPATH ${THIRDPARTY_DIR}/installed/lib64/libalibabacloud_open_api_v2.so.1)
+    add_thirdparty(alibabacloud_credential WHOLELIBPATH ${THIRDPARTY_DIR}/installed/lib64/libalibabacloud_credential.so.0)
 
-    # CPPRestSDK
+    # CPPRestSDK (external dependency)
     add_thirdparty(cpprest LIB64)
 endif()
 

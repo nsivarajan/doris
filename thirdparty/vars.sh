@@ -529,8 +529,8 @@ OSS_NAME="aliyun-oss-cpp-sdk-1.10.1.tar.gz"
 OSS_SOURCE="aliyun-oss-cpp-sdk-1.10.1"
 OSS_MD5SUM="7b1628a678a47148e6c25c88ecf2b5f6"
 
-# AliCloud STS v2 SDK
-STS_VERSION="1.0.7"
+# AliCloud STS v2 SDK 1.0.8
+STS_VERSION="1.0.8"
 STS_DOWNLOAD="https://github.com/alibabacloud-sdk-cpp/sts-20150401/archive/refs/tags/${STS_VERSION}.tar.gz"
 STS_NAME="sts-20150401-${STS_VERSION}.tar.gz"
 STS_SOURCE="sts-20150401-${STS_VERSION}"

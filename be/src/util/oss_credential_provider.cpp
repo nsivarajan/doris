@@ -22,6 +22,8 @@
 #include <curl/curl.h>
 #include <rapidjson/document.h>
 #include <rapidjson/error/en.h>
+#include <alibabacloud/Openapi.hpp>
+#include <alibabacloud/Sts20150401.hpp>
 
 #include <chrono>
 #include <sstream>
@@ -210,20 +212,19 @@ AlibabaCloud::OSS::Credentials StsAssumeRoleCredentialsProvider::assumeRole() {
     }
 
     try {
-        // Create STS v2 config for 1.0.7
-        auto config = std::make_shared<AlibabaCloud::OpenApi::Utils::Models::Config>();
-        config->accessKeyId = std::make_shared<std::string>(base_creds.AccessKeyId());
-        config->accessKeySecret = std::make_shared<std::string>(base_creds.AccessKeySecret());
+        AlibabaCloud::OpenApi::Utils::Models::Config config;
+        config.setAccessKeyId(base_creds.AccessKeyId());
+        config.setAccessKeySecret(base_creds.AccessKeySecret());
 
         // Add security token if present
         if (!base_creds.SessionToken().empty()) {
-            config->securityToken = std::make_shared<std::string>(base_creds.SessionToken());
+            config.setSecurityToken(base_creds.SessionToken());
         }
 
-        config->endpoint = std::make_shared<std::string>("sts.aliyuncs.com");
-        config->protocol = std::make_shared<std::string>("https");
+        config.setEndpoint("sts.aliyuncs.com");
+        config.setProtocol("https");
 
-        AlibabaCloud::Sts20150401::Client client(*config);
+        AlibabaCloud::Sts20150401::Client client(config);
 
         AlibabaCloud::Sts20150401::Models::AssumeRoleRequest request;
         request.setRoleArn(_role_arn);
@@ -242,13 +243,13 @@ AlibabaCloud::OSS::Credentials StsAssumeRoleCredentialsProvider::assumeRole() {
             return AlibabaCloud::OSS::Credentials("", "");
         }
 
-        auto& body = response.getBody();
+        auto body = response.getBody();
         if (!body.hasCredentials()) {
             LOG(WARNING) << "STS AssumeRole returned empty credentials. Role: " << _role_arn;
             return AlibabaCloud::OSS::Credentials("", "");
         }
 
-        auto& creds = body.getCredentials();
+        auto creds = body.getCredentials();
         std::string access_key = creds.getAccessKeyId();
         std::string secret_key = creds.getAccessKeySecret();
         std::string token = creds.getSecurityToken();
@@ -326,12 +327,11 @@ AlibabaCloud::OSS::Credentials DefaultCredentialsProvider::getCredentialsFromRRS
     }
 
     try {
-        // Create STS v2 config for 1.0.7
-        auto config = std::make_shared<AlibabaCloud::OpenApi::Utils::Models::Config>();
-        config->endpoint = std::make_shared<std::string>("sts.aliyuncs.com");
-        config->protocol = std::make_shared<std::string>("https");
+        AlibabaCloud::OpenApi::Utils::Models::Config config;
+        config.setEndpoint("sts.aliyuncs.com");
+        config.setProtocol("https");
 
-        AlibabaCloud::Sts20150401::Client client(*config);
+        AlibabaCloud::Sts20150401::Client client(config);
 
         AlibabaCloud::Sts20150401::Models::AssumeRoleWithOIDCRequest request;
         request.setRoleArn(role_arn);
@@ -352,13 +352,13 @@ AlibabaCloud::OSS::Credentials DefaultCredentialsProvider::getCredentialsFromRRS
             return AlibabaCloud::OSS::Credentials("", "");
         }
 
-        auto& body = response.getBody();
+        auto body = response.getBody();
         if (!body.hasCredentials()) {
             LOG(WARNING) << "RRSA AssumeRoleWithOIDC returned empty credentials. Role: " << role_arn;
             return AlibabaCloud::OSS::Credentials("", "");
         }
 
-        auto& creds = body.getCredentials();
+        auto creds = body.getCredentials();
         std::string access_key = creds.getAccessKeyId();
         std::string secret_key = creds.getAccessKeySecret();
         std::string token = creds.getSecurityToken();
