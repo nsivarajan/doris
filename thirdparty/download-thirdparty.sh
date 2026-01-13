@@ -73,10 +73,13 @@ while [[ $# -gt 0 ]]; do
 
     # Auto-add dependencies for specific packages
     if [[ "${SPEC_LIB}" == "STS" ]]; then
-        # Add CPPRestSDK (required by STS v2)
-        if [[ ! " ${SPEC_ARCHIVES[*]} " =~ " CPPRESTSDK " ]]; then
-            SPEC_ARCHIVES=("${SPEC_ARCHIVES[@]}" "CPPRESTSDK")
-        fi
+        # Add all STS v2 SDK dependencies
+        STS_DEPENDENCIES=("DARABONBA_CORE" "ALIBABACLOUD_CREDENTIAL" "ALIBABACLOUD_OPEN_API_V2" "CPPRESTSDK")
+        for dep in "${STS_DEPENDENCIES[@]}"; do
+            if [[ ! " ${SPEC_ARCHIVES[*]} " =~ " ${dep} " ]]; then
+                SPEC_ARCHIVES=("${SPEC_ARCHIVES[@]}" "${dep}")
+            fi
+        done
     fi
 done
 if [[ "${SPEC_LIB}" != "" ]]; then
@@ -461,8 +464,9 @@ if [[ " ${TP_ARCHIVES[*]} " =~ " BASE64 " ]]; then
     echo "Finished patching ${BASE64_SOURCE}"
 fi
 
-# patch sts
+# patch sts and its dependencies
 if [[ " ${TP_ARCHIVES[*]} " =~ " STS " ]]; then
+    # Patch main STS library
     if [[ "${STS_SOURCE}" = "sts-20150401-1.0.8" ]]; then
         cd "${TP_SOURCE_DIR}/${STS_SOURCE}"
         if [[ ! -f "${PATCHED_MARK}" ]]; then
@@ -472,6 +476,39 @@ if [[ " ${TP_ARCHIVES[*]} " =~ " STS " ]]; then
         cd -
     fi
     echo "Finished patching ${STS_SOURCE}"
+
+    # Patch darabonba_core (tea-cpp)
+    if [[ " ${TP_ARCHIVES[*]} " =~ " DARABONBA_CORE " ]] && [[ "${DARABONBA_CORE_SOURCE}" = "tea-cpp-0ac7209295218497ff9f0bf4d3c919f13caaba00" ]]; then
+        cd "${TP_SOURCE_DIR}/${DARABONBA_CORE_SOURCE}"
+        if [[ ! -f "${PATCHED_MARK}" ]]; then
+            patch -p1 <"${TP_PATCH_DIR}/tea-cpp-0ac7209295218497ff9f0bf4d3c919f13caaba00.patch"
+            touch "${PATCHED_MARK}"
+        fi
+        cd -
+        echo "Finished patching ${DARABONBA_CORE_SOURCE}"
+    fi
+
+    # Patch alibabacloud_credential
+    if [[ " ${TP_ARCHIVES[*]} " =~ " ALIBABACLOUD_CREDENTIAL " ]] && [[ "${ALIBABACLOUD_CREDENTIAL_SOURCE}" = "credentials-cpp-158310f573a2102b4901677e187408b8a554a60f" ]]; then
+        cd "${TP_SOURCE_DIR}/${ALIBABACLOUD_CREDENTIAL_SOURCE}"
+        if [[ ! -f "${PATCHED_MARK}" ]]; then
+            patch -p1 <"${TP_PATCH_DIR}/credentials-cpp-158310f573a2102b4901677e187408b8a554a60f.patch"
+            touch "${PATCHED_MARK}"
+        fi
+        cd -
+        echo "Finished patching ${ALIBABACLOUD_CREDENTIAL_SOURCE}"
+    fi
+
+    # Patch alibabacloud_open_api_v2
+    if [[ " ${TP_ARCHIVES[*]} " =~ " ALIBABACLOUD_OPEN_API_V2 " ]] && [[ "${ALIBABACLOUD_OPEN_API_V2_SOURCE}" = "alibabacloud-open-api-v2-f7adac46e44a1126e12c2932110775c88e8e9c2b" ]]; then
+        cd "${TP_SOURCE_DIR}/${ALIBABACLOUD_OPEN_API_V2_SOURCE}"
+        if [[ ! -f "${PATCHED_MARK}" ]]; then
+            patch -p1 <"${TP_PATCH_DIR}/alibabacloud-open-api-v2-f7adac46e44a1126e12c2932110775c88e8e9c2b.patch"
+            touch "${PATCHED_MARK}"
+        fi
+        cd -
+        echo "Finished patching ${ALIBABACLOUD_OPEN_API_V2_SOURCE}"
+    fi
 fi
 
 # patch libdivide
