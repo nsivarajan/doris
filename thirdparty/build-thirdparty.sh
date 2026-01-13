@@ -1985,144 +1985,162 @@ build_oss() {
     fi
 }
 
-# AliCloud STS v2 SDK (Fixed version with vendored dependencies)
+# AliCloud STS v2 SDK with nested dependencies
 build_sts() {
     if [[ "${BUILD_STS}" == "OFF" ]]; then
         echo "Skip build AliCloud STS v2 SDK"
-    else
-        # CPPRestSDK is still required externally
-        echo "Building STS v2 SDK dependencies..."
-        build_cpprestsdk
+        return
+    fi
 
-        # Use the STS SDK directory from vars.sh
-        if [[ ! -d "${TP_SOURCE_DIR}/${STS_SOURCE}" ]]; then
-            echo "ERROR: STS SDK not found at ${TP_SOURCE_DIR}/${STS_SOURCE}"
-            exit 1
-        fi
+    echo "Building STS v2 SDK with all dependencies..."
 
-        cd "${TP_SOURCE_DIR}/${STS_SOURCE}"
+    # Internal function: build darabonba_core (tea-cpp)
+    _build_darabonba_core() {
+        echo "===== Building darabonba_core (tea-cpp) ====="
+        check_if_source_exist "${DARABONBA_CORE_SOURCE}"
+        cd "${TP_SOURCE_DIR}/${DARABONBA_CORE_SOURCE}"
 
-        rm -rf "${BUILD_DIR}"
         mkdir -p "${BUILD_DIR}"
         cd "${BUILD_DIR}"
 
-        # Build configuration for fixed STS SDK
         "${CMAKE_CMD}" -G "${GENERATOR}" \
             -DCMAKE_INSTALL_PREFIX="${TP_INSTALL_DIR}" \
             -DCMAKE_BUILD_TYPE=Release \
             -DCMAKE_POSITION_INDEPENDENT_CODE=ON \
             -DBUILD_SHARED_LIBS=OFF \
-            -DCMAKE_PREFIX_PATH="${TP_INSTALL_DIR}" \
-            -DCMAKE_MODULE_PATH="${TP_INSTALL_DIR}/lib/cmake" \
-            -DBoost_INCLUDE_DIR="${TP_INCLUDE_DIR}" \
-            -DBoost_USE_STATIC_LIBS=ON \
-            -DBoost_USE_STATIC_RUNTIME=ON \
             -DOPENSSL_ROOT_DIR="${TP_INSTALL_DIR}" \
-            -DCPPREST_INCLUDE_DIR="${TP_INCLUDE_DIR}" \
-            -DCPPREST_LIB="${TP_INSTALL_DIR}/lib/libcpprest.a" \
-            -DCMAKE_CXX_FLAGS="-Wno-error -fvisibility=hidden -I${TP_INCLUDE_DIR}" \
-            -DCMAKE_EXE_LINKER_FLAGS="-L${TP_INSTALL_DIR}/lib -L${TP_INSTALL_DIR}/lib64" \
-            -DCMAKE_SHARED_LINKER_FLAGS="-L${TP_INSTALL_DIR}/lib -L${TP_INSTALL_DIR}/lib64" \
-            -DBUILD_TESTS=OFF \
-            -DBUILD_TESTING=OFF \
-            -DBUILD_UNIT_TESTS=OFF \
-            -DENABLE_UNIT_TESTS=OFF \
-            -DENABLE_TESTING=OFF \
-            -DBUILD_GMOCK=OFF \
-            -DBUILD_GTEST=OFF \
-            -DALIBABACLOUD_CREDENTIAL_BUILD_TESTS=OFF \
-            -DDARABONBA_CORE_BUILD_TESTS=OFF \
+            -DCURL_LIBRARY="${TP_INSTALL_DIR}/lib/libcurl.a" \
+            -DCURL_INCLUDE_DIR="${TP_INCLUDE_DIR}" \
             ..
 
-        echo "Building STS library..."
-        "${BUILD_SYSTEM}" -j "${PARALLEL}" alibabacloud_sts20150401
+        "${BUILD_SYSTEM}" -j "${PARALLEL}"
 
-        # Copy the main STS library to the install directory
-        if [[ -f "libalibabacloud_sts20150401.a" ]]; then
-            cp "libalibabacloud_sts20150401.a" "${TP_INSTALL_DIR}/lib64/libalibabacloud_sts_20150401.a"
-            echo "Successfully installed main STS library as libalibabacloud_sts_20150401.a"
-        else
-            echo "ERROR: Main STS library not found at ${TP_SOURCE_DIR}/${STS_SOURCE}/${BUILD_DIR}/libalibabacloud_sts20150401.a"
-            # List what files are actually in the build directory for debugging
-            echo "Files in build directory ${TP_SOURCE_DIR}/${STS_SOURCE}/${BUILD_DIR}:"
-            ls -la *.a 2>/dev/null || echo "No .a files found"
-            exit 1
+        # Copy library and headers
+        if [[ -f "src/libdarabonba_core.a" ]]; then
+            cp "src/libdarabonba_core.a" "${TP_INSTALL_DIR}/lib64/"
+            echo "Installed libdarabonba_core.a"
         fi
 
-        # Install STS header files
-        echo "Installing STS header files..."
-
-        # Create alibabacloud directory if it doesn't exist
-        mkdir -p "${TP_INCLUDE_DIR}/alibabacloud"
-
-        # Copy main STS headers
-        if [[ -d "../include/alibabacloud" ]]; then
-            cp -r "../include/alibabacloud"/* "${TP_INCLUDE_DIR}/alibabacloud/"
-            echo "Installed main STS headers to ${TP_INCLUDE_DIR}/alibabacloud/"
-        else
-            echo "Warning: STS main headers not found at ../include/alibabacloud"
-        fi
-
-        # Copy dependency headers from build (still needed for separate dependencies)
-        if [[ -d "_deps/_darabonba_core-src/include/darabonba" ]]; then
+        if [[ -d "../include/darabonba" ]]; then
             mkdir -p "${TP_INCLUDE_DIR}/darabonba"
-            cp -r "_deps/_darabonba_core-src/include/darabonba"/* "${TP_INCLUDE_DIR}/darabonba/"
-            echo "Installed darabonba_core headers"
+            cp -r "../include/darabonba"/* "${TP_INCLUDE_DIR}/darabonba/"
+            echo "Installed darabonba headers"
+        fi
+    }
+
+    # Internal function: build alibabacloud_credential
+    _build_alibabacloud_credential() {
+        echo "===== Building alibabacloud_credential ====="
+        check_if_source_exist "${ALIBABACLOUD_CREDENTIAL_SOURCE}"
+        cd "${TP_SOURCE_DIR}/${ALIBABACLOUD_CREDENTIAL_SOURCE}"
+
+        mkdir -p "${BUILD_DIR}"
+        cd "${BUILD_DIR}"
+
+        "${CMAKE_CMD}" -G "${GENERATOR}" \
+            -DCMAKE_INSTALL_PREFIX="${TP_INSTALL_DIR}" \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_POSITION_INDEPENDENT_CODE=ON \
+            -DBUILD_SHARED_LIBS=OFF \
+            -DENABLE_UNIT_TESTS=OFF \
+            -DOPENSSL_ROOT_DIR="${TP_INSTALL_DIR}" \
+            -Dnlohmann_json_DIR="${TP_INSTALL_DIR}/share/cmake/nlohmann_json" \
+            -Ddarabonba_core_DIR="${TP_INSTALL_DIR}" \
+            ..
+
+        "${BUILD_SYSTEM}" -j "${PARALLEL}"
+
+        # Copy library and headers
+        if [[ -f "libalibabacloud_credential.a" ]]; then
+            cp "libalibabacloud_credential.a" "${TP_INSTALL_DIR}/lib64/"
+            echo "Installed libalibabacloud_credential.a"
         fi
 
-        if [[ -d "_deps/_alibabacloud_credential-src/include/alibabacloud/credential" ]]; then
-            mkdir -p "${TP_INCLUDE_DIR}/alibabacloud/credential"
-            cp -r "_deps/_alibabacloud_credential-src/include/alibabacloud/credential"/* "${TP_INCLUDE_DIR}/alibabacloud/credential/"
-            echo "Installed alibabacloud_credential headers"
+        if [[ -d "../include/AlibabaCloud" ]]; then
+            mkdir -p "${TP_INCLUDE_DIR}/alibabacloud"
+            cp -r "../include/AlibabaCloud"/* "${TP_INCLUDE_DIR}/alibabacloud/"
+            echo "Installed alibabacloud credential headers"
+        fi
+    }
+
+    # Internal function: build alibabacloud_open_api_v2
+    _build_alibabacloud_open_api_v2() {
+        echo "===== Building alibabacloud_open_api_v2 ====="
+        check_if_source_exist "${ALIBABACLOUD_OPEN_API_V2_SOURCE}"
+        cd "${TP_SOURCE_DIR}/${ALIBABACLOUD_OPEN_API_V2_SOURCE}"
+
+        mkdir -p "${BUILD_DIR}"
+        cd "${BUILD_DIR}"
+
+        "${CMAKE_CMD}" -G "${GENERATOR}" \
+            -DCMAKE_INSTALL_PREFIX="${TP_INSTALL_DIR}" \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_POSITION_INDEPENDENT_CODE=ON \
+            -DBUILD_SHARED_LIBS=OFF \
+            -DOPENSSL_ROOT_DIR="${TP_INSTALL_DIR}" \
+            -DCURL_LIBRARY="${TP_INSTALL_DIR}/lib/libcurl.a" \
+            -DCURL_INCLUDE_DIR="${TP_INCLUDE_DIR}" \
+            -Ddarabonba_core_DIR="${TP_INSTALL_DIR}" \
+            -Dalibabacloud_credential_DIR="${TP_INSTALL_DIR}" \
+            ..
+
+        "${BUILD_SYSTEM}" -j "${PARALLEL}"
+
+        # Copy library and headers
+        if [[ -f "libalibabacloud_open_api_v2.a" ]]; then
+            cp "libalibabacloud_open_api_v2.a" "${TP_INSTALL_DIR}/lib64/"
+            echo "Installed libalibabacloud_open_api_v2.a"
         fi
 
-        if [[ -d "_deps/_alibabacloud_open_api_v2-src/include/alibabacloud" ]]; then
-            cp -r "_deps/_alibabacloud_open_api_v2-src/include/alibabacloud"/* "${TP_INCLUDE_DIR}/alibabacloud/" 2>/dev/null || true
-            echo "Installed alibabacloud_open_api_v2 headers"
+        if [[ -d "../include/alibabacloud" ]]; then
+            cp -r "../include/alibabacloud"/* "${TP_INCLUDE_DIR}/alibabacloud/" 2>/dev/null || true
+            echo "Installed alibabacloud open api v2 headers"
         fi
+    }
 
-        # Handle dependencies - Copy .so files and create .a copies for Doris compatibility
-        echo "Installing STS dependency libraries..."
+    # Build dependencies in correct order
+    _build_darabonba_core
+    _build_alibabacloud_credential
+    _build_alibabacloud_open_api_v2
 
-        # Copy darabonba_core
-        if [[ -f "_deps/_darabonba_core-build/src/libdarabonba_core.so" ]]; then
-            cp "_deps/_darabonba_core-build/src/libdarabonba_core.so" "${TP_INSTALL_DIR}/lib64/"
-            # Create .a copy for Doris compatibility
-            cp "_deps/_darabonba_core-build/src/libdarabonba_core.so" "${TP_INSTALL_DIR}/lib64/libdarabonba_core.a"
-            echo "Copied libdarabonba_core.so and created .a copy"
-        else
-            echo "Warning: libdarabonba_core.so not found"
-        fi
+    # Finally build main STS library
+    echo "===== Building main STS library ====="
+    check_if_source_exist "${STS_SOURCE}"
+    cd "${TP_SOURCE_DIR}/${STS_SOURCE}"
 
-        # Copy alibabacloud_credential
-        if [[ -f "_deps/_alibabacloud_credential-build/libalibabacloud_credential.so.0" ]]; then
-            cp "_deps/_alibabacloud_credential-build/libalibabacloud_credential.so.0" "${TP_INSTALL_DIR}/lib64/"
-            # Create symlink and .a copy
-            cd "${TP_INSTALL_DIR}/lib64"
-            ln -sf libalibabacloud_credential.so.0 libalibabacloud_credential.so
-            cp libalibabacloud_credential.so.0 libalibabacloud_credential.a
-            echo "Copied libalibabacloud_credential.so.0, created symlink and .a copy"
-            cd "${TP_SOURCE_DIR}/../${STS_SOURCE}/${BUILD_DIR}"
-        else
-            echo "Warning: libalibabacloud_credential.so.0 not found"
-        fi
+    mkdir -p "${BUILD_DIR}"
+    cd "${BUILD_DIR}"
 
-        # Copy alibabacloud_open_api_v2
-        if [[ -f "_deps/_alibabacloud_open_api_v2-build/libalibabacloud_open_api_v2.so.1" ]]; then
-            cp "_deps/_alibabacloud_open_api_v2-build/libalibabacloud_open_api_v2.so.1" "${TP_INSTALL_DIR}/lib64/"
-            # Create symlink and .a copy
-            cd "${TP_INSTALL_DIR}/lib64"
-            ln -sf libalibabacloud_open_api_v2.so.1 libalibabacloud_open_api_v2.so
-            cp libalibabacloud_open_api_v2.so.1 libalibabacloud_open_api_v2.a
-            echo "Copied libalibabacloud_open_api_v2.so.1, created symlink and .a copy"
-            cd "${TP_SOURCE_DIR}/../${STS_SOURCE}/${BUILD_DIR}"
-        else
-            echo "Warning: libalibabacloud_open_api_v2.so.1 not found"
-        fi
+    "${CMAKE_CMD}" -G "${GENERATOR}" \
+        -DCMAKE_INSTALL_PREFIX="${TP_INSTALL_DIR}" \
+        -DCMAKE_BUILD_TYPE=Release \
+        -DCMAKE_POSITION_INDEPENDENT_CODE=ON \
+        -DBUILD_SHARED_LIBS=OFF \
+        -DBUILD_TESTS=OFF \
+        -DBUILD_TESTING=OFF \
+        -DOPENSSL_ROOT_DIR="${TP_INSTALL_DIR}" \
+        -DCPPREST_INCLUDE_DIR="${TP_INCLUDE_DIR}" \
+        -DCPPREST_LIB="${TP_INSTALL_DIR}/lib64/libcpprest.a" \
+        -Dnlohmann_json_DIR="${TP_INSTALL_DIR}/share/cmake/nlohmann_json" \
+        -Ddarabonba_core_DIR="${TP_INSTALL_DIR}" \
+        -Dalibabacloud_credential_DIR="${TP_INSTALL_DIR}" \
+        -Dalibabacloud_open_api_v2_DIR="${TP_INSTALL_DIR}" \
+        ..
 
-        echo "STS v2 SDK installation complete. Installed libraries:"
-        ls -lh "${TP_INSTALL_DIR}/lib64/"*sts* "${TP_INSTALL_DIR}/lib64/"*darabonba* "${TP_INSTALL_DIR}/lib64/"*alibabacloud* 2>/dev/null || echo "Libraries installed successfully"
+    "${BUILD_SYSTEM}" -j "${PARALLEL}"
+
+    # Copy library and headers
+    if [[ -f "libalibabacloud_sts20150401.a" ]]; then
+        cp "libalibabacloud_sts20150401.a" "${TP_INSTALL_DIR}/lib64/libalibabacloud_sts_20150401.a"
+        echo "Installed libalibabacloud_sts_20150401.a"
     fi
+
+    if [[ -d "../include/alibabacloud" ]]; then
+        cp -r "../include/alibabacloud"/* "${TP_INCLUDE_DIR}/alibabacloud/" 2>/dev/null || true
+        echo "Installed STS headers"
+    fi
+
+    echo "STS v2 SDK with all dependencies installation complete"
 }
 
 # dragonbox

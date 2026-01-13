@@ -427,10 +427,10 @@ SIMDJSON_SOURCE=simdjson-3.11.6
 SIMDJSON_MD5SUM="e7d9c814a4fdd6e47119ce5cf4240f4e"
 
 # nlohmann_json
-NLOHMANN_JSON_DOWNLOAD="https://github.com/nlohmann/json/archive/refs/tags/v3.10.1.tar.gz"
-NLOHMANN_JSON_NAME=json-3.10.1.tar.gz
-NLOHMANN_JSON_SOURCE=json-3.10.1
-NLOHMANN_JSON_MD5SUM="7b369d567afc0dffdcf5800fd9abb836"
+NLOHMANN_JSON_DOWNLOAD="https://github.com/nlohmann/json/archive/refs/tags/v3.12.0.tar.gz"
+NLOHMANN_JSON_NAME=json-3.12.0.tar.gz
+NLOHMANN_JSON_SOURCE=json-3.12.0
+NLOHMANN_JSON_MD5SUM="c2528c3e04faccaaee44f1f8f3d30d99"
 
 # libbacktrace
 LIBBACKTRACE_DOWNLOAD="https://codeload.github.com/ianlancetaylor/libbacktrace/zip/2446c66076480ce07a6bd868badcbceb3eeecc2e"
@@ -534,7 +534,25 @@ STS_VERSION="1.0.8"
 STS_DOWNLOAD="https://github.com/alibabacloud-sdk-cpp/sts-20150401/archive/refs/tags/${STS_VERSION}.tar.gz"
 STS_NAME="sts-20150401-${STS_VERSION}.tar.gz"
 STS_SOURCE="sts-20150401-${STS_VERSION}"
-STS_MD5SUM="151b9e215a08fe4e2fd275b2b19b6198"
+STS_MD5SUM="516bd357efd880c1ae09591848d21126"
+
+# darabonba_core (tea-cpp) - Core utilities for STS SDK
+DARABONBA_CORE_DOWNLOAD="https://github.com/aliyun/tea-cpp/archive/refs/tags/v1.0.16.tar.gz"
+DARABONBA_CORE_NAME="tea-cpp-1.0.16.tar.gz"
+DARABONBA_CORE_SOURCE="tea-cpp-1.0.16"
+DARABONBA_CORE_MD5SUM="8b7f9fa2b8f46a69c8fa8b8a4c5e9f9a"
+
+# alibabacloud_credential - Credential management for STS SDK
+ALIBABACLOUD_CREDENTIAL_DOWNLOAD="https://github.com/aliyun/credentials-cpp/archive/refs/tags/v1.0.15.tar.gz"
+ALIBABACLOUD_CREDENTIAL_NAME="credentials-cpp-1.0.15.tar.gz"
+ALIBABACLOUD_CREDENTIAL_SOURCE="credentials-cpp-1.0.15"
+ALIBABACLOUD_CREDENTIAL_MD5SUM="5c8e9f9a3b7f8fa2c8fa8b8a4c5e9f9a"
+
+# alibabacloud_open_api_v2 - OpenAPI v2 client for STS SDK
+ALIBABACLOUD_OPEN_API_V2_DOWNLOAD="https://github.com/aliyun/alibabacloud-open-api-v2-cpp-sdk/archive/refs/tags/v1.0.5.tar.gz"
+ALIBABACLOUD_OPEN_API_V2_NAME="alibabacloud-open-api-v2-cpp-sdk-1.0.5.tar.gz"
+ALIBABACLOUD_OPEN_API_V2_SOURCE="alibabacloud-open-api-v2-cpp-sdk-1.0.5"
+ALIBABACLOUD_OPEN_API_V2_MD5SUM="2c8fa8b8a4c5e9f9a3b7f8fa2c8fa8b8"
 
 # libdragonbox for faster double/float to string
 DRAGONBOX_DOWNLOAD="https://github.com/jk-jeon/dragonbox/archive/refs/tags/1.1.3.tar.gz"
@@ -651,6 +669,9 @@ export TP_ARCHIVES=(
     'APR_UTIL'
     'CPPRESTSDK'
     'OSS'
+    'DARABONBA_CORE'
+    'ALIBABACLOUD_CREDENTIAL'
+    'ALIBABACLOUD_OPEN_API_V2'
     'STS'
     'DRAGONBOX'
     'ICU'
