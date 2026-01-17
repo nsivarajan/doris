@@ -540,19 +540,19 @@ STS_MD5SUM="516bd357efd880c1ae09591848d21126"
 DARABONBA_CORE_DOWNLOAD="https://github.com/aliyun/tea-cpp/archive/0ac7209295218497ff9f0bf4d3c919f13caaba00.tar.gz"
 DARABONBA_CORE_NAME="tea-cpp-0ac7209295218497ff9f0bf4d3c919f13caaba00.tar.gz"
 DARABONBA_CORE_SOURCE="tea-cpp-0ac7209295218497ff9f0bf4d3c919f13caaba00"
-DARABONBA_CORE_MD5SUM="d41d8cd98f00b204e9800998ecf8427e"
+DARABONBA_CORE_MD5SUM="30f51f50749f201ea261b88de3b89bb9"
 
 # alibabacloud_credential - Credential management for STS SDK
 ALIBABACLOUD_CREDENTIAL_DOWNLOAD="https://github.com/aliyun/credentials-cpp/archive/158310f573a2102b4901677e187408b8a554a60f.tar.gz"
 ALIBABACLOUD_CREDENTIAL_NAME="credentials-cpp-158310f573a2102b4901677e187408b8a554a60f.tar.gz"
 ALIBABACLOUD_CREDENTIAL_SOURCE="credentials-cpp-158310f573a2102b4901677e187408b8a554a60f"
-ALIBABACLOUD_CREDENTIAL_MD5SUM="d41d8cd98f00b204e9800998ecf8427e"
+ALIBABACLOUD_CREDENTIAL_MD5SUM="ddbfe61f5934f6c84bd91b1889abdb27"
 
 # alibabacloud_open_api_v2 - OpenAPI v2 client for STS SDK
 ALIBABACLOUD_OPEN_API_V2_DOWNLOAD="https://github.com/alibabacloud-sdk-cpp/alibabacloud-open-api-v2/archive/f7adac46e44a1126e12c2932110775c88e8e9c2b.tar.gz"
 ALIBABACLOUD_OPEN_API_V2_NAME="alibabacloud-open-api-v2-f7adac46e44a1126e12c2932110775c88e8e9c2b.tar.gz"
 ALIBABACLOUD_OPEN_API_V2_SOURCE="alibabacloud-open-api-v2-f7adac46e44a1126e12c2932110775c88e8e9c2b"
-ALIBABACLOUD_OPEN_API_V2_MD5SUM="d41d8cd98f00b204e9800998ecf8427e"
+ALIBABACLOUD_OPEN_API_V2_MD5SUM="6dd531200b0e3c89830ac62e526bf8bc"
 
 # libdragonbox for faster double/float to string
 DRAGONBOX_DOWNLOAD="https://github.com/jk-jeon/dragonbox/archive/refs/tags/1.1.3.tar.gz"

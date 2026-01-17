@@ -1,10 +1,10 @@
 --- a/CMakeLists.txt
 +++ b/CMakeLists.txt
-@@ -31,1 +31,1 @@
--add_library(${PROJECT_NAME} SHARED ${SOURCE_FILES})
-+add_library(${PROJECT_NAME} STATIC ${SOURCE_FILES})
---- a/CMakeLists.txt
-+++ b/CMakeLists.txt
 @@ -10,1 +10,1 @@
 -set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -std=c++11")
 +set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -std=c++11 -DEVP_MD_CTX_get0_md=EVP_MD_CTX_md")
+--- a/CMakeLists.txt
++++ b/CMakeLists.txt
+@@ -31,1 +31,1 @@
+-add_library(${PROJECT_NAME} SHARED ${SOURCE_FILES})
++add_library(${PROJECT_NAME} STATIC ${SOURCE_FILES})

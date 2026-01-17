@@ -1994,6 +1994,9 @@ build_sts() {
 
     echo "Building STS v2 SDK with all dependencies..."
 
+    # Build cpprestsdk first (required by STS)
+    build_cpprestsdk
+
     # Internal function: build darabonba_core (tea-cpp)
     _build_darabonba_core() {
         echo "===== Building darabonba_core (tea-cpp) ====="
@@ -2003,14 +2006,23 @@ build_sts() {
         mkdir -p "${BUILD_DIR}"
         cd "${BUILD_DIR}"
 
+        # Build configuration with comprehensive flags
         "${CMAKE_CMD}" -G "${GENERATOR}" \
             -DCMAKE_INSTALL_PREFIX="${TP_INSTALL_DIR}" \
             -DCMAKE_BUILD_TYPE=Release \
             -DCMAKE_POSITION_INDEPENDENT_CODE=ON \
             -DBUILD_SHARED_LIBS=OFF \
+            -DCMAKE_PREFIX_PATH="${TP_INSTALL_DIR}" \
+            -DCMAKE_MODULE_PATH="${TP_INSTALL_DIR}/lib/cmake" \
             -DOPENSSL_ROOT_DIR="${TP_INSTALL_DIR}" \
             -DCURL_LIBRARY="${TP_INSTALL_DIR}/lib/libcurl.a" \
             -DCURL_INCLUDE_DIR="${TP_INCLUDE_DIR}" \
+            -DCMAKE_CXX_FLAGS="-Wno-error -fvisibility=hidden -I${TP_INCLUDE_DIR} -DEVP_MD_CTX_get0_md=EVP_MD_CTX_md" \
+            -DCMAKE_EXE_LINKER_FLAGS="-L${TP_INSTALL_DIR}/lib -L${TP_INSTALL_DIR}/lib64" \
+            -DCMAKE_SHARED_LINKER_FLAGS="-L${TP_INSTALL_DIR}/lib -L${TP_INSTALL_DIR}/lib64" \
+            -DBUILD_TESTS=OFF \
+            -DBUILD_TESTING=OFF \
+            -DENABLE_UNIT_TESTS=OFF \
             ..
 
         "${BUILD_SYSTEM}" -j "${PARALLEL}"
@@ -2037,13 +2049,28 @@ build_sts() {
         mkdir -p "${BUILD_DIR}"
         cd "${BUILD_DIR}"
 
+        # Build configuration with comprehensive flags
         "${CMAKE_CMD}" -G "${GENERATOR}" \
             -DCMAKE_INSTALL_PREFIX="${TP_INSTALL_DIR}" \
             -DCMAKE_BUILD_TYPE=Release \
             -DCMAKE_POSITION_INDEPENDENT_CODE=ON \
             -DBUILD_SHARED_LIBS=OFF \
-            -DENABLE_UNIT_TESTS=OFF \
+            -DCMAKE_PREFIX_PATH="${TP_INSTALL_DIR}" \
+            -DCMAKE_MODULE_PATH="${TP_INSTALL_DIR}/lib/cmake" \
+            -DBoost_INCLUDE_DIR="${TP_INCLUDE_DIR}" \
+            -DBoost_USE_STATIC_LIBS=ON \
+            -DBoost_USE_STATIC_RUNTIME=ON \
             -DOPENSSL_ROOT_DIR="${TP_INSTALL_DIR}" \
+            -DCMAKE_CXX_FLAGS="-Wno-error -fvisibility=hidden -I${TP_INCLUDE_DIR} -DEVP_MD_CTX_get0_md=EVP_MD_CTX_md" \
+            -DCMAKE_EXE_LINKER_FLAGS="-L${TP_INSTALL_DIR}/lib -L${TP_INSTALL_DIR}/lib64" \
+            -DCMAKE_SHARED_LINKER_FLAGS="-L${TP_INSTALL_DIR}/lib -L${TP_INSTALL_DIR}/lib64" \
+            -DBUILD_TESTS=OFF \
+            -DBUILD_TESTING=OFF \
+            -DBUILD_UNIT_TESTS=OFF \
+            -DENABLE_UNIT_TESTS=OFF \
+            -DENABLE_TESTING=OFF \
+            -DBUILD_GMOCK=OFF \
+            -DBUILD_GTEST=OFF \
             -Dnlohmann_json_DIR="${TP_INSTALL_DIR}/share/cmake/nlohmann_json" \
             -Ddarabonba_core_DIR="${TP_INSTALL_DIR}" \
             ..
@@ -2056,9 +2083,9 @@ build_sts() {
             echo "Installed libalibabacloud_credential.a"
         fi
 
-        if [[ -d "../include/AlibabaCloud" ]]; then
+        if [[ -d "../include/alibabacloud" ]]; then
             mkdir -p "${TP_INCLUDE_DIR}/alibabacloud"
-            cp -r "../include/AlibabaCloud"/* "${TP_INCLUDE_DIR}/alibabacloud/"
+            cp -r "../include/alibabacloud"/* "${TP_INCLUDE_DIR}/alibabacloud/"
             echo "Installed alibabacloud credential headers"
         fi
     }
@@ -2072,14 +2099,30 @@ build_sts() {
         mkdir -p "${BUILD_DIR}"
         cd "${BUILD_DIR}"
 
+        # Build configuration with comprehensive flags
         "${CMAKE_CMD}" -G "${GENERATOR}" \
             -DCMAKE_INSTALL_PREFIX="${TP_INSTALL_DIR}" \
             -DCMAKE_BUILD_TYPE=Release \
             -DCMAKE_POSITION_INDEPENDENT_CODE=ON \
             -DBUILD_SHARED_LIBS=OFF \
+            -DCMAKE_PREFIX_PATH="${TP_INSTALL_DIR}" \
+            -DCMAKE_MODULE_PATH="${TP_INSTALL_DIR}/lib/cmake" \
+            -DBoost_INCLUDE_DIR="${TP_INCLUDE_DIR}" \
+            -DBoost_USE_STATIC_LIBS=ON \
+            -DBoost_USE_STATIC_RUNTIME=ON \
             -DOPENSSL_ROOT_DIR="${TP_INSTALL_DIR}" \
             -DCURL_LIBRARY="${TP_INSTALL_DIR}/lib/libcurl.a" \
             -DCURL_INCLUDE_DIR="${TP_INCLUDE_DIR}" \
+            -DCMAKE_CXX_FLAGS="-Wno-error -fvisibility=hidden -I${TP_INCLUDE_DIR} -DEVP_MD_CTX_get0_md=EVP_MD_CTX_md" \
+            -DCMAKE_EXE_LINKER_FLAGS="-L${TP_INSTALL_DIR}/lib -L${TP_INSTALL_DIR}/lib64" \
+            -DCMAKE_SHARED_LINKER_FLAGS="-L${TP_INSTALL_DIR}/lib -L${TP_INSTALL_DIR}/lib64" \
+            -DBUILD_TESTS=OFF \
+            -DBUILD_TESTING=OFF \
+            -DBUILD_UNIT_TESTS=OFF \
+            -DENABLE_UNIT_TESTS=OFF \
+            -DENABLE_TESTING=OFF \
+            -DBUILD_GMOCK=OFF \
+            -DBUILD_GTEST=OFF \
             -Ddarabonba_core_DIR="${TP_INSTALL_DIR}" \
             -Dalibabacloud_credential_DIR="${TP_INSTALL_DIR}" \
             ..
@@ -2111,23 +2154,40 @@ build_sts() {
     mkdir -p "${BUILD_DIR}"
     cd "${BUILD_DIR}"
 
+    # Build configuration for fixed STS SDK with comprehensive flags
     "${CMAKE_CMD}" -G "${GENERATOR}" \
         -DCMAKE_INSTALL_PREFIX="${TP_INSTALL_DIR}" \
         -DCMAKE_BUILD_TYPE=Release \
         -DCMAKE_POSITION_INDEPENDENT_CODE=ON \
         -DBUILD_SHARED_LIBS=OFF \
-        -DBUILD_TESTS=OFF \
-        -DBUILD_TESTING=OFF \
+        -DCMAKE_PREFIX_PATH="${TP_INSTALL_DIR}" \
+        -DCMAKE_MODULE_PATH="${TP_INSTALL_DIR}/lib/cmake" \
+        -DBoost_INCLUDE_DIR="${TP_INCLUDE_DIR}" \
+        -DBoost_USE_STATIC_LIBS=ON \
+        -DBoost_USE_STATIC_RUNTIME=ON \
         -DOPENSSL_ROOT_DIR="${TP_INSTALL_DIR}" \
         -DCPPREST_INCLUDE_DIR="${TP_INCLUDE_DIR}" \
-        -DCPPREST_LIB="${TP_INSTALL_DIR}/lib64/libcpprest.a" \
+        -DCPPREST_LIB="${TP_INSTALL_DIR}/lib/libcpprest.a" \
+        -DCMAKE_CXX_FLAGS="-Wno-error -fvisibility=hidden -I${TP_INCLUDE_DIR} -DEVP_MD_CTX_get0_md=EVP_MD_CTX_md" \
+        -DCMAKE_EXE_LINKER_FLAGS="-L${TP_INSTALL_DIR}/lib -L${TP_INSTALL_DIR}/lib64" \
+        -DCMAKE_SHARED_LINKER_FLAGS="-L${TP_INSTALL_DIR}/lib -L${TP_INSTALL_DIR}/lib64" \
+        -DBUILD_TESTS=OFF \
+        -DBUILD_TESTING=OFF \
+        -DBUILD_UNIT_TESTS=OFF \
+        -DENABLE_UNIT_TESTS=OFF \
+        -DENABLE_TESTING=OFF \
+        -DBUILD_GMOCK=OFF \
+        -DBUILD_GTEST=OFF \
+        -DALIBABACLOUD_CREDENTIAL_BUILD_TESTS=OFF \
+        -DDARABONBA_CORE_BUILD_TESTS=OFF \
         -Dnlohmann_json_DIR="${TP_INSTALL_DIR}/share/cmake/nlohmann_json" \
         -Ddarabonba_core_DIR="${TP_INSTALL_DIR}" \
         -Dalibabacloud_credential_DIR="${TP_INSTALL_DIR}" \
         -Dalibabacloud_open_api_v2_DIR="${TP_INSTALL_DIR}" \
         ..
 
-    "${BUILD_SYSTEM}" -j "${PARALLEL}"
+    echo "Building STS library..."
+    "${BUILD_SYSTEM}" -j "${PARALLEL}" alibabacloud_sts20150401
 
     # Copy library and headers
     if [[ -f "libalibabacloud_sts20150401.a" ]]; then

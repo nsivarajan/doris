@@ -1,10 +1,15 @@
 --- a/src/CMakeLists.txt
 +++ b/src/CMakeLists.txt
-@@ -1,6 +1,6 @@
- file(GLOB_RECURSE CPP_FILES "*.cpp")
-
+@@ -3,1 +3,1 @@
 -add_library(${PROJECT_NAME} SHARED ${CPP_FILES})
 +add_library(${PROJECT_NAME} STATIC ${CPP_FILES})
-
- if(WIN32)
-   # Ensure MSVC emits the import library by exporting all public symbols
+--- a/CMakeLists.txt
++++ b/CMakeLists.txt
+@@ -28,1 +28,1 @@
+-  set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wall -Wextra -Wpedantic")
++  set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wall -Wextra -Wpedantic -DEVP_MD_CTX_get0_md=EVP_MD_CTX_md")
+--- a/CMakeLists.txt
++++ b/CMakeLists.txt
+@@ -32,1 +32,1 @@
+-option(ENABLE_UNIT_TESTS "Enable unit tests" ON)
++option(ENABLE_UNIT_TESTS "Enable unit tests" OFF)

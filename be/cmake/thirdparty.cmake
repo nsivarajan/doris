@@ -167,6 +167,9 @@ if(BUILD_STS STREQUAL "ON")
     add_thirdparty(alibabacloud_open_api_v2 LIB64)
     add_thirdparty(alibabacloud_credential LIB64)
 
+    # UUID library (required by darabonba_core)
+    add_thirdparty(uuid LIB64)
+
     # CPPRestSDK (external dependency)
     add_thirdparty(cpprest LIB64)
 endif()
