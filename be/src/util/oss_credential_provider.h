@@ -52,7 +52,7 @@ private:
     static constexpr const char* ECS_METADATA_SERVICE_HOST = "100.100.100.200";
     static constexpr const char* ECS_METADATA_FETCH_ROLE_URL =
             "http://100.100.100.200/latest/meta-data/ram/security-credentials/";
-    static constexpr int REFRESH_THRESHOLD_SECONDS = 180;
+    static constexpr int REFRESH_THRESHOLD_SECONDS = 300;
 };
 
 // STS AssumeRole Credentials Provider
@@ -81,7 +81,7 @@ private:
     AlibabaCloud::OSS::Credentials _cached_credentials;
     std::chrono::system_clock::time_point _expiration;
 
-    static constexpr int REFRESH_THRESHOLD_SECONDS = 180;
+    static constexpr int REFRESH_THRESHOLD_SECONDS = 300;
 };
 
 // Default Credentials Provider with RRSA support
@@ -99,6 +99,7 @@ private:
     AlibabaCloud::OSS::Credentials getCredentialsFromECS();
 
     std::shared_ptr<AlibabaCloud::OSS::CredentialsProvider> _provider;
+    mutable std::shared_ptr<EcsRamRoleCredentialsProvider> _ecs_provider;
 };
 
 } // namespace doris

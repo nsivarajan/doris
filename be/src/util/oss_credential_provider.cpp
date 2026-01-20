@@ -24,6 +24,8 @@
 #include <rapidjson/error/en.h>
 #include <alibabacloud/Openapi.hpp>
 #include <alibabacloud/Sts20150401.hpp>
+#include <darabonba/Runtime.hpp>
+#include <darabonba/Exception.hpp>
 
 #include <chrono>
 #include <sstream>
@@ -236,7 +238,15 @@ AlibabaCloud::OSS::Credentials StsAssumeRoleCredentialsProvider::assumeRole() {
         }
 
         LOG(INFO) << "Calling STS AssumeRole for role: " << _role_arn;
-        auto response = client.assumeRole(request);
+
+        Darabonba::RuntimeOptions runtime;
+        runtime.setConnectTimeout(5000);
+        runtime.setReadTimeout(10000);
+        runtime.setAutoretry(true);
+        runtime.setMaxAttempts(3);
+        runtime.setMaxIdleConns(64);
+
+        auto response = client.assumeRoleWithOptions(request, runtime);
 
         if (!response.hasBody()) {
             LOG(WARNING) << "STS AssumeRole returned empty response body. Role: " << _role_arn;
@@ -268,6 +278,19 @@ AlibabaCloud::OSS::Credentials StsAssumeRoleCredentialsProvider::assumeRole() {
 
         return AlibabaCloud::OSS::Credentials(access_key, secret_key, token);
 
+    } catch (const Darabonba::ResponseException& e) {
+        LOG(WARNING) << "STS AssumeRole failed with ResponseException."
+                     << " StatusCode: " << e.getStatusCode()
+                     << " Code: " << e.getCode()
+                     << " Message: " << e.getMessage()
+                     << " Description: " << e.getDescription()
+                     << " Role: " << _role_arn;
+        return AlibabaCloud::OSS::Credentials("", "");
+    } catch (const Darabonba::Exception& e) {
+        LOG(WARNING) << "STS AssumeRole failed with Darabonba Exception."
+                     << " Message: " << e.what()
+                     << " Role: " << _role_arn;
+        return AlibabaCloud::OSS::Credentials("", "");
     } catch (const std::exception& e) {
         LOG(WARNING) << "STS AssumeRole failed with exception: " << e.what()
                      << ", Role: " << _role_arn;
@@ -345,7 +368,15 @@ AlibabaCloud::OSS::Credentials DefaultCredentialsProvider::getCredentialsFromRRS
         }
 
         LOG(INFO) << "Calling STS AssumeRoleWithOIDC for role: " << role_arn;
-        auto response = client.assumeRoleWithOIDC(request);
+
+        Darabonba::RuntimeOptions runtime;
+        runtime.setConnectTimeout(5000);
+        runtime.setReadTimeout(10000);
+        runtime.setAutoretry(true);
+        runtime.setMaxAttempts(3);
+        runtime.setMaxIdleConns(64);
+
+        auto response = client.assumeRoleWithOIDCWithOptions(request, runtime);
 
         if (!response.hasBody()) {
             LOG(WARNING) << "RRSA AssumeRoleWithOIDC returned empty response body. Role: " << role_arn;
@@ -372,6 +403,19 @@ AlibabaCloud::OSS::Credentials DefaultCredentialsProvider::getCredentialsFromRRS
 
         return AlibabaCloud::OSS::Credentials(access_key, secret_key, token);
 
+    } catch (const Darabonba::ResponseException& e) {
+        LOG(WARNING) << "RRSA AssumeRoleWithOIDC failed with ResponseException."
+                     << " StatusCode: " << e.getStatusCode()
+                     << " Code: " << e.getCode()
+                     << " Message: " << e.getMessage()
+                     << " Description: " << e.getDescription()
+                     << " Role ARN: " << role_arn;
+        return AlibabaCloud::OSS::Credentials("", "");
+    } catch (const Darabonba::Exception& e) {
+        LOG(WARNING) << "RRSA AssumeRoleWithOIDC failed with Darabonba Exception."
+                     << " Message: " << e.what()
+                     << " Role ARN: " << role_arn;
+        return AlibabaCloud::OSS::Credentials("", "");
     } catch (const std::exception& e) {
         LOG(WARNING) << "RRSA AssumeRoleWithOIDC failed with exception: " << e.what()
                      << ", Role ARN: " << role_arn;
@@ -380,8 +424,10 @@ AlibabaCloud::OSS::Credentials DefaultCredentialsProvider::getCredentialsFromRRS
 }
 
 AlibabaCloud::OSS::Credentials DefaultCredentialsProvider::getCredentialsFromECS() {
-    auto ecs_provider = std::make_shared<EcsRamRoleCredentialsProvider>();
-    return ecs_provider->getCredentials();
+    if (!_ecs_provider) {
+        _ecs_provider = std::make_shared<EcsRamRoleCredentialsProvider>();
+    }
+    return _ecs_provider->getCredentials();
 }
 
 AlibabaCloud::OSS::Credentials DefaultCredentialsProvider::getCredentials() {
