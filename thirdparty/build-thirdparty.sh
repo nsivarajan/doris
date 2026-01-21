@@ -1918,7 +1918,7 @@ build_cpprestsdk() {
     if [[ "${BUILD_CPPRESTSDK}" == "OFF" ]]; then
         echo "Skip build CPPRestSDK"
     else
-        echo "Building CPPRestSDK for STS v2 SDK..."
+        echo "Building CPPRestSDK with Doris-consistent flags..."
         check_if_source_exist "${CPPRESTSDK_SOURCE}"
         cd "${TP_SOURCE_DIR}/${CPPRESTSDK_SOURCE}"
 
@@ -1927,9 +1927,20 @@ build_cpprestsdk() {
         mkdir -p "${BUILD_DIR}"
         cd "${BUILD_DIR}"
 
-        # 1. -w: This is a "sledgehammer" flag that tells Clang to ignore all warnings.
-        #    This neutralizes the -Werror that the SDK tries to inject at the end.
-        # 2. -DWERROR=OFF: This is the internal CMake toggle for CPPRestSDK 2.10.x.
+        # Define Doris-consistent flags (matching BE and STS components)
+        local CPPREST_FLAGS="-w -fvisibility=hidden -isystem ${TP_INCLUDE_DIR} -D_GLIBCXX_USE_CXX11_ABI=1"
+
+        # Add optimization and instruction set flags to match BE
+        CPPREST_FLAGS="${CPPREST_FLAGS} -O3 -DNDEBUG -fPIC -msse4.2 -std=gnu++20"
+
+        # Add AVX2 support if enabled (matching Doris BE configuration)
+        if [[ "${USE_AVX2}" == "ON" ]]; then
+            CPPREST_FLAGS="${CPPREST_FLAGS} -mavx2"
+            echo "Added -mavx2 flag to CPPRestSDK (USE_AVX2=${USE_AVX2})"
+        fi
+
+        echo "CPPRestSDK Compiler flags: ${CPPREST_FLAGS}"
+
         "${CMAKE_CMD}" -G "${GENERATOR}" \
             -DCMAKE_C_COMPILER="${CC:-clang}" \
             -DCMAKE_CXX_COMPILER="${CXX:-clang++}" \
@@ -1950,13 +1961,13 @@ build_cpprestsdk() {
             -DOPENSSL_INCLUDE_DIR="${TP_INCLUDE_DIR}" \
             -DOPENSSL_CRYPTO_LIBRARY="${TP_INSTALL_DIR}/lib/libcrypto.a" \
             -DOPENSSL_SSL_LIBRARY="${TP_INSTALL_DIR}/lib/libssl.a" \
-            -DCMAKE_CXX_FLAGS="-w -fvisibility=hidden -isystem ${TP_INCLUDE_DIR} -DNLOHMANN_JSON_NAMESPACE=alibaba_json -D_GLIBCXX_USE_CXX11_ABI=1" \
+            -DCMAKE_CXX_FLAGS="${CPPREST_FLAGS}" \
             ../Release
 
         "${BUILD_SYSTEM}" -j "${PARALLEL}"
         "${BUILD_SYSTEM}" install
 
-        echo "CPPRestSDK installed to ${TP_INSTALL_DIR}"
+        echo "CPPRestSDK installed with Doris-consistent compiler flags"
     fi
 }
 
@@ -2006,12 +2017,25 @@ build_sts() {
     # Ensure dependencies are built first
     build_cpprestsdk
 
-    # Define shared flags to force into CMake Cache
-    local GLOBAL_FLAGS="-w -fvisibility=hidden -isystem ${TP_INCLUDE_DIR} -DEVP_MD_CTX_get0_md=EVP_MD_CTX_md -DNLOHMANN_JSON_NAMESPACE=alibaba_json -D_GLIBCXX_USE_CXX11_ABI=1"
+    # Define shared flags to match Doris BE compilation environment
+    # These flags are NOT inherited from BE CMAKE context, so we must set them explicitly
+    local GLOBAL_FLAGS="-w -fvisibility=hidden -isystem ${TP_INCLUDE_DIR} -DEVP_MD_CTX_get0_md=EVP_MD_CTX_md -D_GLIBCXX_USE_CXX11_ABI=1"
+
+    # Add optimization and instruction set flags to match BE (not inherited from BE CMAKE)
+    GLOBAL_FLAGS="${GLOBAL_FLAGS} -O3 -DNDEBUG -fPIC -msse4.2 -std=gnu++20"
+
+    # Add AVX2 if enabled (matching BE configuration: USE_AVX2=ON triggers -mavx2)
+    if [[ "${USE_AVX2}" == "ON" ]]; then
+        GLOBAL_FLAGS="${GLOBAL_FLAGS} -mavx2"
+        echo "Added -mavx2 flag to match BE configuration (USE_AVX2=${USE_AVX2})"
+    fi
+
+    echo "STS Compiler flags: ${GLOBAL_FLAGS}"
     local LINKER_FLAGS="-L${TP_INSTALL_DIR}/lib -L${TP_INSTALL_DIR}/lib64"
 
     _build_darabonba_core() {
         echo "===== Building darabonba_core ====="
+        echo "darabonba_core compiler flags: ${GLOBAL_FLAGS}"
         check_if_source_exist "${DARABONBA_CORE_SOURCE}"
         cd "${TP_SOURCE_DIR}/${DARABONBA_CORE_SOURCE}"
         rm -rf "${BUILD_DIR}" && mkdir -p "${BUILD_DIR}" && cd "${BUILD_DIR}"
@@ -2038,6 +2062,7 @@ build_sts() {
 
     _build_alibabacloud_credential() {
         echo "===== Building alibabacloud_credential ====="
+        echo "alibabacloud_credential compiler flags: ${GLOBAL_FLAGS}"
         check_if_source_exist "${ALIBABACLOUD_CREDENTIAL_SOURCE}"
         cd "${TP_SOURCE_DIR}/${ALIBABACLOUD_CREDENTIAL_SOURCE}"
         rm -rf "${BUILD_DIR}" && mkdir -p "${BUILD_DIR}" && cd "${BUILD_DIR}"
@@ -2067,6 +2092,7 @@ build_sts() {
 
     _build_alibabacloud_open_api_v2() {
         echo "===== Building alibabacloud_open_api_v2 ====="
+        echo "alibabacloud_open_api_v2 compiler flags: ${GLOBAL_FLAGS}"
         check_if_source_exist "${ALIBABACLOUD_OPEN_API_V2_SOURCE}"
         cd "${TP_SOURCE_DIR}/${ALIBABACLOUD_OPEN_API_V2_SOURCE}"
         rm -rf "${BUILD_DIR}" && mkdir -p "${BUILD_DIR}" && cd "${BUILD_DIR}"
@@ -2099,6 +2125,7 @@ build_sts() {
     _build_alibabacloud_open_api_v2
 
     echo "===== Building main STS library ====="
+    echo "Main STS library compiler flags: ${GLOBAL_FLAGS}"
     check_if_source_exist "${STS_SOURCE}"
     cd "${TP_SOURCE_DIR}/${STS_SOURCE}"
     rm -rf "${BUILD_DIR}" && mkdir -p "${BUILD_DIR}" && cd "${BUILD_DIR}"
