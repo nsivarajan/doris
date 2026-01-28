@@ -19,6 +19,8 @@ package org.apache.doris.httpv2.config;
 
 import org.apache.doris.common.Config;
 
+import org.eclipse.jetty.ee10.webapp.WebAppContext;
+import org.eclipse.jetty.ee10.websocket.server.config.JettyWebSocketServletContainerInitializer;
 import org.eclipse.jetty.server.HttpConfiguration;
 import org.eclipse.jetty.server.HttpConnectionFactory;
 import org.eclipse.jetty.server.ServerConnector;
@@ -33,6 +35,12 @@ import java.util.Collections;
 public class WebServerFactoryCustomizerConfig implements WebServerFactoryCustomizer<ConfigurableJettyWebServerFactory> {
     @Override
     public void customize(ConfigurableJettyWebServerFactory factory) {
+        ((JettyServletWebServerFactory) factory).addContextCustomizers(context -> {
+            if (context instanceof WebAppContext) {
+                JettyWebSocketServletContainerInitializer.configure((WebAppContext) context, null);
+            }
+        });
+
         if (Config.enable_https) {
             ((JettyServletWebServerFactory) factory).setConfigurations(
                     Collections.singletonList(new HttpToHttpsJettyConfig())
