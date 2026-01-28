@@ -21,8 +21,8 @@ import org.eclipse.jetty.ee10.servlet.security.ConstraintMapping;
 import org.eclipse.jetty.ee10.servlet.security.ConstraintSecurityHandler;
 import org.eclipse.jetty.ee10.webapp.AbstractConfiguration;
 import org.eclipse.jetty.ee10.webapp.WebAppContext;
+import org.eclipse.jetty.ee10.websocket.server.config.JettyWebSocketServletContainerInitializer;
 import org.eclipse.jetty.security.Constraint;
-import org.eclipse.jetty.websocket.core.server.WebSocketServerComponents;
 
 
 public class HttpToHttpsJettyConfig extends AbstractConfiguration {
@@ -34,7 +34,7 @@ public class HttpToHttpsJettyConfig extends AbstractConfiguration {
     @Override
     public void configure(WebAppContext context) throws Exception {
 
-        WebSocketServerComponents.ensureWebSocketComponents(context.getServer());
+        JettyWebSocketServletContainerInitializer.configure(context, null);
 
         Constraint constraint = new Constraint.Builder()
                 .transport(Constraint.Transport.SECURE)
