@@ -53,6 +53,7 @@ enum class FileSystemType : uint8_t {
     S3,
     HDFS,
     BROKER,
+    OSS,
 };
 
 inline std::ostream& operator<<(std::ostream& ostr, FileSystemType type) {
@@ -68,6 +69,9 @@ inline std::ostream& operator<<(std::ostream& ostr, FileSystemType type) {
         return ostr;
     case FileSystemType::BROKER:
         ostr << "BROKER";
+        return ostr;
+    case FileSystemType::OSS:
+        ostr << "OSS";
         return ostr;
     default:
         ostr << "UNKNOWN";
