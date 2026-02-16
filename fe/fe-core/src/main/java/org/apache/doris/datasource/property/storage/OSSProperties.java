@@ -172,7 +172,7 @@ public class OSSProperties extends AbstractS3CompatibleProperties {
         return propertiesObj;
     }
 
-    protected static boolean guessIsMe(Map<String, String> origProps) {
+    public static boolean guessIsMe(Map<String, String> origProps) {
         String value = Stream.of("oss.endpoint", "s3.endpoint", "AWS_ENDPOINT", "endpoint", "ENDPOINT",
                         "dlf.endpoint", "dlf.catalog.endpoint", "fs.oss.endpoint")
                 .map(origProps::get)
@@ -315,7 +315,7 @@ public class OSSProperties extends AbstractS3CompatibleProperties {
     public static final String SECRET_KEY_KEY = "oss.secret_key";
     public static final String SESSION_TOKEN_KEY = "oss.session_token";
     public static final String ROOT_PATH_KEY = "oss.root.path";
-    public static final String BUCKET_KEY = "bucket";  // Generic bucket name, not OSS-specific
+    public static final String BUCKET_KEY = "oss.bucket";
 
     /**
      * Build ObjectStoreInfoPB from OSS properties for storage vault creation/alteration.
@@ -384,12 +384,14 @@ public class OSSProperties extends AbstractS3CompatibleProperties {
             builder.setPrefix(rootPath);
         }
 
-        // Bucket
-        if (properties.containsKey(BUCKET_KEY)) {
-            String bucket = properties.get(BUCKET_KEY);
-            if (StringUtils.isNotBlank(bucket)) {
-                builder.setBucket(bucket);
-            }
+        // Bucket - try multiple property keys for compatibility
+        String bucket = Stream.of(BUCKET_KEY, "bucket")
+                .map(properties::get)
+                .filter(StringUtils::isNotBlank)
+                .findFirst()
+                .orElse(null);
+        if (bucket != null) {
+            builder.setBucket(bucket);
         }
 
         // Credential Provider Type
