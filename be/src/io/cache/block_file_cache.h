@@ -72,6 +72,22 @@ private:
     LockScopedTimer cache_lock_timer;
 
 class FSFileCacheStorage;
+class BlockFileCache;
+struct FileBlockCell;
+
+// Per-shard cache data structure for lock sharding
+// Each shard has independent mutex to reduce lock contention
+struct CacheShard {
+    mutable std::mutex mutex;
+
+    // Per-shard file blocks: hash -> (offset -> cell)
+    using FileBlocksByOffset = std::map<size_t, FileBlockCell>;
+    using CachedFiles = std::unordered_map<UInt128Wrapper, FileBlocksByOffset, KeyHash>;
+    CachedFiles files;
+
+    // Per-shard cache size tracking
+    size_t cur_cache_size = 0;
+};
 
 // The BlockFileCache is responsible for the management of the blocks
 // The current strategies are lru and ttl.
@@ -215,7 +231,8 @@ public:
 
     // change the block cache type
     void change_cache_type(const UInt128Wrapper& hash, size_t offset, FileCacheType new_type,
-                           std::lock_guard<std::mutex>& cache_lock);
+                           std::lock_guard<std::mutex>& lru_lock,
+                           std::lock_guard<std::mutex>& shard_lock);
 
     // remove all blocks that belong to the key
     void remove_if_cached(const UInt128Wrapper& key);
@@ -337,20 +354,39 @@ private:
     LRUQueue& get_queue(FileCacheType type);
     const LRUQueue& get_queue(FileCacheType type) const;
 
+    // Shard management helpers
+    size_t get_shard_index(const UInt128Wrapper& hash) const {
+        return hash.low() & (_shard_count - 1);
+    }
+
+    CacheShard& get_shard(const UInt128Wrapper& hash) {
+        return _shards[get_shard_index(hash)];
+    }
+
+    const CacheShard& get_shard(const UInt128Wrapper& hash) const {
+        return _shards[get_shard_index(hash)];
+    }
+
+    static size_t calculate_shard_count();
+    static size_t next_power_of_2(size_t n);
+    size_t get_total_cache_size_unlocked() const;
+
     template <class T, class U>
         requires IsXLock<T> && IsXLock<U>
     void remove(FileBlockSPtr file_block, T& cache_lock, U& segment_lock, bool sync = true);
 
     FileBlocks get_impl(const UInt128Wrapper& hash, const CacheContext& context,
-                        const FileBlock::Range& range, std::lock_guard<std::mutex>& cache_lock);
+                        const FileBlock::Range& range, std::lock_guard<std::mutex>& shard_lock,
+                        CacheShard& shard);
 
     template <class T>
         requires IsXLock<T>
-    FileBlockCell* get_cell(const UInt128Wrapper& hash, size_t offset, T& cache_lock);
+    FileBlockCell* get_cell(const UInt128Wrapper& hash, size_t offset, T& shard_lock,
+                            CacheShard& shard);
 
     virtual FileBlockCell* add_cell(const UInt128Wrapper& hash, const CacheContext& context,
                                     size_t offset, size_t size, FileBlock::State state,
-                                    std::lock_guard<std::mutex>& cache_lock);
+                                    std::lock_guard<std::mutex>& shard_lock, CacheShard& shard);
 
     Status initialize_unlocked(std::lock_guard<std::mutex>& cache_lock);
 
@@ -377,7 +413,7 @@ private:
 
     FileBlocks split_range_into_cells(const UInt128Wrapper& hash, const CacheContext& context,
                                       size_t offset, size_t size, FileBlock::State state,
-                                      std::lock_guard<std::mutex>& cache_lock);
+                                      std::lock_guard<std::mutex>& shard_lock, CacheShard& shard);
 
     std::string dump_structure_unlocked(const UInt128Wrapper& hash,
                                         std::lock_guard<std::mutex>& cache_lock);
@@ -388,7 +424,8 @@ private:
     void fill_holes_with_empty_file_blocks(FileBlocks& file_blocks, const UInt128Wrapper& hash,
                                            const CacheContext& context,
                                            const FileBlock::Range& range,
-                                           std::lock_guard<std::mutex>& cache_lock);
+                                           std::lock_guard<std::mutex>& shard_lock,
+                                           CacheShard& shard);
 
     size_t get_used_cache_size_unlocked(FileCacheType type,
                                         std::lock_guard<std::mutex>& cache_lock) const;
@@ -405,7 +442,8 @@ private:
     bool need_to_move(FileCacheType cell_type, FileCacheType query_type) const;
 
     bool remove_if_ttl_file_blocks(const UInt128Wrapper& file_key, bool remove_directly,
-                                   std::lock_guard<std::mutex>&, bool sync);
+                                   std::lock_guard<std::mutex>& lru_lock,
+                                   std::lock_guard<std::mutex>& shard_lock, bool sync);
 
     void run_background_monitor();
     void run_background_ttl_gc();
@@ -459,7 +497,15 @@ private:
     size_t _max_file_block_size = 0;
     size_t _max_query_cache_size = 0;
 
-    mutable std::mutex _mutex;
+    // Lock sharding for contention reduction
+    static constexpr size_t MIN_SHARD_COUNT = 64;
+    static constexpr size_t MAX_SHARD_COUNT = 4096;
+    size_t _shard_count;
+    std::vector<CacheShard> _shards;
+
+    // Separate mutex for shared LRU queues and TTL management
+    mutable std::mutex _lru_mutex;
+
     bool _close {false};
     std::mutex _close_mtx;
     std::condition_variable _close_cv;
@@ -471,17 +517,13 @@ private:
     std::thread _cache_background_lru_log_replay_thread;
     std::thread _cache_background_block_lru_update_thread;
     std::atomic_bool _async_open_done {false};
-    // disk space or inode is less than the specified value
-    bool _disk_resource_limit_mode {false};
-    bool _need_evict_cache_in_advance {false};
+    // Use atomic to prevent race conditions on concurrent reads/writes
+    std::atomic<bool> _disk_resource_limit_mode {false};
+    std::atomic<bool> _need_evict_cache_in_advance {false};
     bool _is_initialized {false};
 
-    // strategy
-    using FileBlocksByOffset = std::map<size_t, FileBlockCell>;
-    using CachedFiles = std::unordered_map<UInt128Wrapper, FileBlocksByOffset, KeyHash>;
-    CachedFiles _files;
+    // Shared data structures protected by _lru_mutex
     QueryFileCacheContextMap _query_map;
-    size_t _cur_cache_size = 0;
     size_t _cur_ttl_size = 0;
     std::multimap<uint64_t, UInt128Wrapper> _time_to_key;
     std::unordered_map<UInt128Wrapper, uint64_t, KeyHash> _key_to_time;

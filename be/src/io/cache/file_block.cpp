@@ -148,12 +148,14 @@ Status FileBlock::append(Slice data) {
 
 Status FileBlock::finalize() {
     if (_downloaded_size != 0 && _downloaded_size != _block_range.size()) {
-        SCOPED_CACHE_LOCK(_mgr->_mutex, _mgr);
+        // Get the shard for this block's hash
+        auto& shard = _mgr->get_shard(_key.hash);
+        std::lock_guard shard_lock(shard.mutex);
         size_t old_size = _block_range.size();
         _block_range.right = _block_range.left + _downloaded_size - 1;
         size_t new_size = _block_range.size();
         DCHECK(new_size < old_size);
-        _mgr->reset_range(_key.hash, _block_range.left, old_size, new_size, cache_lock);
+        _mgr->reset_range(_key.hash, _block_range.left, old_size, new_size, shard_lock);
     }
     std::lock_guard block_lock(_mutex);
     Status st = set_downloaded(block_lock);
@@ -183,7 +185,11 @@ Status FileBlock::change_cache_type_between_ttl_and_others(FileCacheType new_typ
 }
 
 Status FileBlock::change_cache_type_between_normal_and_index(FileCacheType new_type) {
-    SCOPED_CACHE_LOCK(_mgr->_mutex, _mgr);
+    // Lock ordering: _lru_mutex → shard.mutex → block_lock
+    std::lock_guard lru_lock(_mgr->_lru_mutex);
+    // Get the shard for this block's hash
+    auto& shard = _mgr->get_shard(_key.hash);
+    std::lock_guard shard_lock(shard.mutex);
     std::lock_guard block_lock(_mutex);
     bool expr = (new_type != FileCacheType::TTL && _key.meta.type != FileCacheType::TTL);
     if (!expr) {
@@ -201,7 +207,7 @@ Status FileBlock::change_cache_type_between_normal_and_index(FileCacheType new_t
         TEST_SYNC_POINT_CALLBACK("FileBlock::change_cache_type", &st);
         RETURN_IF_ERROR(_mgr->_storage->change_key_meta_type(_key, new_type));
     }
-    _mgr->change_cache_type(_key.hash, _block_range.left, new_type, cache_lock);
+    _mgr->change_cache_type(_key.hash, _block_range.left, new_type, lru_lock, shard_lock);
     _key.meta.type = new_type;
     return Status::OK();
 }
@@ -297,14 +303,16 @@ FileBlocksHolder::~FileBlocksHolder() {
                 }
             }
             if (should_remove) {
-                SCOPED_CACHE_LOCK(_mgr->_mutex, _mgr);
+                // Get the shard for this block's hash
+                auto& shard = _mgr->get_shard(file_block->_key.hash);
+                std::lock_guard shard_lock(shard.mutex);
                 std::lock_guard block_lock(file_block->_mutex);
                 if (file_block.use_count() == 2) {
                     DCHECK(file_block->state_unlock(block_lock) != FileBlock::State::DOWNLOADING);
                     // one in cache, one in here
                     if (file_block->is_deleting() ||
                         file_block->state_unlock(block_lock) == FileBlock::State::EMPTY) {
-                        _mgr->remove(file_block, cache_lock, block_lock, false);
+                        _mgr->remove(file_block, shard_lock, block_lock, false);
                     }
                 }
             }

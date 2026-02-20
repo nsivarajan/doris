@@ -1166,6 +1166,10 @@ DECLARE_mInt64(file_cache_error_log_limit_bytes);
 DECLARE_mInt64(cache_lock_wait_long_tail_threshold_us);
 DECLARE_mInt64(cache_lock_held_long_tail_threshold_us);
 
+// File cache shard count for lock contention reduction
+// 0 = auto (based on CPU cores × 8), must be power of 2, range [64, 4096]
+DECLARE_Int32(file_cache_shard_count);
+
 // Base compaction may retrieve and produce some less frequently accessed data,
 // potentially affecting the file cache hit rate.
 // This configuration determines whether to retain the output within the file cache.
