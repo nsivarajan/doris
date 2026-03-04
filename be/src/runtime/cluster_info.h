@@ -32,7 +32,8 @@ public:
     int32_t cluster_id = 0;
     // Master FE addr: ip:rpc_port
     TNetworkAddress master_fe_addr;
-    // Master FE http_port
+    // Master FE http_port.  When FE has enable_https=true this field carries the
+    // https_port value (the FE sends whichever port is active in the http_port Thrift field).
     int32_t master_fe_http_port = 0;
     // Unique cluster token
     std::string token = "";

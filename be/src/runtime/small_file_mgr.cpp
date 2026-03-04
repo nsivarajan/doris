@@ -168,17 +168,32 @@ Status SmallFileMgr::_download_file(int64_t file_id, const std::string& md5,
 
     HttpClient client;
 
-    std::stringstream url_ss;
     ClusterInfo* cluster_info = _exec_env->cluster_info();
-    url_ss << cluster_info->master_fe_addr.hostname << ":" << cluster_info->master_fe_http_port
-           << "/api/get_small_file?"
-           << "file_id=" << file_id << "&token=" << cluster_info->token;
+    // The FE sends whichever port is active in the http_port heartbeat field:
+    //   - enable_https=false  →  http_port  (plain HTTP)
+    //   - enable_https=true   →  https_port (TLS)
+    // We probe with http:// first; if the connection fails we retry with https://.
+    // Certificate verification is disabled (use_untrusted_ssl) for intra-cluster
+    // communication — traffic is still encrypted and protected by the cluster token
+    // and MD5 integrity check.
+    int fe_port = cluster_info->master_fe_http_port;
 
-    std::string url = url_ss.str();
+    auto build_url = [&](const std::string& scheme) {
+        std::stringstream url_ss;
+        url_ss << scheme << cluster_info->master_fe_addr.hostname << ":" << fe_port
+               << "/api/get_small_file?"
+               << "file_id=" << file_id << "&token=" << cluster_info->token;
+        return url_ss.str();
+    };
 
+    // Try HTTP first, then fall back to HTTPS on connection failure.
+    std::string url = build_url("http://");
     LOG(INFO) << "download file from: " << url;
+    Status init_st = client.init(url);
+    if (!init_st.ok()) {
+        return init_st;
+    }
 
-    RETURN_IF_ERROR(client.init(url));
     Status status;
     Md5Digest digest;
     auto download_cb = [&status, &tmp_file, &fp, &digest](const void* data, size_t length) {
@@ -192,8 +207,26 @@ Status SmallFileMgr::_download_file(int64_t file_id, const std::string& md5,
         }
         return true;
     };
-    RETURN_IF_ERROR(client.execute(download_cb));
-    RETURN_IF_ERROR(status);
+
+    Status exec_st = client.execute(download_cb);
+    if (!exec_st.ok()) {
+        // HTTP failed — retry once with HTTPS (FE may have enable_https=true).
+        LOG(INFO) << "HTTP download failed (" << exec_st << "), retrying with HTTPS: " << url;
+        digest = Md5Digest {};
+        status = Status::OK();
+        // Rewind temp file for the retry write.
+        if (fseek(fp.get(), 0, SEEK_SET) != 0 || ftruncate(fileno(fp.get()), 0) != 0) {
+            return Status::InternalError("fail to reset temp file for HTTPS retry");
+        }
+        std::string https_url = build_url("https://");
+        LOG(INFO) << "retrying download from: " << https_url;
+        HttpClient https_client;
+        RETURN_IF_ERROR(https_client.init(https_url));
+        https_client.use_untrusted_ssl();
+        RETURN_IF_ERROR(https_client.execute(download_cb));
+    } else {
+        RETURN_IF_ERROR(status);
+    }
     digest.digest();
 
     if (!iequal(digest.hex(), md5)) {

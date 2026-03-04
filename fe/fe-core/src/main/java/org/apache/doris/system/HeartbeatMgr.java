@@ -96,7 +96,11 @@ public class HeartbeatMgr extends MasterDaemon {
         TMasterInfo tMasterInfo = new TMasterInfo(
                 new TNetworkAddress(FrontendOptions.getLocalHostAddress(), Config.rpc_port), clusterId, epoch);
         tMasterInfo.setToken(token);
-        tMasterInfo.setHttpPort(Config.http_port);
+        // When enable_https=true, send the HTTPS port in the http_port field so that BEs
+        // on older protocol versions (which have no https_port field) still receive the
+        // correct active port.  The BE will probe HTTP first and fall back to HTTPS on
+        // failure, so it does not need an explicit scheme flag.
+        tMasterInfo.setHttpPort(Config.enable_https ? Config.https_port : Config.http_port);
         long flags = heartbeatFlags.getHeartbeatFlags();
         tMasterInfo.setHeartbeatFlags(flags);
         if (Config.isCloudMode()) {
