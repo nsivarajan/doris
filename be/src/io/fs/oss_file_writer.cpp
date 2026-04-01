@@ -25,7 +25,6 @@
 #include <algorithm>
 #include <sstream>
 
-#include "common/compile_check_begin.h"
 #include "common/config.h"
 #include "common/status.h"
 #include "io/cache/file_cache_common.h"
@@ -34,6 +33,7 @@
 #include "io/fs/s3_file_bufferpool.h"
 #include "runtime/exec_env.h"
 #include "util/debug_points.h"
+#include "common/compile_check_begin.h"
 
 namespace doris::io {
 
@@ -146,12 +146,11 @@ Status OSSFileWriter::_build_upload_buffer() {
             .set_is_cancelled([this]() { return _failed.load(); });
 
     if (cache_builder() != nullptr) {
-        int64_t tablet_id = get_tablet_id(_path.native()).value_or(0);
-        builder.set_allocate_file_blocks_holder([builder = *cache_builder(),
-                                                 offset = _bytes_appended,
-                                                 tablet_id = tablet_id]() -> FileBlocksHolderPtr {
-            return builder.allocate_cache_holder(offset, config::s3_write_buffer_size, tablet_id);
-        });
+        builder.set_allocate_file_blocks_holder(
+                [builder = *cache_builder(),
+                 offset = _bytes_appended]() -> FileBlocksHolderPtr {
+                    return builder.allocate_cache_holder(offset, config::s3_write_buffer_size);
+                });
     }
 
     RETURN_IF_ERROR(builder.build(&_pending_buf));

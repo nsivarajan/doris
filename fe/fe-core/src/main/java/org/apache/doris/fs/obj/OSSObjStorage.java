@@ -18,7 +18,6 @@
 package org.apache.doris.fs.obj;
 
 import org.apache.doris.backup.Status;
-import org.apache.doris.common.Config;
 import org.apache.doris.common.DdlException;
 import org.apache.doris.common.UserException;
 import org.apache.doris.common.util.S3URI;
@@ -512,20 +511,6 @@ public class OSSObjStorage implements ObjStorage<OSS> {
             S3URI uri = S3URI.create(remotePath, isUsePathStyle, forceParsingByStandardUri);
             bucket = uri.getBucket();
             String keyPattern = uri.getKey();
-            String schemaAndBucket = remotePath.substring(0, remotePath.length() - keyPattern.length());
-
-            // Optimization: for deterministic paths (no wildcards), use HEAD instead of listing.
-            // Mirrors S3ObjStorage behaviour — avoids requiring ListBucket permission.
-            if (Config.s3_skip_list_for_deterministic_path
-                    && !isUsePathStyle
-                    && S3Util.isDeterministicPattern(keyPattern)
-                    && !hasLimits && startFile == null) {
-                GlobListResult headResult = globListByHeadRequests(
-                        bucket, keyPattern, schemaAndBucket, result, fileNameOnly, startTime);
-                if (headResult != null) {
-                    return headResult;
-                }
-            }
 
             String globPath = S3Util.extendGlobs(keyPattern);
             if (LOG.isDebugEnabled()) {
@@ -635,51 +620,6 @@ public class OSSObjStorage implements ObjStorage<OSS> {
                         + "{} matched, took {} ms",
                         elementCnt, finalPrefix, roundCnt, matchCnt, duration / 1_000_000);
             }
-        }
-    }
-
-    /**
-     * HEAD-based listing for deterministic paths (no wildcards).
-     * Returns null if should fall back to LIST-based approach.
-     */
-    private GlobListResult globListByHeadRequests(String bucket, String keyPattern,
-            String schemaAndBucket, List<RemoteFile> result, boolean fileNameOnly, long startTime) {
-        try {
-            String expandedPattern = S3Util.extendGlobs(keyPattern);
-            List<String> expandedPaths = S3Util.expandBracePatterns(expandedPattern);
-
-            if (expandedPaths.size() > Config.s3_head_request_max_paths) {
-                LOG.info("OSS: expanded path count {} exceeds limit {}, falling back to LIST",
-                        expandedPaths.size(), Config.s3_head_request_max_paths);
-                return null;
-            }
-
-            for (String path : expandedPaths) {
-                try {
-                    ObjectMetadata meta = getClient().headObject(bucket, path);
-                    String displayPath = fileNameOnly
-                            ? Paths.get(path).getFileName().toString()
-                            : "s3://" + bucket + "/" + path;
-                    result.add(new RemoteFile(displayPath, true,
-                            meta.getContentLength(), meta.getContentLength(),
-                            meta.getLastModified() != null ? meta.getLastModified().getTime() : 0));
-                } catch (OSSException e) {
-                    if ("NoSuchKey".equals(e.getErrorCode())) {
-                        continue; // object does not exist, skip
-                    }
-                    throw e;
-                }
-            }
-
-            if (LOG.isDebugEnabled()) {
-                long duration = System.nanoTime() - startTime;
-                LOG.debug("OSS HEAD-based glob: {} paths checked, {} matched, took {} ms",
-                        expandedPaths.size(), result.size(), duration / 1_000_000);
-            }
-            return new GlobListResult(Status.OK, "", bucket, "");
-        } catch (Exception e) {
-            LOG.warn("OSS HEAD-based glob failed, falling back to LIST: {}", e.getMessage());
-            return null;
         }
     }
 

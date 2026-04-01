@@ -19,7 +19,7 @@ package org.apache.doris.catalog;
 
 import org.apache.doris.common.DdlException;
 import org.apache.doris.common.proc.BaseProcResult;
-import org.apache.doris.common.util.DatasourcePrintableMap;
+import org.apache.doris.common.util.PrintableMap;
 import org.apache.doris.datasource.property.storage.OSSProperties;
 import org.apache.doris.datasource.property.storage.S3Properties;
 
@@ -219,7 +219,7 @@ public class OSSResource extends Resource {
         readLock();
         result.addRow(Lists.newArrayList(name, lowerCaseType, "version", String.valueOf(version)));
         for (Map.Entry<String, String> entry : this.properties.entrySet()) {
-            if (DatasourcePrintableMap.HIDDEN_KEY.contains(entry.getKey())) {
+            if (PrintableMap.HIDDEN_KEY.contains(entry.getKey())) {
                 continue;
             }
             if (entry.getKey().equals(S3Properties.Env.SECRET_KEY)
