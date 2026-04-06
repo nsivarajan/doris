@@ -487,6 +487,16 @@ DECLARE_mInt32(index_page_cache_stale_sweep_time_sec);
 // great impact on the performance of MOW, so it can be longer.
 DECLARE_mInt32(pk_index_page_cache_stale_sweep_time_sec);
 
+// ── Decoded Page Cache (Tier 1 SSD) ──────────────────────────────────────────
+DECLARE_Bool(enable_decoded_page_cache);
+DECLARE_String(decoded_page_cache_path);
+DECLARE_String(decoded_page_cache_size);
+DECLARE_Int32(decoded_page_cache_shard_count);
+DECLARE_Bool(decoded_page_cache_async_write);
+DECLARE_Int32(decoded_page_cache_write_queue_size);
+DECLARE_Int32(decoded_page_cache_writer_threads);
+// ── End Decoded Page Cache ────────────────────────────────────────────────────
+
 DECLARE_mBool(enable_low_cardinality_optimize);
 DECLARE_Bool(enable_low_cardinality_cache_code);
 

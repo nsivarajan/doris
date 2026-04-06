@@ -22,8 +22,10 @@
 #include "common/cast_set.h"
 #include "common/config.h"
 #include "io/cache/block_file_cache_factory.h"
+#include "io/cache/decoded_page_cache.h"
 #include "olap/olap_define.h"
 #include "olap/rowset/segment_v2/inverted_index_desc.h"
+#include "olap/rowset/segment_v2/segment.h"
 #include "olap/segment_loader.h"
 #include "olap/tablet_schema.h"
 #include "util/time.h"
@@ -145,6 +147,21 @@ void Rowset::clear_cache() {
             auto file_key = io::BlockFileCache::hash(file_name);
             auto* file_cache = io::FileCacheFactory::instance()->get_by_path(file_key);
             file_cache->remove_if_cached_async(file_key);
+        }
+    }
+
+    // NEW: clear SSD decoded page cache (Tier 1) on compaction/deletion.
+    // FIX 2: use Segment::file_cache_key() — segment_file_path() does not exist.
+    // FIX 2: use .value_.low() — NOT .low field.
+    // Guard: only active when enable_decoded_page_cache=true.
+    if (config::enable_decoded_page_cache) {
+        auto* dc = io::DecodedPageCache::instance();
+        if (dc != nullptr) {
+            for (int seg_id = 0; seg_id < num_segments(); ++seg_id) {
+                auto file_key = segment_v2::Segment::file_cache_key(
+                                    rowset_id().to_string(), seg_id);
+                dc->erase_by_file_hash(file_key.value_.low());
+            }
         }
     }
 }

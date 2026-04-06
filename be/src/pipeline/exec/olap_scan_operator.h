@@ -208,9 +208,11 @@ private:
     // total pages read
     // used by segment v2
     RuntimeProfile::Counter* _total_pages_num_counter = nullptr;
-    // page read from cache
+    // page read from RAM StoragePageCache (Tier 0)
     // used by segment v2
     RuntimeProfile::Counter* _cached_pages_num_counter = nullptr;
+    // page read from SSD DecodedPageCache (Tier 1) — no decode overhead
+    RuntimeProfile::Counter* _decoded_cache_pages_num_counter = nullptr;
 
     RuntimeProfile::Counter* _statistics_collect_timer = nullptr;
     RuntimeProfile::Counter* _inverted_index_filter_counter = nullptr;

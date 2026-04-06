@@ -18,8 +18,10 @@
 #include "olap/rowset/segment_v2/page_io.h"
 
 #include <crc32c/crc32c.h>
+#include <fcntl.h>
 #include <gen_cpp/segment_v2.pb.h>
 #include <stdint.h>
+#include <unistd.h>
 
 #include <algorithm>
 #include <cstring>
@@ -36,6 +38,7 @@
 #include "io/cache/cached_remote_file_reader.h"
 #include "io/fs/file_reader.h"
 #include "io/fs/file_writer.h"
+#include "io/cache/decoded_page_cache.h"
 #include "olap/olap_common.h"
 #include "olap/page_cache.h"
 #include "olap/rowset/segment_v2/encoding_info.h"
@@ -156,6 +159,87 @@ Status PageIO::read_and_decompress_page_(const PageReadOptions& opts, PageHandle
         return Status::OK();
     }
 
+    // ── NEW: Tier 1 SSD Decoded Page Cache check ──────────────────────────────
+    // Only active when enable_decoded_page_cache=true AND column_unique_id is set
+    // AND this is a DATA_PAGE (index pages are tiny and already in RAM StoragePageCache).
+    // FIX 1: use file_cache_key_from_path().value_.low() — NOT .low field
+    auto* decoded_cache = io::DecodedPageCache::instance();
+    if (config::enable_decoded_page_cache
+            && decoded_cache != nullptr
+            && opts.column_unique_id >= 0
+            && opts.type == PageTypePB::DATA_PAGE) {
+
+        io::DecodedPageCache::Key dk {
+            .file_hash        = file_cache_key_from_path(
+                                    opts.file_reader->path().native()).value_.low(),
+            .column_unique_id = opts.column_unique_id,
+            .page_offset      = (uint64_t)opts.page_pointer.offset
+        };
+
+        if (auto entry = decoded_cache->lookup(dk)) {
+            // TIER 1 HIT: pread decoded bytes directly — no LZ4, no BIT_SHUFFLE needed.
+            // data starts at offset HEADER_SIZE (64 bytes) in the .dpc file.
+            std::unique_ptr<DataPage> page = std::make_unique<DataPage>(
+                    entry->data_size, opts.use_page_cache, opts.type);
+
+            int fd = ::open(entry->file_path.c_str(), O_RDONLY);
+            if (fd >= 0) {
+                ssize_t bytes = ::pread(fd, page->data(), entry->data_size,
+                                        (off_t)io::DecodedPageCache::HEADER_SIZE);
+                ::close(fd);
+
+                if (bytes == (ssize_t)entry->data_size) {
+                    page->reset_size(entry->data_size);
+                    opts.stats->decoded_cache_pages_num++;
+
+                    // Parse footer and body from the decoded buffer.
+                    // The .dpc file stores the full page_slice written at decode time:
+                    //   [decoded_elements][nullmap][footer_bytes][footer_size(4)]
+                    // This mirrors exactly what the normal decode path produces at line 312.
+                    // We must parse *footer here so callers get nullmap_size(), num_values(),
+                    // first_ordinal() etc. — otherwise nullable columns return wrong results.
+                    Slice page_slice(page->data(), entry->data_size);
+                    uint32_t footer_size = decode_fixed32_le(
+                            (uint8_t*)page_slice.data + page_slice.size - 4);
+                    if (footer_size >= page_slice.size) {
+                        // Malformed footer: .dpc file corrupted.
+                        // Invalidate the cache entry so the next query does not
+                        // get the same corrupt file again — self-healing behavior.
+                        // On ESSD PL1: unlink() ~0.2ms, runs outside query critical path
+                        // via the goto (page destructor runs, then we fall to full decode).
+                        decoded_cache->invalidate(dk);
+                        goto tier1_miss;
+                    }
+                    if (!footer->ParseFromArray(
+                                page_slice.data + page_slice.size - 4 - footer_size,
+                                footer_size)) {
+                        // Footer parse failed: .dpc file corrupted — same self-healing.
+                        decoded_cache->invalidate(dk);
+                        goto tier1_miss;
+                    }
+                    // body = decoded elements only (excludes footer and footer_size field)
+                    *body = Slice(page_slice.data, page_slice.size - 4 - footer_size);
+                    opts.stats->uncompressed_bytes_read += body->size;
+
+                    // Promote to Tier 0 RAM cache for the next access
+                    if (opts.use_page_cache && cache) {
+                        cache->insert(cache_key, page.get(), &cache_handle,
+                                      opts.type, opts.kept_in_memory);
+                        *handle = PageHandle(std::move(cache_handle));
+                    } else {
+                        *handle = PageHandle(page.get());
+                    }
+                    page.release();
+                    return Status::OK();
+                }
+                // pread returned wrong size (file truncated/corrupted): fall through to decode
+            }
+            // open failed or short read: fall through to full decode path
+            tier1_miss:;
+        }
+    }
+    // ── END Tier 1 check ──────────────────────────────────────────────────────
+
     // every page contains 4 bytes footer length and 4 bytes checksum
     const uint32_t page_size = opts.page_pointer.size;
     if (page_size < 8) {
@@ -254,6 +338,30 @@ Status PageIO::read_and_decompress_page_(const PageReadOptions& opts, PageHandle
     // uncompressed or decoded. So that should update the uncompressed_bytes_read counter
     // just before add it to pagecache, it will be consistency with reading data from page cache.
     opts.stats->uncompressed_bytes_read += body->size;
+
+    // ── NEW: Tier 1 async write — BEFORE ownership transfer (FIX 4) ──────────
+    // Must happen while page unique_ptr still owns the data (before cache insert
+    // or page.release()). insert_async() COPIES bytes into WriteTask::data.
+    // FIX 1: value_.low() — NOT .low
+    // FIX 4: write BEFORE RAM cache insert so page pointer is still valid
+    if (config::enable_decoded_page_cache
+            && decoded_cache != nullptr
+            && opts.column_unique_id >= 0
+            && opts.type == PageTypePB::DATA_PAGE) {
+        io::DecodedPageCache::Key dk {
+            .file_hash        = file_cache_key_from_path(
+                                    opts.file_reader->path().native()).value_.low(),
+            .column_unique_id = opts.column_unique_id,
+            .page_offset      = (uint64_t)opts.page_pointer.offset
+        };
+        // Non-blocking: background writer thread handles the SSD write
+        decoded_cache->insert_async(dk,
+            Slice(page->data(), page->capacity()),
+            opts.encoding_info ? (uint32_t)opts.encoding_info->type_size() : 0u,
+            0u, 0u, 0u);
+    }
+    // ── END Tier 1 async write ────────────────────────────────────────────────
+
     if (opts.use_page_cache && cache) {
         // insert this page into cache and return the cache handle
         cache->insert(cache_key, page.get(), &cache_handle, opts.type, opts.kept_in_memory);

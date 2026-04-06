@@ -766,6 +766,8 @@ void OlapScanner::_collect_profile_before_close() {
     COUNTER_UPDATE(local_state->_key_range_filtered_counter, stats.rows_key_range_filtered);
     COUNTER_UPDATE(local_state->_total_pages_num_counter, stats.total_pages_num);
     COUNTER_UPDATE(local_state->_cached_pages_num_counter, stats.cached_pages_num);
+    COUNTER_UPDATE(local_state->_decoded_cache_pages_num_counter,
+                   stats.decoded_cache_pages_num);
     COUNTER_UPDATE(local_state->_inverted_index_filter_counter, stats.rows_inverted_index_filtered);
     COUNTER_UPDATE(local_state->_inverted_index_filter_timer, stats.inverted_index_filter_timer);
     COUNTER_UPDATE(local_state->_inverted_index_query_cache_hit_counter,

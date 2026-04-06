@@ -40,6 +40,7 @@
 #include "cloud/config.h"
 #include "common/cast_set.h"
 #include "common/config.h"
+#include "io/cache/decoded_page_cache.h"
 #include "common/kerberos/kerberos_ticket_mgr.h"
 #include "common/logging.h"
 #include "common/status.h"
@@ -567,6 +568,30 @@ Status ExecEnv::init_mem_env() {
     LOG(INFO) << "Storage page cache memory limit: "
               << PrettyPrinter::print(storage_cache_limit, TUnit::BYTES)
               << ", origin config value: " << config::storage_page_cache_limit;
+
+    // NEW: Initialize SSD Decoded Page Cache (Tier 1).
+    // Only created when explicitly enabled — zero overhead when disabled (default).
+    if (config::enable_decoded_page_cache && !config::decoded_page_cache_path.empty()) {
+        bool is_pct = false;
+        int64_t decoded_capacity = ParseUtil::parse_mem_spec(
+                config::decoded_page_cache_size, -1, MemInfo::physical_mem(), &is_pct);
+        if (decoded_capacity > 0) {
+            io::DecodedPageCache::create_global_cache(
+                    config::decoded_page_cache_path,
+                    (size_t)decoded_capacity,
+                    config::decoded_page_cache_shard_count);
+            LOG(INFO) << "[DecodedPageCache] Initialized"
+                      << " path=" << config::decoded_page_cache_path
+                      << " capacity=" << decoded_capacity / (1024 * 1024 * 1024) << "GB"
+                      << " shards=" << config::decoded_page_cache_shard_count;
+        } else {
+            LOG(WARNING) << "[DecodedPageCache] Invalid capacity config '"
+                         << config::decoded_page_cache_size << "' — not initialized";
+        }
+    } else if (config::enable_decoded_page_cache) {
+        LOG(WARNING) << "[DecodedPageCache] enable_decoded_page_cache=true but"
+                        " decoded_page_cache_path is empty — not initialized";
+    }
 
     // Init row cache
     int64_t row_cache_mem_limit =

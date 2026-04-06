@@ -289,6 +289,9 @@ ColumnReader::ColumnReader(const ColumnReaderOptions& opts, const ColumnMetaPB& 
     _meta_is_nullable = meta.is_nullable();
     _meta_dict_page = meta.dict_page();
     _meta_compression = meta.compression();
+    // Store column unique_id for use as DecodedPageCache key component.
+    // unique_id is stable across schema evolution (unlike column position).
+    _column_unique_id = meta.unique_id();
 }
 
 ColumnReader::~ColumnReader() = default;
@@ -427,6 +430,9 @@ Status ColumnReader::read_page(const ColumnIteratorOptions& iter_opts, const Pag
     opts.stats = iter_opts.stats;
     opts.encoding_info = _encoding_info;
     opts.is_dict_page = is_dict_page;
+    // Pass column unique_id so DecodedPageCache can key on it.
+    // Only set for DATA_PAGE reads (index pages are small and already in RAM StoragePageCache).
+    opts.column_unique_id = (iter_opts.type == PageTypePB::DATA_PAGE) ? _column_unique_id : -1;
 
     return PageIO::read_and_decompress_page(opts, handle, page_body, footer);
 }

@@ -272,6 +272,12 @@ private:
     bool _use_index_page_cache;
     int _be_exec_version = -1;
 
+    // Column unique_id from ColumnMetaPB.unique_id().
+    // Stable across schema evolution (schema changes assign new positions but keep unique_ids).
+    // Used as part of DecodedPageCache key in read_page().
+    // -1 means not set (e.g. for sub-columns of ARRAY/STRUCT that don't participate).
+    int32_t _column_unique_id = -1;
+
     PagePointer _meta_dict_page;
     CompressionTypePB _meta_compression;
 

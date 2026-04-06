@@ -72,6 +72,11 @@ struct PageReadOptions {
 
     const io::IOContext io_ctx;
 
+    // Column unique_id from ColumnMetaPB.unique_id() — stable across schema evolution.
+    // Used as part of DecodedPageCache key.
+    // -1 means "not set" → decoded page cache is skipped for this read.
+    // Set by ColumnReader::read_page() from _column_unique_id.
+    int32_t column_unique_id = -1;
     // for dict page, we need to use encoding_info based on footer->dict_page_footer().encoding()
     // to get its pre_decoder
     bool is_dict_page {false};

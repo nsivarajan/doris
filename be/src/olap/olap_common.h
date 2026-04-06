@@ -358,6 +358,7 @@ struct OlapReaderStatistics {
 
     int64_t total_pages_num = 0;
     int64_t cached_pages_num = 0;
+    int64_t decoded_cache_pages_num = 0; // pages served from SSD decoded page cache (Tier 1)
 
     int64_t rows_inverted_index_filtered = 0;
     int64_t inverted_index_filter_timer = 0;

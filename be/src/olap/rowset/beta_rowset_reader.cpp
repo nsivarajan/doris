@@ -44,6 +44,7 @@
 #include "olap/schema_cache.h"
 #include "olap/tablet_meta.h"
 #include "olap/tablet_schema.h"
+#include "io/cache/decoded_page_cache.h"
 #include "runtime/descriptors.h"
 #include "util/runtime_profile.h"
 #include "vec/core/block.h"
@@ -283,6 +284,32 @@ Status BetaRowsetReader::get_segment_iterators(RowsetReaderContext* read_context
             continue;
         }
         out_iters->push_back(std::move(iter));
+    }
+
+    // NEW: prefetch decoded .dpc files into OS Page Cache during the tablet sync window.
+    // FIX 3: use seg->file_cache_key().value_.low() — seg->file_name() does not exist.
+    // FIX 3: return_columns holds schema positions — map to unique_ids via TabletSchema.
+    // posix_fadvise(FADV_WILLNEED) is async in the kernel: it returns immediately and the
+    // kernel prefetches in the background, so by the time the scan starts the decoded
+    // pages are already in OS Page Cache (RAM-speed reads on Run 3+).
+    if (config::enable_decoded_page_cache) {
+        auto* dc = io::DecodedPageCache::instance();
+        if (dc != nullptr && _read_context->tablet_schema != nullptr
+                && _read_context->return_columns != nullptr) {
+            RowsetId rowset_id = rowset()->rowset_id();
+            for (int64_t i = seg_start; i < seg_end; ++i) {
+                auto file_key = segment_v2::Segment::file_cache_key(
+                                    rowset_id.to_string(), (uint32_t)i);
+                uint64_t fh = file_key.value_.low();
+                for (int col_idx : *_read_context->return_columns) {
+                    if (col_idx < (int)_read_context->tablet_schema->num_columns()) {
+                        int32_t unique_id =
+                                _read_context->tablet_schema->column(col_idx).unique_id();
+                        dc->prefetch_column(fh, unique_id);
+                    }
+                }
+            }
+        }
     }
 
     return Status::OK();

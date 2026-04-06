@@ -416,6 +416,36 @@ DEFINE_mInt32(data_page_cache_stale_sweep_time_sec, "300");
 DEFINE_mInt32(index_page_cache_stale_sweep_time_sec, "600");
 DEFINE_mInt32(pk_index_page_cache_stale_sweep_time_sec, "600");
 
+// ── Decoded Page Cache (Tier 1 SSD) ──────────────────────────────────────────
+// Stores decoded (decompressed + bit-unshuffled) column pages on a separate SSD
+// partition. Eliminates repeated BIT_SHUFFLE+LZ4 decode overhead for hot data.
+// ONLY active when enable_decoded_page_cache=true AND decoded_page_cache_path set.
+// Zero overhead when disabled (default).
+DEFINE_Bool(enable_decoded_page_cache, "false");
+// Directory on SSD for decoded pages. Should be a SEPARATE mount from
+// file_cache_path to avoid IO contention. Example: /nvme2/doris-decoded
+DEFINE_String(decoded_page_cache_path, "");
+// Total size limit per BE. Decoded pages are 2-21x larger than compressed.
+// For TPC-H 1000 lineitem (7 columns): ~40GB per BE.
+// Recommend: 1.5-2x your hot working set decoded size.
+DEFINE_String(decoded_page_cache_size, "200GB");
+// Number of shards. MUST be power of 2. Each shard has its own mutex.
+// 64 shards = 64 independent locks — zero cross-shard contention.
+DEFINE_Int32(decoded_page_cache_shard_count, "64");
+// Async write: query never waits for SSD write (recommended).
+// Set false for synchronous writes (useful for testing/debugging).
+DEFINE_Bool(decoded_page_cache_async_write, "true");
+// Max pending entries in async write queue per shard. If full, new writes are
+// silently dropped (next read is a cache miss — not a correctness issue).
+DEFINE_Int32(decoded_page_cache_write_queue_size, "4096");
+// Number of background writer threads. Tune to SSD throughput:
+//   ESSD PL1 350 MB/s  (26800 IOPS):  4  ← your current disk
+//   ESSD PL2 1000 MB/s:                6
+//   NVMe     3500 MB/s:                8
+// Formula: max(2, SSD_throughput_MB_per_sec / 100)
+DEFINE_Int32(decoded_page_cache_writer_threads, "4");
+// ── End Decoded Page Cache ────────────────────────────────────────────────────
+
 DEFINE_mBool(enable_low_cardinality_optimize, "true");
 DEFINE_Bool(enable_low_cardinality_cache_code, "true");
 
