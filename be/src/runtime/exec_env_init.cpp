@@ -573,8 +573,17 @@ Status ExecEnv::init_mem_env() {
     // Only created when explicitly enabled — zero overhead when disabled (default).
     if (config::enable_decoded_page_cache && !config::decoded_page_cache_path.empty()) {
         bool is_pct = false;
+        // ParseUtil::parse_mem_spec uses single-char suffix: '200G' not '200GB'.
+        // Normalize: strip trailing 'B'/'b' so both "200GB" and "200G" are accepted.
+        std::string cap_str = config::decoded_page_cache_size;
+        if (!cap_str.empty()) {
+            char last = cap_str.back();
+            if (last == 'B' || last == 'b') {
+                cap_str.pop_back(); // "200GB" → "200G", "200MB" → "200M"
+            }
+        }
         int64_t decoded_capacity = ParseUtil::parse_mem_spec(
-                config::decoded_page_cache_size, -1, MemInfo::physical_mem(), &is_pct);
+                cap_str, -1, MemInfo::physical_mem(), &is_pct);
         if (decoded_capacity > 0) {
             io::DecodedPageCache::create_global_cache(
                     config::decoded_page_cache_path,
@@ -586,7 +595,8 @@ Status ExecEnv::init_mem_env() {
                       << " shards=" << config::decoded_page_cache_shard_count;
         } else {
             LOG(WARNING) << "[DecodedPageCache] Invalid capacity config '"
-                         << config::decoded_page_cache_size << "' — not initialized";
+                         << config::decoded_page_cache_size
+                         << "' — use format '200G' or '200GB' — not initialized";
         }
     } else if (config::enable_decoded_page_cache) {
         LOG(WARNING) << "[DecodedPageCache] enable_decoded_page_cache=true but"

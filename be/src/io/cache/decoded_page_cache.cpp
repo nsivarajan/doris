@@ -47,10 +47,13 @@ void DecodedPageCache::create_global_cache(const std::string& base_path,
 
     auto* cache = new DecodedPageCache();
     cache->_shards.resize(shard_count);
+    for (int i = 0; i < shard_count; ++i) {
+        cache->_shards[i] = std::make_unique<Shard>();
+    }
     size_t per_shard = capacity_bytes / shard_count;
 
     for (int i = 0; i < shard_count; ++i) {
-        auto& shard      = cache->_shards[i];
+        auto& shard      = *cache->_shards[i];
         shard.capacity   = per_shard;
         shard.dir_path   = fmt::format("{}/shard_{:03d}", base_path, i);
 
@@ -96,7 +99,7 @@ void DecodedPageCache::create_global_cache(const std::string& base_path,
     // Queries can start immediately; pages become visible as shards are scanned.
     for (int i = 0; i < shard_count; ++i) {
         std::thread([cache, i]() {
-            cache->_rebuild_shard_index(cache->_shards[i]);
+            cache->_rebuild_shard_index(*cache->_shards[i]);
         }).detach();
     }
 }
@@ -108,8 +111,8 @@ DecodedPageCache* DecodedPageCache::instance() {
 DecodedPageCache::~DecodedPageCache() {
     _stop.store(true, std::memory_order_release);
     // Wake all writer threads (they wait on per-shard CVs)
-    for (auto& shard : _shards) {
-        shard.write_queue_cv.notify_all();
+    for (auto& shard_ptr : _shards) {
+        shard_ptr->write_queue_cv.notify_all();
     }
     for (auto& t : _writer_threads) {
         if (t.joinable()) t.join();
@@ -270,9 +273,9 @@ void DecodedPageCache::prefetch_column(uint64_t file_hash, int32_t column_unique
 
 size_t DecodedPageCache::used_bytes() const {
     size_t total = 0;
-    for (auto& shard : _shards) {
-        std::lock_guard<std::mutex> lock(shard.mutex);
-        total += shard.used_bytes;
+    for (auto& shard_ptr : _shards) {
+        std::lock_guard<std::mutex> lock(shard_ptr->mutex);
+        total += shard_ptr->used_bytes;
     }
     return total;
 }
@@ -292,7 +295,7 @@ void DecodedPageCache::_writer_thread_fn(int thread_id) {
         bool did_work = false;
 
         for (int si = start_shard; si < end_shard; ++si) {
-            auto& shard = _shards[si];
+            auto& shard = *_shards[si];
 
             WriteTask task;
             {
@@ -325,7 +328,7 @@ void DecodedPageCache::_writer_thread_fn(int thread_id) {
             // some shards' CVs were notified (each insert_async notifies only
             // the shard that received work, not the thread's designated CV shard).
             if (start_shard < end_shard) {
-                auto& shard = _shards[start_shard];
+                auto& shard = *_shards[start_shard];
                 std::unique_lock<std::mutex> lock(shard.mutex);
                 // 5ms timeout: responsive enough for write throughput,
                 // low enough CPU overhead when all queues are empty.
@@ -333,7 +336,7 @@ void DecodedPageCache::_writer_thread_fn(int thread_id) {
                     if (_stop.load(std::memory_order_relaxed)) return true;
                     // Check all owned shards for any pending work
                     for (int si = start_shard; si < end_shard; ++si) {
-                        if (!_shards[si].write_queue.empty()) return true;
+                        if (!_shards[si]->write_queue.empty()) return true;
                     }
                     return false;
                 });

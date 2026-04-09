@@ -354,11 +354,13 @@ Status PageIO::read_and_decompress_page_(const PageReadOptions& opts, PageHandle
             .column_unique_id = opts.column_unique_id,
             .page_offset      = (uint64_t)opts.page_pointer.offset
         };
-        // Non-blocking: background writer thread handles the SSD write
+        // Non-blocking: background writer thread handles the SSD write.
+        // element_size is best-effort metadata stored in .dpc header for debugging —
+        // the read path does not use it (raw buffer is parsed directly).
+        // EncodingInfo has no public type_size() method; pass 0u as placeholder.
         decoded_cache->insert_async(dk,
             Slice(page->data(), page->capacity()),
-            opts.encoding_info ? (uint32_t)opts.encoding_info->type_size() : 0u,
-            0u, 0u, 0u);
+            0u, 0u, 0u, 0u);
     }
     // ── END Tier 1 async write ────────────────────────────────────────────────
 

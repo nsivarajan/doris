@@ -1657,6 +1657,16 @@ DECLARE_mBool(enable_hdfs_mem_limiter);
 // we should do agg limit opt
 DECLARE_mInt16(topn_agg_limit_multiplier);
 
+// Low-cardinality aggregation for low-NDV GROUP BY columns (NDV < 1024).
+// Uses O(1) array access instead of hash table lookup when key fits in [0, 1024).
+// Activated automatically for SMALLINT/INT keys after CompressedMaterialize.
+DECLARE_Bool(enable_low_cardinality_agg);
+
+// Split int128 accumulator for DECIMAL128 aggregation.
+// Uses two int64_t fields to enable AVX2 PADDQ vectorization (~3-4x faster).
+// Only valid for DECIMAL32/DECIMAL64 input types.
+DECLARE_Bool(enable_decimal128_split_accumulator);
+
 DECLARE_mInt64(tablet_meta_serialize_size_limit);
 
 DECLARE_mInt64(pipeline_task_leakage_detect_period_secs);

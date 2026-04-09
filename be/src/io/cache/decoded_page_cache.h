@@ -261,13 +261,16 @@ private:
         std::string make_file_path(const Key& key) const;
     };
 
-    std::vector<Shard> _shards;
+    // std::unique_ptr<Shard> because Shard contains std::mutex and
+    // std::condition_variable which are neither copyable nor moveable.
+    // vector<unique_ptr> supports resize without requiring Shard to be moveable.
+    std::vector<std::unique_ptr<Shard>> _shards;
 
     // Shard routing: bitmask for power-of-2 shard count.
     // KEY ROUTING PROPERTY: all pages for the same file_hash → same shard.
     // This is why prefetch_column() and erase_by_file_hash() only need 1 shard.
     Shard& _get_shard(const Key& key) {
-        return _shards[key.file_hash & (_shards.size() - 1)];
+        return *_shards[key.file_hash & (_shards.size() - 1)];
     }
 
     // ── Writer thread pool ────────────────────────────────────────────────────
