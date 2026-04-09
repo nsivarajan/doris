@@ -62,6 +62,7 @@ import org.apache.doris.nereids.rules.rewrite.CountLiteralRewrite;
 import org.apache.doris.nereids.rules.rewrite.CreatePartitionTopNFromWindow;
 import org.apache.doris.nereids.rules.rewrite.DecoupleEncodeDecode;
 import org.apache.doris.nereids.rules.rewrite.DeferMaterializeTopNResult;
+import org.apache.doris.nereids.rules.rewrite.AdaptiveDecimalAccumulator;
 import org.apache.doris.nereids.rules.rewrite.DistinctAggStrategySelector;
 import org.apache.doris.nereids.rules.rewrite.DistinctAggregateRewriter;
 import org.apache.doris.nereids.rules.rewrite.DistinctWindowExpression;
@@ -908,6 +909,8 @@ public class Rewriter extends AbstractBatchJobExecutor {
                     rewriteJobs.addAll(jobs(topic("split multi distinct",
                             custom(RuleType.DISTINCT_AGG_STRATEGY_SELECTOR,
                                     () -> DistinctAggStrategySelector.INSTANCE))));
+                    rewriteJobs.addAll(jobs(topic("adaptive decimal accumulator",
+                            topDown(AdaptiveDecimalAccumulator.INSTANCE))));
 
                     // Rewrite search function before VariantSubPathPruning
                     // so that ElementAt expressions from search can be processed

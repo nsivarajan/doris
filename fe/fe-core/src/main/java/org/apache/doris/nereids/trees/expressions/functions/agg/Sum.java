@@ -23,6 +23,7 @@ import org.apache.doris.nereids.trees.expressions.NeedSessionVarGuard;
 import org.apache.doris.nereids.trees.expressions.functions.ComputePrecisionForSum;
 import org.apache.doris.nereids.trees.expressions.functions.ExplicitlyCastableSignature;
 import org.apache.doris.nereids.trees.expressions.functions.Function;
+import org.apache.doris.nereids.trees.expressions.functions.FunctionParams;
 import org.apache.doris.nereids.trees.expressions.functions.window.SupportWindowAnalytic;
 import org.apache.doris.nereids.trees.expressions.shape.UnaryExpression;
 import org.apache.doris.nereids.trees.expressions.visitor.ExpressionVisitor;
@@ -143,5 +144,25 @@ public class Sum extends NullableAggregateFunction
     @Override
     public boolean canRollUp() {
         return true;
+    }
+
+    /**
+     * Create a new Sum with a fixed narrowed return type for the accumulator.
+     * Used by AdaptiveDecimalAccumulator to select DECIMAL64 (int64) accumulator
+     * instead of DECIMAL128 (__int128) when statistics guarantee no overflow.
+     */
+    public Sum withNarrowedReturnType(DecimalV3Type narrowedReturnType) {
+        FunctionSignature narrowed = this.getSignature().withReturnType(narrowedReturnType);
+        // Create a NullableAggregateFunctionParams subclass that returns the fixed narrowed signature.
+        // BoundFunction.buildSignatureCache(specifiedSignature) will use this directly, bypassing
+        // ComputePrecisionForSum which would expand back to DECIMAL128.
+        NullableAggregateFunctionParams params = new NullableAggregateFunctionParams(
+                null, getName(), isDistinct(), isSkew(), alwaysNullable, children, isInferred()) {
+            @Override
+            public java.util.function.Supplier<FunctionSignature> getOriginSignature() {
+                return () -> narrowed;
+            }
+        };
+        return new Sum(params);
     }
 }

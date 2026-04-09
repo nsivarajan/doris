@@ -86,7 +86,15 @@ using AggregatedMethodVariants = std::variant<
         vectorized::MethodKeysFixed<AggData<vectorized::UInt104>>,
         vectorized::MethodKeysFixed<AggData<vectorized::UInt128>>,
         vectorized::MethodKeysFixed<AggData<vectorized::UInt136>>,
-        vectorized::MethodKeysFixed<AggData<vectorized::UInt256>>>;
+        vectorized::MethodKeysFixed<AggData<vectorized::UInt256>>,
+        // Low-cardinality aggregation: O(1) array access instead of hash table lookup.
+        // Used for low-NDV GROUP BY columns (NDV < 1024) after CompressedMaterialize.
+        vectorized::MethodLowCardinality<vectorized::UInt16, AggData<vectorized::UInt16>>,
+        vectorized::MethodLowCardinality<vectorized::UInt32, AggData<vectorized::UInt32>>,
+        vectorized::MethodSingleNullableColumn<vectorized::MethodLowCardinality<
+                vectorized::UInt16, AggDataNullable<vectorized::UInt16>>>,
+        vectorized::MethodSingleNullableColumn<vectorized::MethodLowCardinality<
+                vectorized::UInt32, AggDataNullable<vectorized::UInt32>>>>;
 
 struct AggregatedDataVariants
         : public DataVariants<AggregatedMethodVariants, vectorized::MethodSingleNullableColumn,
@@ -163,6 +171,33 @@ struct AggregatedDataVariants
         case HashKeyType::fixed256:
             method_variant.emplace<vectorized::MethodKeysFixed<AggData<vectorized::UInt256>>>(
                     get_key_sizes(data_types));
+            break;
+        case HashKeyType::low_cardinality:
+            // Low-cardinality aggregation: acc[key] instead of hash table lookup.
+            // Key must be UInt16 (from encode_as_smallint).
+            // UInt32 path reserved for future encode_as_int support.
+            // NDV guaranteed < 1024 by FE cardinality check.
+            if (nullable) {
+                if (data_types[0]->get_size_of_value_in_memory() <= sizeof(vectorized::UInt16)) {
+                    method_variant.emplace<vectorized::MethodSingleNullableColumn<
+                            vectorized::MethodLowCardinality<
+                                    vectorized::UInt16,
+                                    AggDataNullable<vectorized::UInt16>>>>();
+                } else {
+                    method_variant.emplace<vectorized::MethodSingleNullableColumn<
+                            vectorized::MethodLowCardinality<
+                                    vectorized::UInt32,
+                                    AggDataNullable<vectorized::UInt32>>>>();
+                }
+            } else {
+                if (data_types[0]->get_size_of_value_in_memory() <= sizeof(vectorized::UInt16)) {
+                    method_variant.emplace<vectorized::MethodLowCardinality<
+                            vectorized::UInt16, AggData<vectorized::UInt16>>>();
+                } else {
+                    method_variant.emplace<vectorized::MethodLowCardinality<
+                            vectorized::UInt32, AggData<vectorized::UInt32>>>();
+                }
+            }
             break;
         default:
             throw Exception(ErrorCode::INTERNAL_ERROR,

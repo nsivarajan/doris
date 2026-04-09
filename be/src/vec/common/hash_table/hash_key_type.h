@@ -42,7 +42,12 @@ enum class HashKeyType {
     fixed104,
     fixed128,
     fixed136,
-    fixed256
+    fixed256,
+    // Low-cardinality indexing for aggregation when NDV < 1024.
+    // Replaces hash table lookup with acc[key] array access.
+    // Only valid when all key values fit in [0, 1024).
+    // Set by FE when: CompressedMaterialize active + estimated cardinality < 1024.
+    low_cardinality
 };
 
 inline HashKeyType get_hash_key_type_with_phase(HashKeyType t, bool phase2) {
@@ -54,6 +59,14 @@ inline HashKeyType get_hash_key_type_with_phase(HashKeyType t, bool phase2) {
     }
     if (t == HashKeyType::int64_key) {
         return HashKeyType::int64_key_phase2;
+    }
+    // low_cardinality guarantees all keys fit in [0, 1024) — a property that only
+    // holds before network shuffle. After shuffle in phase2, the same encoded key
+    // values appear on all nodes, so the property still holds. However, the FE
+    // should not be routing phase2 aggregations through low_cardinality at all.
+    // Downgrade to standard int16_key to be safe.
+    if (t == HashKeyType::low_cardinality) {
+        return HashKeyType::int16_key;
     }
     return t;
 }
