@@ -414,6 +414,144 @@ struct MethodOneNumber : public MethodBase<TData> {
     }
 };
 
+// MethodLowCardinality: O(1) direct array indexing for aggregation.
+//
+// Single-column (ARRAY_SIZE=1024, FieldType=UInt16):
+//   GROUP BY encode_as_smallint(col) — key in [0, 1024).
+//   Reads raw column data directly as keys. No packing needed.
+//
+// Two-column packed (ARRAY_SIZE=65536, FieldType=UInt32):
+//   GROUP BY encode_as_smallint(col0), encode_as_smallint(col1)
+//   Packed entirely in BE as: key = col0 | (col1 << 8)
+//   Max key = 255 | (255 << 8) = 65535 < ARRAY_SIZE=65536.
+//   No FE arithmetic needed — packing is transparent to the optimizer.
+//
+// How it works (both cases):
+//   Hash table pre-reserved to capacity >= 2*ARRAY_SIZE.
+//   For any key k in [0, ARRAY_SIZE): bucket = k & (capacity-1) = k — zero collision.
+//   hash_values[i] = key directly (no CRC32). PHHashMap acts as a direct array.
+//
+// Activated by:
+//   FE sets TAggregationNode.use_low_cardinality_agg = true when 1 or 2 GROUP BY
+//   columns are encode_as_smallint output (CHAR(1) columns, values in [0, 256)).
+//
+// Safety:
+//   CHECK(key < ARRAY_SIZE) validates at runtime — fails cleanly, no corruption.
+//   Phase2 (merge) aggregation downgrades to int16_key (standard hash path).
+template <typename FieldType, typename TData, size_t ARRAY_SIZE = 1024>
+struct MethodLowCardinality : public MethodBase<TData> {
+    using Base = MethodBase<TData>;
+    using Base::init_iterator;
+    using Base::hash_table;
+    using State = ColumnsHashing::HashMethodOneNumber<typename Base::Value,
+                                                      typename Base::Mapped, FieldType>;
+
+    static_assert((ARRAY_SIZE & (ARRAY_SIZE - 1)) == 0, "ARRAY_SIZE must be power of 2");
+    static_assert(ARRAY_SIZE <= 65536, "ARRAY_SIZE must fit in UInt16");
+
+    // Default constructor — single-column case.
+    MethodLowCardinality() : _num_columns(1) {
+        hash_table->reserve(ARRAY_SIZE * 2);
+    }
+
+    // Constructor for two-column packed case.
+    // data_types size tells us how many columns to pack.
+    explicit MethodLowCardinality(const std::vector<vectorized::DataTypePtr>& data_types)
+            : _num_columns(data_types.size()) {
+        DCHECK(_num_columns == 1 || _num_columns == 2)
+                << "MethodLowCardinality supports 1 or 2 columns, got " << _num_columns;
+        hash_table->reserve(ARRAY_SIZE * 2);
+    }
+
+    size_t estimated_size(const ColumnRawPtrs& key_columns, uint32_t num_rows, bool is_join,
+                          bool is_build, uint32_t bucket_size) override {
+        return sizeof(FieldType) * num_rows + sizeof(size_t) * num_rows;
+    }
+
+    void init_serialized_keys(const ColumnRawPtrs& key_columns, uint32_t num_rows,
+                              const uint8_t* null_map = nullptr, bool is_join = false,
+                              bool is_build = false, uint32_t bucket_size = 0) override {
+        if (_num_columns == 2) {
+            // Two-column packed case: pack col0 | (col1 << 8) into _packed_keys buffer.
+            // col0 and col1 are both SMALLINT from encode_as_smallint (values 0-255).
+            _packed_keys.resize(num_rows);
+            const uint16_t* col0 = reinterpret_cast<const uint16_t*>(
+                    key_columns[0]->get_raw_data().data);
+            const uint16_t* col1 = reinterpret_cast<const uint16_t*>(
+                    key_columns[1]->get_raw_data().data);
+            for (uint32_t i = 0; i < num_rows; ++i) {
+                // Pack: low 8 bits = col0, high 8 bits = col1
+                // encode_as_smallint for CHAR(1) produces values 0-255 (fits in 8 bits)
+                _packed_keys[i] = static_cast<FieldType>(
+                        (static_cast<uint32_t>(col0[i]) & 0xFF) |
+                        ((static_cast<uint32_t>(col1[i]) & 0xFF) << 8));
+            }
+            Base::keys = _packed_keys.data();
+        } else {
+            // Single-column case: read directly from column raw data.
+            Base::keys = (FieldType*)(key_columns[0]->is_nullable()
+                                              ? assert_cast<const ColumnNullable*>(key_columns[0])
+                                                        ->get_nested_column_ptr()
+                                                        ->get_raw_data()
+                                                        .data
+                                              : key_columns[0]->get_raw_data().data);
+        }
+
+        // Validate all keys fit in the array. Runs in both debug and release builds.
+        // If the FE's estimate was wrong, fail immediately — no silent data corruption.
+        for (uint32_t i = 0; i < num_rows; ++i) {
+            size_t key = static_cast<size_t>(Base::keys[i]);
+            CHECK(key < ARRAY_SIZE)
+                    << "MethodLowCardinality: key " << key << " >= ARRAY_SIZE " << ARRAY_SIZE
+                    << " (num_columns=" << _num_columns << "). Cardinality assumption violated.";
+        }
+
+        if (is_join) {
+            Base::init_join_bucket_num(num_rows, bucket_size, null_map);
+        } else {
+            // Store key value directly as hash_value (no CRC32).
+            // Since capacity >= 2*ARRAY_SIZE, bucket = key & (capacity-1) = key.
+            Base::hash_values.resize(num_rows);
+            for (size_t k = 0; k < num_rows; ++k) {
+                if (null_map && null_map[k]) {
+                    continue;
+                }
+                Base::hash_values[k] = static_cast<size_t>(Base::keys[k]);
+            }
+        }
+    }
+
+    void insert_keys_into_columns(std::vector<typename Base::Key>& input_keys,
+                                  MutableColumns& key_columns,
+                                  const uint32_t num_rows) override {
+        if (_num_columns == 2) {
+            // Unpack: col0 = key & 0xFF, col1 = (key >> 8) & 0xFF
+            if (!input_keys.empty()) {
+                std::vector<uint16_t> col0_data(num_rows), col1_data(num_rows);
+                for (uint32_t i = 0; i < num_rows; ++i) {
+                    col0_data[i] = static_cast<uint16_t>(input_keys[i] & 0xFF);
+                    col1_data[i] = static_cast<uint16_t>((input_keys[i] >> 8) & 0xFF);
+                }
+                key_columns[0]->insert_many_raw_data(
+                        reinterpret_cast<char*>(col0_data.data()), num_rows);
+                key_columns[1]->insert_many_raw_data(
+                        reinterpret_cast<char*>(col1_data.data()), num_rows);
+            }
+        } else {
+            if (!input_keys.empty()) {
+                key_columns[0]->insert_many_raw_data(
+                        reinterpret_cast<char*>(input_keys.data()), num_rows);
+            }
+        }
+    }
+
+private:
+    size_t _num_columns = 1;
+    // Temporary buffer for packed two-column keys. Allocated per batch in
+    // init_serialized_keys, reused across batches (resize only if needed).
+    DorisVector<FieldType> _packed_keys;
+};
+
 template <typename FieldType, typename TData>
 struct MethodOneNumberDirect : public MethodOneNumber<FieldType, TData> {
     using Base = MethodOneNumber<FieldType, TData>;

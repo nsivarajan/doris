@@ -34,10 +34,20 @@ inline std::vector<vectorized::DataTypePtr> get_data_types(
 
 template <typename DataVariants>
 Status init_hash_method(DataVariants* data, const std::vector<vectorized::DataTypePtr>& data_types,
-                        bool is_first_phase) {
+                        bool is_first_phase, bool use_low_cardinality_agg = false) {
     auto type = HashKeyType::EMPTY;
     try {
-        type = get_hash_key_type_with_phase(get_hash_key_type(data_types), !is_first_phase);
+        // When the FE marks this aggregation as low-cardinality (single composite
+        // encode_as_smallint key, combined NDV < 1024, first-phase only), use direct
+        // array indexing instead of PHHashMap. Phase2 (merge) uses standard path.
+        if (use_low_cardinality_agg && is_first_phase) {
+            DCHECK_EQ(data_types.size(), 1)
+                    << "use_low_cardinality_agg requires exactly 1 GROUP BY column, got "
+                    << data_types.size();
+            type = HashKeyType::low_cardinality;
+        } else {
+            type = get_hash_key_type_with_phase(get_hash_key_type(data_types), !is_first_phase);
+        }
         data->init(data_types, type);
     } catch (const Exception& e) {
         // method_variant may meet valueless_by_exception, so we set it to monostate

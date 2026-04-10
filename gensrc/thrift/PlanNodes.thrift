@@ -1026,6 +1026,12 @@ struct TAggregationNode {
   8: optional bool is_first_phase
   9: optional bool is_colocate
   10: optional TSortInfo agg_sort_info_by_group_key
+  // When true, 1 or 2 GROUP BY keys are encode_as_smallint output (CHAR(1) columns).
+  // BE uses MethodLowCardinality instead of PHHashMap:
+  //   1 key → ARRAY_SIZE=1024, key in [0, 1024)
+  //   2 keys → packed as col0|(col1<<8), ARRAY_SIZE=65536, packed value in [0, 65536)
+  // Only valid for first-phase (local) aggregation. Phase2 uses int16_key.
+  11: optional bool use_low_cardinality_agg
 }
 
 struct TRepeatNode {

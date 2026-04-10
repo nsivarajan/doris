@@ -198,9 +198,10 @@ void StreamingAggLocalState::_update_memusage_with_serialized_key() {
 }
 
 Status StreamingAggLocalState::_init_hash_method(const vectorized::VExprContextSPtrs& probe_exprs) {
+    const auto& p = Base::_parent->template cast<StreamingAggOperatorX>();
     RETURN_IF_ERROR(init_hash_method<AggregatedDataVariants>(
-            _agg_data.get(), get_data_types(probe_exprs),
-            Base::_parent->template cast<StreamingAggOperatorX>()._is_first_phase));
+            _agg_data.get(), get_data_types(probe_exprs), p._is_first_phase,
+            p._use_low_cardinality_agg));
     return Status::OK();
 }
 
@@ -617,6 +618,8 @@ StreamingAggOperatorX::StreamingAggOperatorX(ObjectPool* pool, int operator_id,
           _needs_finalize(tnode.agg_node.need_finalize),
           _is_merge(false),
           _is_first_phase(tnode.agg_node.__isset.is_first_phase && tnode.agg_node.is_first_phase),
+          _use_low_cardinality_agg(tnode.agg_node.__isset.use_low_cardinality_agg
+                                   && tnode.agg_node.use_low_cardinality_agg),
           _have_conjuncts(tnode.__isset.vconjunct && !tnode.vconjunct.nodes.empty()),
           _agg_fn_output_row_descriptor(descs, tnode.row_tuples, tnode.nullable_tuples) {}
 

@@ -183,6 +183,9 @@ private:
     bool _needs_finalize;
     bool _is_merge;
     const bool _is_first_phase;
+    // Set by FE when GROUP BY is a single composite encode_as_smallint key with NDV < 1024.
+    // Activates MethodLowCardinality (O(1) direct array) instead of PHHashMap.
+    const bool _use_low_cardinality_agg;
     size_t _align_aggregate_states = 1;
     /// The offset to the n-th aggregate function in a row of aggregate functions.
     vectorized::Sizes _offsets_of_aggregate_states;

@@ -42,7 +42,11 @@ enum class HashKeyType {
     fixed104,
     fixed128,
     fixed136,
-    fixed256
+    fixed256,
+    // Direct array indexing for low-NDV GROUP BY after CompressedMaterialize.
+    // Only valid for a single SMALLINT key with values guaranteed in [0, 1024).
+    // Set by FE when: single composite encode_as_smallint key + combined NDV < 1024.
+    low_cardinality
 };
 
 inline HashKeyType get_hash_key_type_with_phase(HashKeyType t, bool phase2) {
@@ -54,6 +58,11 @@ inline HashKeyType get_hash_key_type_with_phase(HashKeyType t, bool phase2) {
     }
     if (t == HashKeyType::int64_key) {
         return HashKeyType::int64_key_phase2;
+    }
+    // low_cardinality is only valid for first-phase (local) aggregation.
+    // After network shuffle in phase2, downgrade to standard int16_key.
+    if (t == HashKeyType::low_cardinality) {
+        return HashKeyType::int16_key;
     }
     return t;
 }

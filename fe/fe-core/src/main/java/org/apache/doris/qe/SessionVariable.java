@@ -2952,6 +2952,19 @@ public class SessionVariable implements Serializable, Writable {
     public boolean enableCompressMaterialize = false;
 
     @VariableMgr.VarAttr(
+            name = "enable_adaptive_decimal_accumulator",
+            needForward = true,
+            varType = VariableAnnotation.EXPERIMENTAL,
+            description = {
+                "当统计信息显示 sum(DECIMAL) 结果可安全放入 DECIMAL64 时，"
+                        + "使用 int64 累加器代替 __int128，以启用 AVX2 向量化。",
+                "When statistics show sum(DECIMAL) fits safely in DECIMAL64, "
+                        + "use int64 accumulator instead of __int128 to enable AVX2 vectorization."
+            }
+    )
+    public boolean enableAdaptiveDecimalAccumulator = false;
+
+    @VariableMgr.VarAttr(
             name = DATA_QUEUE_MAX_BLOCKS,
             description = {"DataQueue 中每个子队列允许最大的 block 个数",
                     "Max blocks in DataQueue."},

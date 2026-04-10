@@ -34,6 +34,7 @@ import org.apache.doris.nereids.rules.expression.ExpressionRewrite;
 import org.apache.doris.nereids.rules.expression.MergeGuardExpr;
 import org.apache.doris.nereids.rules.expression.NullableDependentExpressionRewrite;
 import org.apache.doris.nereids.rules.expression.QueryColumnCollector;
+import org.apache.doris.nereids.rules.rewrite.AdaptiveDecimalAccumulator;
 import org.apache.doris.nereids.rules.rewrite.AddDefaultLimit;
 import org.apache.doris.nereids.rules.rewrite.AddProjectForJoin;
 import org.apache.doris.nereids.rules.rewrite.AddProjectForUniqueFunction;
@@ -908,6 +909,8 @@ public class Rewriter extends AbstractBatchJobExecutor {
                     rewriteJobs.addAll(jobs(topic("split multi distinct",
                             custom(RuleType.DISTINCT_AGG_STRATEGY_SELECTOR,
                                     () -> DistinctAggStrategySelector.INSTANCE))));
+                    rewriteJobs.addAll(jobs(topic("adaptive decimal accumulator",
+                            topDown(AdaptiveDecimalAccumulator.INSTANCE))));
 
                     // Rewrite search function before VariantSubPathPruning
                     // so that ElementAt expressions from search can be processed

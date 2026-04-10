@@ -64,6 +64,10 @@ public class AggregationNode extends PlanNode {
 
     private boolean queryCacheCandidate;
 
+    // Set by Nereids when all GROUP BY keys are composite encode_as_smallint output
+    // and combined NDV < 1024. Tells BE to use MethodLowCardinality (direct array).
+    private boolean useLowCardinalityAgg = false;
+
     /**
      * Create an agg node that is not an intermediate node.
      * isIntermediate is true if it is a slave node in a 2-part agg plan.
@@ -151,6 +155,9 @@ public class AggregationNode extends PlanNode {
         msg.agg_node.setUseStreamingPreaggregation(useStreamingPreagg);
         msg.agg_node.setIsFirstPhase(aggInfo.isFirstPhase());
         msg.agg_node.setIsColocate(isColocate);
+        if (useLowCardinalityAgg) {
+            msg.agg_node.setUseLowCardinalityAgg(true);
+        }
         if (sortByGroupKey != null) {
             msg.agg_node.setAggSortInfoByGroupKey(sortByGroupKey.toThrift());
         }
@@ -273,6 +280,10 @@ public class AggregationNode extends PlanNode {
 
     public void setSortByGroupKey(SortInfo sortByGroupKey) {
         this.sortByGroupKey = sortByGroupKey;
+    }
+
+    public void setUseLowCardinalityAgg(boolean useLowCardinalityAgg) {
+        this.useLowCardinalityAgg = useLowCardinalityAgg;
     }
 
     public boolean isQueryCacheCandidate() {

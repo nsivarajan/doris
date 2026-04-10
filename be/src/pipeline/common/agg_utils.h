@@ -86,7 +86,18 @@ using AggregatedMethodVariants = std::variant<
         vectorized::MethodKeysFixed<AggData<vectorized::UInt104>>,
         vectorized::MethodKeysFixed<AggData<vectorized::UInt128>>,
         vectorized::MethodKeysFixed<AggData<vectorized::UInt136>>,
-        vectorized::MethodKeysFixed<AggData<vectorized::UInt256>>>;
+        vectorized::MethodKeysFixed<AggData<vectorized::UInt256>>,
+        // Low-cardinality aggregation: O(1) direct array indexing.
+        // Single-column (UInt16, ARRAY_SIZE=1024): single encode_as_smallint key.
+        // Two-column packed (UInt32, ARRAY_SIZE=65536): two SMALLINT columns packed
+        // as col0 | (col1 << 8), handled entirely in BE — no FE arithmetic needed.
+        vectorized::MethodLowCardinality<vectorized::UInt16, AggData<vectorized::UInt16>>,
+        vectorized::MethodLowCardinality<vectorized::UInt32, AggData<vectorized::UInt32>,
+                                         65536>,
+        vectorized::MethodSingleNullableColumn<vectorized::MethodLowCardinality<
+                vectorized::UInt16, AggDataNullable<vectorized::UInt16>>>,
+        vectorized::MethodSingleNullableColumn<vectorized::MethodLowCardinality<
+                vectorized::UInt32, AggDataNullable<vectorized::UInt32>, 65536>>>;
 
 struct AggregatedDataVariants
         : public DataVariants<AggregatedMethodVariants, vectorized::MethodSingleNullableColumn,
@@ -163,6 +174,34 @@ struct AggregatedDataVariants
         case HashKeyType::fixed256:
             method_variant.emplace<vectorized::MethodKeysFixed<AggData<vectorized::UInt256>>>(
                     get_key_sizes(data_types));
+            break;
+        case HashKeyType::low_cardinality:
+            // Direct array indexing: acc[key] instead of hash table probe.
+            // Single SMALLINT column (1 key): ARRAY_SIZE=1024, key in [0,1024).
+            // Two SMALLINT columns (2 keys): packed as col0|(col1<<8), ARRAY_SIZE=65536.
+            // FE sets this flag when 1 or 2 GROUP BY columns are encode_as_smallint.
+            DCHECK(data_types.size() == 1 || data_types.size() == 2)
+                    << "low_cardinality requires 1 or 2 GROUP BY columns, got "
+                    << data_types.size();
+            if (data_types.size() == 2) {
+                // Two-column packed: col0 | (col1 << 8), stored as UInt32.
+                // ARRAY_SIZE=65536 covers all possible packed values (256*256).
+                // nullable check: two-column case never nullable (FE ensures this)
+                method_variant.emplace<vectorized::MethodLowCardinality<
+                        vectorized::UInt32, AggData<vectorized::UInt32>, 65536>>(
+                        data_types);
+            } else {
+                // Single-column: UInt16, ARRAY_SIZE=1024
+                bool single_nullable = data_types[0]->is_nullable();
+                if (single_nullable) {
+                    method_variant.emplace<vectorized::MethodSingleNullableColumn<
+                            vectorized::MethodLowCardinality<vectorized::UInt16,
+                                                             AggDataNullable<vectorized::UInt16>>>>();
+                } else {
+                    method_variant.emplace<vectorized::MethodLowCardinality<
+                            vectorized::UInt16, AggData<vectorized::UInt16>>>();
+                }
+            }
             break;
         default:
             throw Exception(ErrorCode::INTERNAL_ERROR,

@@ -108,6 +108,7 @@ import org.apache.doris.nereids.trees.expressions.WindowFrame;
 import org.apache.doris.nereids.trees.expressions.functions.Udf;
 import org.apache.doris.nereids.trees.expressions.functions.agg.AggregateFunction;
 import org.apache.doris.nereids.trees.expressions.functions.agg.AggregateParam;
+import org.apache.doris.nereids.trees.expressions.functions.scalar.EncodeAsSmallInt;
 import org.apache.doris.nereids.trees.expressions.functions.scalar.GroupingScalarFunction;
 import org.apache.doris.nereids.trees.expressions.functions.scalar.UniqueFunction;
 import org.apache.doris.nereids.trees.plans.AbstractPlan;
@@ -1290,7 +1291,39 @@ public class PhysicalPlanTranslator extends DefaultPlanVisitor<PlanFragment, Pla
             setQueryCacheCandidate(aggregate, aggregationNode);
         }
 
+        // Set use_low_cardinality_agg when:
+        //   - This is first-phase (local) aggregation — INPUT_TO_BUFFER mode
+        //   - 1 or 2 GROUP BY keys, ALL are encode_as_smallint output
+        //   - Single key: values in [0, 1024) — ARRAY_SIZE=1024 (~8KB, fits in L1 cache)
+        //   - Two keys: packed by BE as col0|(col1<<8), values in [0, 65536) — ARRAY_SIZE=65536
+        //     encode_as_smallint on CHAR(1) produces values 0-255, packed max=255|(255<<8)=65535
+        //     (~512KB, fits in L2 cache)
+        //
+        // 3+ column limit: 3 columns would need ARRAY_SIZE=16M (~128MB) — defeats optimization.
+        // Non-encode_as_smallint columns: not guaranteed to be in [0,255) — unsafe.
+        // Both cases fall back to standard MethodKeysFixed path — correct, just not optimized.
+        if (aggregate.getAggregateParam().aggMode == AggMode.INPUT_TO_BUFFER
+                && !groupByExpressions.isEmpty()
+                && groupByExpressions.size() <= 2
+                && allKeysAreEncodeAsSmallInt(groupByExpressions)) {
+            aggregationNode.setUseLowCardinalityAgg(true);
+        }
+
         return inputPlanFragment;
+    }
+
+    /**
+     * Returns true when every GROUP BY expression is an encode_as_smallint() call.
+     * Used to activate MethodLowCardinality (O(1) direct array) on the BE.
+     * Only encode_as_smallint on CHAR(1) columns guarantees values in [0, 256).
+     */
+    private boolean allKeysAreEncodeAsSmallInt(List<Expression> groupByExpressions) {
+        for (Expression expr : groupByExpressions) {
+            if (!(expr instanceof EncodeAsSmallInt)) {
+                return false;
+            }
+        }
+        return true;
     }
 
     @Override

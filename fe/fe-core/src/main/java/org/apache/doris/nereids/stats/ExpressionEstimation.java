@@ -57,6 +57,7 @@ import org.apache.doris.nereids.trees.expressions.functions.scalar.DayOfYear;
 import org.apache.doris.nereids.trees.expressions.functions.scalar.DaysAdd;
 import org.apache.doris.nereids.trees.expressions.functions.scalar.DaysDiff;
 import org.apache.doris.nereids.trees.expressions.functions.scalar.DaysSub;
+import org.apache.doris.nereids.trees.expressions.functions.scalar.EncodeAsSmallInt;
 import org.apache.doris.nereids.trees.expressions.functions.scalar.FromDays;
 import org.apache.doris.nereids.trees.expressions.functions.scalar.Hour;
 import org.apache.doris.nereids.trees.expressions.functions.scalar.HoursDiff;
@@ -490,6 +491,22 @@ public class ExpressionEstimation extends ExpressionVisitor<ColumnStatistic, Sta
 
     @Override
     public ColumnStatistic visitBoundFunction(BoundFunction boundFunction, Statistics context) {
+        // Propagate NDV through encode_as_smallint (EncodeAsSmallInt).
+        // encode_as_smallint is a bijection on its input's distinct values — the output
+        // has the same NDV as the input. Without this, the optimizer sees UNKNOWN and
+        // estimates cardinality as rowCount × selectivity (e.g. 1.9B) instead of the
+        // real NDV (e.g. 3 for l_returnflag), which defeats CompressedMaterialize
+        // composite key optimization and produces poor cost estimates downstream.
+        if (boundFunction instanceof EncodeAsSmallInt) {
+            ColumnStatistic childStats = boundFunction.child(0).accept(this, context);
+            if (!childStats.isUnKnown()) {
+                return new ColumnStatisticBuilder(childStats)
+                        .setNdv(childStats.ndv)
+                        .setNumNulls(childStats.numNulls)
+                        .setIsUnknown(false)
+                        .build();
+            }
+        }
         return ColumnStatistic.UNKNOWN;
     }
 
