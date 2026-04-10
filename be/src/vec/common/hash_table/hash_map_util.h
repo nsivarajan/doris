@@ -34,10 +34,19 @@ inline std::vector<vectorized::DataTypePtr> get_data_types(
 
 template <typename DataVariants>
 Status init_hash_method(DataVariants* data, const std::vector<vectorized::DataTypePtr>& data_types,
-                        bool is_first_phase) {
+                        bool is_first_phase, bool use_low_cardinality_agg = false) {
     auto type = HashKeyType::EMPTY;
     try {
-        type = get_hash_key_type_with_phase(get_hash_key_type(data_types), !is_first_phase);
+        // When the FE explicitly marks this aggregation as low-cardinality
+        // (all GROUP BY keys are encode_as_smallint output, NDV < 1024),
+        // use direct array indexing instead of PHHashMap — O(1) access, no hashing.
+        // For phase2 (merge), downgrade to int16_key since after shuffle the
+        // direct-index property is maintained but we stay conservative.
+        if (use_low_cardinality_agg && is_first_phase) {
+            type = HashKeyType::low_cardinality;
+        } else {
+            type = get_hash_key_type_with_phase(get_hash_key_type(data_types), !is_first_phase);
+        }
         data->init(data_types, type);
     } catch (const Exception& e) {
         // method_variant may meet valueless_by_exception, so we set it to monostate

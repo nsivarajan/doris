@@ -1026,6 +1026,10 @@ struct TAggregationNode {
   8: optional bool is_first_phase
   9: optional bool is_colocate
   10: optional TSortInfo agg_sort_info_by_group_key
+  // When true, all GROUP BY keys come from encode_as_smallint/encode_as_int
+  // (CompressedMaterialize) and values are guaranteed to fit in [0, 1024).
+  // BE will use MethodLowCardinality (direct array indexing) instead of PHHashMap.
+  11: optional bool use_low_cardinality_agg
 }
 
 struct TRepeatNode {

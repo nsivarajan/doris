@@ -1577,18 +1577,6 @@ DEFINE_mBool(enable_hdfs_mem_limiter, "true");
 
 DEFINE_mInt16(topn_agg_limit_multiplier, "2");
 
-// When enabled, use low-cardinality array indexing (acc[key]) instead of hash table for
-// GROUP BY columns with NDV < 1024 (e.g. after CompressedMaterialize encode_as_smallint).
-// Eliminates hash computation and collision handling, ~50× faster for low-NDV columns.
-// Only activates for non-nullable SMALLINT/INT keys. Default false (pending validation).
-DEFINE_Bool(enable_low_cardinality_agg, "false");
-
-// When enabled, accumulate DECIMAL128 sums using two int64_t fields (sum_high, sum_low)
-// instead of a single __int128. Allows AVX2 PADDQ auto-vectorization (~3-4x faster).
-// Only applies when input type is DECIMAL32 or DECIMAL64 (values fit in int64_t).
-// Default false until unit tests and correctness validation are complete.
-DEFINE_Bool(enable_decimal128_split_accumulator, "false");
-
 // Tablet meta size limit after serialization, 1.5GB
 DEFINE_mInt64(tablet_meta_serialize_size_limit, "1610612736");
 // Protobuf supports a maximum of 2GB, so the size of the tablet meta after serialization must be less than 2GB

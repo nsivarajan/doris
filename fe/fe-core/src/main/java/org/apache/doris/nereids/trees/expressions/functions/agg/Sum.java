@@ -23,7 +23,6 @@ import org.apache.doris.nereids.trees.expressions.NeedSessionVarGuard;
 import org.apache.doris.nereids.trees.expressions.functions.ComputePrecisionForSum;
 import org.apache.doris.nereids.trees.expressions.functions.ExplicitlyCastableSignature;
 import org.apache.doris.nereids.trees.expressions.functions.Function;
-import org.apache.doris.nereids.trees.expressions.functions.FunctionParams;
 import org.apache.doris.nereids.trees.expressions.functions.window.SupportWindowAnalytic;
 import org.apache.doris.nereids.trees.expressions.shape.UnaryExpression;
 import org.apache.doris.nereids.trees.expressions.visitor.ExpressionVisitor;

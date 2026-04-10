@@ -205,8 +205,10 @@ protected:
     bool _needs_finalize;
     bool _is_merge;
     const bool _is_first_phase;
-
-    size_t _align_aggregate_states = 1;
+    const bool _is_colocate;
+    // Set by FE when all GROUP BY keys are encode_as_smallint output (CompressedMaterialize).
+    // Activates MethodLowCardinality: O(1) direct array indexing instead of PHHashMap.
+    const bool _use_low_cardinality_agg;
     /// The offset to the n-th aggregate function in a row of aggregate functions.
     vectorized::Sizes _offsets_of_aggregate_states;
     /// The total size of the row from the aggregate functions.
@@ -224,7 +226,6 @@ protected:
 
     bool _have_conjuncts;
     std::vector<TExpr> _partition_exprs;
-    const bool _is_colocate;
     RowDescriptor _agg_fn_output_row_descriptor;
 };
 

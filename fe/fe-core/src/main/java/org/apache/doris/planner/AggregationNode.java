@@ -64,6 +64,8 @@ public class AggregationNode extends PlanNode {
 
     private boolean queryCacheCandidate;
 
+    private boolean useLowCardinalityAgg;
+
     /**
      * Create an agg node that is not an intermediate node.
      * isIntermediate is true if it is a slave node in a 2-part agg plan.
@@ -157,6 +159,9 @@ public class AggregationNode extends PlanNode {
         List<Expr> groupingExprs = aggInfo.getGroupingExprs();
         if (groupingExprs != null) {
             msg.agg_node.setGroupingExprs(Expr.treesToThrift(groupingExprs));
+        }
+        if (useLowCardinalityAgg) {
+            msg.agg_node.setUseLowCardinalityAgg(true);
         }
     }
 
@@ -281,5 +286,9 @@ public class AggregationNode extends PlanNode {
 
     public void setQueryCacheCandidate(boolean queryCacheCandidate) {
         this.queryCacheCandidate = queryCacheCandidate;
+    }
+
+    public void setUseLowCardinalityAgg(boolean useLowCardinalityAgg) {
+        this.useLowCardinalityAgg = useLowCardinalityAgg;
     }
 }

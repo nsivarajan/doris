@@ -516,6 +516,7 @@ struct MethodLowCardinality : public MethodBase<TData> {
 };
 
 
+template <typename FieldType, typename TData>
 struct MethodOneNumberDirect : public MethodOneNumber<FieldType, TData> {
     using Base = MethodOneNumber<FieldType, TData>;
     using Base::init_iterator;

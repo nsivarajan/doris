@@ -31,10 +31,8 @@ import org.apache.doris.nereids.util.PlanConstructor;
 import org.apache.doris.qe.ConnectContext;
 
 import com.google.common.collect.ImmutableList;
+import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
-
-import static org.junit.jupiter.api.Assertions.assertFalse;
-import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class AdaptiveDecimalAccumulatorTest {
 
@@ -51,7 +49,7 @@ class AdaptiveDecimalAccumulatorTest {
     @Test
     void ruleDisabledByDefault() {
         ConnectContext ctx = MemoTestUtils.createConnectContext();
-        assertFalse(ctx.getSessionVariable().enableAdaptiveDecimalAccumulator,
+        Assertions.assertFalse(ctx.getSessionVariable().enableAdaptiveDecimalAccumulator,
                 "enableAdaptiveDecimalAccumulator must default to false");
     }
 
@@ -80,9 +78,9 @@ class AdaptiveDecimalAccumulatorTest {
         LogicalAggregate<?> resultAgg = (LogicalAggregate<?>) result;
         NamedExpression out = resultAgg.getOutputExpressions().get(0);
         Sum sum = (Sum) ((Alias) out).child();
-        assertTrue(sum.getDataType() instanceof DecimalV3Type,
+        Assertions.assertTrue(sum.getDataType() instanceof DecimalV3Type,
                 "output must still be DecimalV3Type");
-        assertTrue(((DecimalV3Type) sum.getDataType()).getPrecision()
+        Assertions.assertTrue(((DecimalV3Type) sum.getDataType()).getPrecision()
                         > DecimalV3Type.MAX_DECIMAL64_PRECISION,
                 "precision must NOT be narrowed when stats are unavailable");
     }
@@ -113,8 +111,8 @@ class AdaptiveDecimalAccumulatorTest {
         LogicalAggregate<?> resultAgg = (LogicalAggregate<?>) result;
         NamedExpression out = resultAgg.getOutputExpressions().get(0);
         Sum sum = (Sum) ((Alias) out).child();
-        assertTrue(sum.isDistinct(), "DISTINCT must be preserved after rule");
-        assertTrue(((DecimalV3Type) sum.getDataType()).getPrecision()
+        Assertions.assertTrue(sum.isDistinct(), "DISTINCT must be preserved after rule");
+        Assertions.assertTrue(((DecimalV3Type) sum.getDataType()).getPrecision()
                         > DecimalV3Type.MAX_DECIMAL64_PRECISION,
                 "DISTINCT sum precision must NOT be narrowed");
     }

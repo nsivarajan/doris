@@ -108,6 +108,7 @@ import org.apache.doris.nereids.trees.expressions.WindowFrame;
 import org.apache.doris.nereids.trees.expressions.functions.Udf;
 import org.apache.doris.nereids.trees.expressions.functions.agg.AggregateFunction;
 import org.apache.doris.nereids.trees.expressions.functions.agg.AggregateParam;
+import org.apache.doris.nereids.trees.expressions.functions.scalar.EncodeAsSmallInt;
 import org.apache.doris.nereids.trees.expressions.functions.scalar.GroupingScalarFunction;
 import org.apache.doris.nereids.trees.expressions.functions.scalar.UniqueFunction;
 import org.apache.doris.nereids.trees.plans.AbstractPlan;
@@ -1288,6 +1289,16 @@ public class PhysicalPlanTranslator extends DefaultPlanVisitor<PlanFragment, Pla
 
         if (ConnectContext.get().getSessionVariable().getEnableQueryCache()) {
             setQueryCacheCandidate(aggregate, aggregationNode);
+        }
+
+        // Set use_low_cardinality_agg when all GROUP BY keys are encode_as_smallint output.
+        // This tells the BE to use MethodLowCardinality (direct array indexing) instead of
+        // PHHashMap. Only set for the local (first-phase) aggregation — phase2 (merge) uses
+        // standard int16_key path after network shuffle.
+        if (aggregate.getAggregateParam().aggMode == AggMode.INPUT_TO_BUFFER
+                && !groupByExpressions.isEmpty()
+                && allKeysAreEncodeAsSmallInt(groupByExpressions)) {
+            aggregationNode.setUseLowCardinalityAgg(true);
         }
 
         return inputPlanFragment;
@@ -3428,5 +3439,19 @@ public class PhysicalPlanTranslator extends DefaultPlanVisitor<PlanFragment, Pla
             }
         }
         return false;
+    }
+
+    /**
+     * Returns true when every GROUP BY expression is an encode_as_smallint() call.
+     * Used to activate MethodLowCardinality (O(1) direct array lookup) on the BE.
+     * Only encode_as_smallint output is guaranteed to be in [0, NDV) with NDV < 1024.
+     */
+    private boolean allKeysAreEncodeAsSmallInt(List<Expression> groupByExpressions) {
+        for (Expression expr : groupByExpressions) {
+            if (!(expr instanceof EncodeAsSmallInt)) {
+                return false;
+            }
+        }
+        return true;
     }
 }

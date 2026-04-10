@@ -490,6 +490,21 @@ public class ExpressionEstimation extends ExpressionVisitor<ColumnStatistic, Sta
 
     @Override
     public ColumnStatistic visitBoundFunction(BoundFunction boundFunction, Statistics context) {
+        // Propagate NDV through encode_as_smallint / encode_as_int (EncodeString).
+        // Without this, the optimizer sees cardinality = rowCount instead of the real
+        // NDV of the encoded column, causing it to build a 1.9B-slot hash table for
+        // a GROUP BY with only 3 distinct values.
+        if (boundFunction instanceof org.apache.doris.nereids.trees.expressions.functions
+                .scalar.EncodeString) {
+            ColumnStatistic childStats = boundFunction.child(0).accept(this, context);
+            if (!childStats.isUnKnown()) {
+                return new ColumnStatisticBuilder(childStats)
+                        .setNdv(childStats.ndv)
+                        .setNumNulls(childStats.numNulls)
+                        .setIsUnknown(false)
+                        .build();
+            }
+        }
         return ColumnStatistic.UNKNOWN;
     }
 
