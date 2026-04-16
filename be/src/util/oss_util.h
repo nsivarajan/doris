@@ -27,7 +27,6 @@
 #include <string>
 
 #include "common/status.h"
-#include "vec/common/string_ref.h"
 #include "cpp/oss_common.h"
 #include "util/s3_util.h"
 
