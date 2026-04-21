@@ -146,10 +146,13 @@ Status OSSFileWriter::_build_upload_buffer() {
             .set_is_cancelled([this]() { return _failed.load(); });
 
     if (cache_builder() != nullptr) {
+        int64_t tablet_id = get_tablet_id(_path.native()).value_or(0);
         builder.set_allocate_file_blocks_holder(
                 [builder = *cache_builder(),
-                 offset = _bytes_appended]() -> FileBlocksHolderPtr {
-                    return builder.allocate_cache_holder(offset, config::s3_write_buffer_size);
+                 offset = _bytes_appended,
+                 tablet_id]() -> FileBlocksHolderPtr {
+                    return builder.allocate_cache_holder(offset, config::s3_write_buffer_size,
+                                                         tablet_id);
                 });
     }
 

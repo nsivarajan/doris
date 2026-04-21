@@ -116,8 +116,8 @@ if(BUILD_OSS STREQUAL "ON")
     add_thirdparty(alibabacloud_sts20150401)
     # OSS SDK
     add_thirdparty(alibabacloud-oss-cpp-sdk LIB64)
-    add_thirdparty(apr-1)
-    add_thirdparty(aprutil-1)
+    add_thirdparty(apr)
+    add_thirdparty(aprutil)
 endif()
 # end oss libs
 # begin azure libs

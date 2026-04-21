@@ -744,9 +744,7 @@ if [[ " ${TP_ARCHIVES[*]} " =~ " TEA_CPP " ]]; then
     cd "${TP_SOURCE_DIR}/${TEA_CPP_SOURCE}"
     if [[ ! -f "patched_mark_doris_oss_fix" ]]; then
         echo "Applying OSS SSL/error fix to tea-cpp..."
-        patch -p1 < "${TP_PATCH_DIR}/tea-cpp-core-hpp.patch"
-        patch -p1 < "${TP_PATCH_DIR}/tea-cpp-core-cpp.patch"
-        patch -p1 < "${TP_PATCH_DIR}/tea-cpp-mcurl-cpp.patch"
+        patch -p1 < "${TP_PATCH_DIR}/tea-cpp-doris-oss-fix.patch"
         touch "patched_mark_doris_oss_fix"
     fi
     cd -
