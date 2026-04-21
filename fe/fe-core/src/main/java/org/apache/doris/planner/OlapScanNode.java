@@ -210,6 +210,11 @@ public class OlapScanNode extends ScanNode {
     private boolean isTopnLazyMaterialize = false;
     private List<Column> topnLazyMaterializeOutputColumns = new ArrayList<>();
 
+    // True when this scan feeds a hash-join build side (produces runtime filters).
+    // Set by PhysicalPlanTranslator; used in cloud mode by BE to route the scan to
+    // a priority thread pool so RF delivery is not delayed by probe-side saturation.
+    private boolean isBuildSideScan = false;
+
     private Column globalRowIdColumn;
 
     // Constructs node to scan given data files of table 'tbl'.
@@ -1230,6 +1235,9 @@ public class OlapScanNode extends ScanNode {
         }
         msg.olap_scan_node.setTableName(tableName);
         msg.olap_scan_node.setEnableUniqueKeyMergeOnWrite(olapTable.getEnableUniqueKeyMergeOnWrite());
+        if (isBuildSideScan) {
+            msg.olap_scan_node.setIsBuildSideScan(true);
+        }
 
         msg.setPushDownAggTypeOpt(pushDownAggNoGroupingOp);
 
@@ -1426,6 +1434,10 @@ public class OlapScanNode extends ScanNode {
 
     public void setIsTopnLazyMaterialize(boolean isTopnLazyMaterialize) {
         this.isTopnLazyMaterialize = isTopnLazyMaterialize;
+    }
+
+    public void setIsBuildSideScan(boolean isBuildSideScan) {
+        this.isBuildSideScan = isBuildSideScan;
     }
 
     public void addTopnLazyMaterializeOutputColumns(Column column) {

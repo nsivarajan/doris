@@ -40,6 +40,7 @@
 #include "exprs/vslot_ref.h"
 #include "io/cache/block_file_cache_profile.h"
 #include "runtime/query_cache/query_cache.h"
+#include "runtime/query_context.h"
 #include "runtime/runtime_profile.h"
 #include "runtime/runtime_state.h"
 #include "service/backend_options.h"
@@ -50,6 +51,27 @@
 
 namespace doris {
 #include "common/compile_check_begin.h"
+
+ScannerScheduler* OlapScanLocalState::scan_scheduler(RuntimeState* state) const {
+    if (!config::is_cloud_mode()) {
+        return state->get_query_ctx()->get_scan_scheduler();
+    }
+    auto* ctx = state->get_query_ctx();
+    // When priority routing is enabled, build-side scans (marked by FE via
+    // is_build_side_scan) go to the local pool which is otherwise idle in cloud
+    // mode — giving them a dedicated priority lane uncontested by probe-side scans.
+    if (config::enable_cloud_build_side_scan_priority) {
+        const auto& node = _parent->cast<OlapScanOperatorX>()._olap_scan_node;
+        if (node.__isset.is_build_side_scan && node.is_build_side_scan) {
+            return ctx->get_scan_scheduler();  // local pool — priority lane
+        }
+    }
+    // All other cloud OLAP scans (probe-side / no-join queries) → remote pool.
+    if (ScannerScheduler* remote = ctx->get_remote_scan_scheduler()) {
+        return remote;
+    }
+    return ctx->get_scan_scheduler();
+}
 
 Status OlapScanLocalState::init(RuntimeState* state, LocalStateInfo& info) {
     const TOlapScanNode& olap_scan_node = _parent->cast<OlapScanOperatorX>()._olap_scan_node;

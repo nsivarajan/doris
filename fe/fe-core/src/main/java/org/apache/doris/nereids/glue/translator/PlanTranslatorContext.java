@@ -76,6 +76,11 @@ public class PlanTranslatorContext {
     private final RuntimeFilterTranslator translator;
 
     private final TopnFilterContext topnFilterContext;
+
+    // Tracks nesting depth while translating hash-join build-side subtrees.
+    // Incremented before visiting child(1) (build side) of PhysicalHashJoin,
+    // decremented after. Any OlapScan found while depth > 0 is a build-side scan.
+    private int hashJoinBuildSideDepth = 0;
     /**
      * index from Nereids' slot to legacy slot.
      */
@@ -236,6 +241,18 @@ public class PlanTranslatorContext {
 
     public TopnFilterContext getTopnFilterContext() {
         return topnFilterContext;
+    }
+
+    public void enterHashJoinBuildSide() {
+        hashJoinBuildSideDepth++;
+    }
+
+    public void exitHashJoinBuildSide() {
+        hashJoinBuildSideDepth--;
+    }
+
+    public boolean isInHashJoinBuildSide() {
+        return hashJoinBuildSideDepth > 0;
     }
 
     public PlanFragmentId nextFragmentId() {

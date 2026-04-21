@@ -62,6 +62,10 @@ public:
 
     Status open(RuntimeState* state) override;
 
+    // In cloud mode, route OLAP scans to the remote pool (doris_max_remote_scanner_thread_pool_thread_num)
+    // to avoid saturating the local pool (48 threads) which delays runtime-filter delivery.
+    [[nodiscard]] ScannerScheduler* scan_scheduler(RuntimeState* state) const override;
+
 private:
     friend class OlapScanner;
 

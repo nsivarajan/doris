@@ -966,6 +966,9 @@ public class PhysicalPlanTranslator extends DefaultPlanVisitor<PlanFragment, Pla
                 context.getScanContext());
         olapScanNode.setNereidsId(olapScan.getId());
         context.getNereidsIdToPlanNodeIdMap().put(olapScan.getId(), olapScanNode.getId());
+        if (context.isInHashJoinBuildSide()) {
+            olapScanNode.setIsBuildSideScan(true);
+        }
 
         // translate score topn info
         if (!olapScan.getScoreOrderKeys().isEmpty()) {
@@ -1698,7 +1701,15 @@ public class PhysicalPlanTranslator extends DefaultPlanVisitor<PlanFragment, Pla
         PhysicalHashJoin<PhysicalPlan, PhysicalPlan> physicalHashJoin
                 = (PhysicalHashJoin<PhysicalPlan, PhysicalPlan>) hashJoin;
         // NOTICE: We must visit from right to left, to ensure the last fragment is root fragment
-        PlanFragment rightFragment = hashJoin.child(1).accept(this, context);
+        // child(1) is the BUILD side — mark all OlapScan nodes within it as build-side
+        // so BE can route them to a priority thread pool for timely RF delivery.
+        context.enterHashJoinBuildSide();
+        PlanFragment rightFragment;
+        try {
+            rightFragment = hashJoin.child(1).accept(this, context);
+        } finally {
+            context.exitHashJoinBuildSide();
+        }
         PlanFragment leftFragment = hashJoin.child(0).accept(this, context);
         List<List<Expr>> distributeExprLists = getDistributeExprs(physicalHashJoin.left(), physicalHashJoin.right());
 

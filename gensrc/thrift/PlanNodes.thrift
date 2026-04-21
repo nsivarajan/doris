@@ -906,6 +906,10 @@ struct TOlapScanNode {
   21: optional TSortInfo ann_sort_info
   22: optional i64 ann_sort_limit
   23: optional TScoreRangeInfo score_range_info
+  // True when this scan feeds a hash-join build side and produces runtime filters.
+  // Used in cloud/decoupled mode to route it to a dedicated priority thread pool
+  // so runtime-filter delivery is never delayed by probe-side scan saturation.
+  24: optional bool is_build_side_scan
 }
 
 struct TEqJoinCondition {

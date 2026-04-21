@@ -1215,6 +1215,10 @@ DECLARE_mInt32(file_cache_evict_in_advance_interval_ms);
 DECLARE_mInt64(file_cache_evict_in_advance_batch_bytes);
 DECLARE_mInt64(file_cache_evict_in_advance_recycle_keys_num_threshold);
 DECLARE_mBool(enable_read_cache_file_directly);
+// In cloud/decoupled mode: route build-side scans (is_build_side_scan=true, set by FE)
+// to the local scan pool as a priority lane so RF delivery is never delayed by
+// probe-side (fact-table) scan saturation. Default false; enable after testing.
+DECLARE_mBool(enable_cloud_build_side_scan_priority);
 DECLARE_Bool(file_cache_enable_evict_from_other_queue_by_size);
 // If true, evict the ttl cache using LRU when full.
 // Otherwise, only expiration can evict ttl and new data won't add to cache when full.

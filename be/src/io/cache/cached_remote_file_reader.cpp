@@ -133,6 +133,10 @@ void CachedRemoteFileReader::_insert_file_reader(FileBlockSPtr file_block) {
 CachedRemoteFileReader::~CachedRemoteFileReader() {
     for (auto& it : _cache_file_readers) {
         it.second->_owned_by_cached_reader = false;
+        // Batch LRU update on unpin; keeps blocks warm for the next query.
+        if (_cache) {
+            _cache->add_need_update_lru_block(it.second);
+        }
     }
     static_cast<void>(close());
 }
@@ -364,7 +368,7 @@ Status CachedRemoteFileReader::read_at_impl(size_t offset, Slice result, size_t*
                         break;
                     }
                 }
-                _cache->add_need_update_lru_block(iter->second);
+                // LRU updated at construction and destruction; blocks are evictable under cache pressure.
                 need_read_size -= reserve_bytes;
                 cur_offset += reserve_bytes;
                 already_read += reserve_bytes;
