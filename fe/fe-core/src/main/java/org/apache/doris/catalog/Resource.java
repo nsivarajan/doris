@@ -63,7 +63,8 @@ public abstract class Resource implements Writable, GsonPostProcessable {
         HMS,
         ES,
         AZURE,
-        AI;
+        AI,
+        OSS;
 
         public static ResourceType fromString(String resourceType) {
             if ("jfs".equalsIgnoreCase(resourceType) || "juicefs".equalsIgnoreCase(resourceType)) {
@@ -191,6 +192,9 @@ public abstract class Resource implements Writable, GsonPostProcessable {
                 break;
             case AZURE:
                 resource = new AzureResource(name);
+                break;
+            case OSS:
+                resource = new OSSResource(name);
                 break;
             case JDBC:
                 resource = new JdbcResource(name);
