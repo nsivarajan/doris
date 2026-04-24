@@ -93,6 +93,7 @@ import org.apache.doris.catalog.MTMV;
 import org.apache.doris.catalog.MapType;
 import org.apache.doris.catalog.MysqlDBTable;
 import org.apache.doris.catalog.MysqlTable;
+import org.apache.doris.catalog.OSSResource;
 import org.apache.doris.catalog.OdbcCatalogResource;
 import org.apache.doris.catalog.OdbcTable;
 import org.apache.doris.catalog.OlapTable;
@@ -365,6 +366,7 @@ public class GsonUtils {
             .registerSubtype(SparkResource.class, SparkResource.class.getSimpleName())
             .registerSubtype(OdbcCatalogResource.class, OdbcCatalogResource.class.getSimpleName())
             .registerSubtype(S3Resource.class, S3Resource.class.getSimpleName())
+            .registerSubtype(OSSResource.class, OSSResource.class.getSimpleName())
             .registerSubtype(JdbcResource.class, JdbcResource.class.getSimpleName())
             .registerSubtype(HdfsResource.class, HdfsResource.class.getSimpleName())
             .registerSubtype(HMSResource.class, HMSResource.class.getSimpleName())

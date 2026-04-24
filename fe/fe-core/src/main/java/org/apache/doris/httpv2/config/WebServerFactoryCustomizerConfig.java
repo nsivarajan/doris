@@ -69,6 +69,19 @@ public class WebServerFactoryCustomizerConfig implements WebServerFactoryCustomi
                 }
             }
         });
+
+        ((JettyServletWebServerFactory) factory).addServerCustomizers(server -> {
+            WebAppContext context = server.getDescendant(WebAppContext.class);
+            if (context != null) {
+                try {
+                    JettyWebSocketServletContainerInitializer.configure(context, null);
+                } catch (Exception e) {
+                    LOG.error("Failed to initialize WebSocket support", e);
+                    throw new RuntimeException("Failed to initialize WebSocket support", e);
+                }
+            }
+        });
+
         if (Config.enable_https) {
             ((JettyServletWebServerFactory) factory).setConfigurations(
                     Collections.singletonList(new HttpToHttpsJettyConfig())
