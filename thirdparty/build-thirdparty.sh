@@ -1926,6 +1926,8 @@ build_ali_sdk() {
         echo "Skip build Alibaba Cloud SDK (old version)"
         return
     fi
+    build_jsoncpp
+    build_libuuid
 
     check_if_source_exist "${ALI_SDK_SOURCE}"
     cd "${TP_SOURCE_DIR}/${ALI_SDK_SOURCE}"
@@ -1938,11 +1940,13 @@ build_ali_sdk() {
         -DCMAKE_C_COMPILER="${CC:-clang}" \
         -DCMAKE_CXX_COMPILER="${CXX:-clang++}" \
         -DCMAKE_INSTALL_PREFIX="${TP_INSTALL_DIR}" \
-        -DCMAKE_BUILD_TYPE="${BUILD_TYPE:-Release}" \
+        -DBUILD_PRODUCT=core \
+	    -DCMAKE_BUILD_TYPE="${BUILD_TYPE:-Release}" \
         -DBUILD_SHARED_LIBS=OFF \
         -DBUILD_SAMPLE=OFF \
         -DBUILD_TESTS=OFF \
         -DCMAKE_PREFIX_PATH="${TP_INSTALL_DIR}" \
+	    -DTP_INSTALL_DIR="${TP_INSTALL_DIR}" \
         -DCMAKE_CXX_FLAGS="-fvisibility=hidden -D_GLIBCXX_USE_CXX11_ABI=1" \
         ..
 
@@ -1970,12 +1974,14 @@ build_oss() {
         "${CMAKE_CMD}" -G "${GENERATOR}" \
             -DCMAKE_C_COMPILER="${CC:-clang}" \
             -DCMAKE_CXX_COMPILER="${CXX:-clang++}" \
-            -DCMAKE_INSTALL_PREFIX="${TP_INSTALL_DIR}" \
+            -DBUILD_PRODUCT=core \
+	        -DCMAKE_INSTALL_PREFIX="${TP_INSTALL_DIR}" \
             -DCMAKE_BUILD_TYPE="${BUILD_TYPE:-Release}" \
             -DBUILD_SHARED_LIBS=OFF \
             -DBUILD_SAMPLE=OFF \
             -DBUILD_TESTS=OFF \
             -DCMAKE_PREFIX_PATH="${TP_INSTALL_DIR}" \
+	        -DTP_INSTALL_DIR="${TP_INSTALL_DIR}" \
             -DCMAKE_CXX_FLAGS="-fvisibility=hidden -D_GLIBCXX_USE_CXX11_ABI=1" \
             ..
 
@@ -2000,8 +2006,10 @@ build_tea_cpp() {
 
     "${CMAKE_CMD}" -G "${GENERATOR}" \
         -DCMAKE_BUILD_TYPE="${BUILD_TYPE:-Release}" \
-        -DCMAKE_INSTALL_PREFIX="${TP_INSTALL_DIR}" \
+        -DBUILD_PRODUCT=core \
+	    -DCMAKE_INSTALL_PREFIX="${TP_INSTALL_DIR}" \
         -DCMAKE_PREFIX_PATH="${TP_INSTALL_DIR}" \
+	    -DTP_INSTALL_DIR="${TP_INSTALL_DIR}" \
         -DBUILD_SHARED_LIBS=OFF \
         -DOPENSSL_ROOT_DIR="${TP_INSTALL_DIR}" \
         -DCURL_LIBRARY="${TP_LIB_DIR}/libcurl.a" \
@@ -2030,8 +2038,10 @@ build_credentials_cpp() {
 
     "${CMAKE_CMD}" -G "${GENERATOR}" \
         -DCMAKE_BUILD_TYPE="${BUILD_TYPE:-Release}" \
-        -DCMAKE_INSTALL_PREFIX="${TP_INSTALL_DIR}" \
+        -DBUILD_PRODUCT=core \
+	    -DCMAKE_INSTALL_PREFIX="${TP_INSTALL_DIR}" \
         -DCMAKE_PREFIX_PATH="${TP_INSTALL_DIR}" \
+	    -DTP_INSTALL_DIR="${TP_INSTALL_DIR}" \
         -DBUILD_SHARED_LIBS=OFF \
         -DOPENSSL_ROOT_DIR="${TP_INSTALL_DIR}" \
         -DCURL_LIBRARY="${TP_LIB_DIR}/libcurl.a" \
@@ -2060,8 +2070,10 @@ build_openapi_v2() {
 
     "${CMAKE_CMD}" -G "${GENERATOR}" \
         -DCMAKE_BUILD_TYPE="${BUILD_TYPE:-Release}" \
-        -DCMAKE_INSTALL_PREFIX="${TP_INSTALL_DIR}" \
+        -DBUILD_PRODUCT=core \
+	    -DCMAKE_INSTALL_PREFIX="${TP_INSTALL_DIR}" \
         -DCMAKE_PREFIX_PATH="${TP_INSTALL_DIR}" \
+	    -DTP_INSTALL_DIR="${TP_INSTALL_DIR}" \
         -DBUILD_SHARED_LIBS=OFF \
         -DOPENSSL_ROOT_DIR="${TP_INSTALL_DIR}" \
         -DCURL_LIBRARY="${TP_LIB_DIR}/libcurl.a" \
@@ -2091,7 +2103,9 @@ build_sts_20150401() {
     "${CMAKE_CMD}" -G "${GENERATOR}" \
         -DCMAKE_BUILD_TYPE="${BUILD_TYPE:-Release}" \
         -DCMAKE_INSTALL_PREFIX="${TP_INSTALL_DIR}" \
-        -DCMAKE_PREFIX_PATH="${TP_INSTALL_DIR}" \
+        -DBUILD_PRODUCT=core \
+	    -DCMAKE_PREFIX_PATH="${TP_INSTALL_DIR}" \
+	    -DTP_INSTALL_DIR="${TP_INSTALL_DIR}" \
         -DBUILD_SHARED_LIBS=OFF \
         -DOPENSSL_ROOT_DIR="${TP_INSTALL_DIR}" \
         -DCURL_LIBRARY="${TP_LIB_DIR}/libcurl.a" \
