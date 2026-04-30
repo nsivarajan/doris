@@ -33,6 +33,7 @@ import org.apache.doris.analysis.SlotDescriptor;
 import org.apache.doris.analysis.SlotId;
 import org.apache.doris.analysis.SlotRef;
 import org.apache.doris.analysis.SortInfo;
+import org.apache.doris.analysis.StatementBase;
 import org.apache.doris.analysis.TableSample;
 import org.apache.doris.analysis.TupleDescriptor;
 import org.apache.doris.analysis.TupleId;
@@ -238,6 +239,7 @@ import org.apache.doris.planner.UnionNode;
 import org.apache.doris.qe.ConnectContext;
 import org.apache.doris.qe.SessionVariable;
 import org.apache.doris.statistics.StatisticConstants;
+import org.apache.doris.statistics.query.StatsDelta;
 import org.apache.doris.tablefunction.TableValuedFunctionIf;
 import org.apache.doris.thrift.TFetchOption;
 import org.apache.doris.thrift.TPartitionType;
@@ -1054,6 +1056,33 @@ public class PhysicalPlanTranslator extends DefaultPlanVisitor<PlanFragment, Pla
         // create scan range
         Utils.execWithUncheckedException(olapScanNode::init);
         context.addScanNode(olapScanNode, olapScan);
+
+        // Record query stats so SHOW QUERY STATS returns accurate column access counts.
+        // Gated by enable_query_hit_stats (default false) — same as original OriginalPlanner
+        // implementation that was lost when the old planner was deleted (PR #51056).
+        // Skip EXPLAIN queries — they don't execute so should not count toward stats.
+        // Wrapped in try-catch so stats failure never affects query execution.
+        if (Config.enable_query_hit_stats) {
+            StatementBase stmt = context.getStatementContext().getParsedStatement();
+            boolean isExplain = stmt != null && stmt.isExplain();
+            if (!isExplain) {
+                try {
+                    long catalogId = olapTable.getCatalogId();
+                    long databaseId = olapScan.getDatabase().getId();
+                    long tableId = olapTable.getId();
+                    long indexId = olapScan.getSelectedIndexId();
+                    StatsDelta delta = new StatsDelta(catalogId, databaseId, tableId, indexId);
+                    for (SlotDescriptor slotDesc : slotDescriptors) {
+                        if (slotDesc.getColumn() != null && !slotDesc.getColumn().getName().isEmpty()) {
+                            delta.addQueryStats(slotDesc.getColumn().getName());
+                        }
+                    }
+                    Env.getCurrentEnv().getQueryStats().addStats(delta);
+                } catch (Exception e) {
+                    LOG.warn("Failed to update query stats for table: {}", olapTable.getName(), e);
+                }
+            }
+        }
 
         translateRuntimeFilter(olapScan, olapScanNode, context);
 
