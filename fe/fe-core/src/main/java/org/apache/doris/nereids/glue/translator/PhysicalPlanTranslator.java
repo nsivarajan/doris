@@ -1057,11 +1057,8 @@ public class PhysicalPlanTranslator extends DefaultPlanVisitor<PlanFragment, Pla
         Utils.execWithUncheckedException(olapScanNode::init);
         context.addScanNode(olapScanNode, olapScan);
 
-        // Record query stats so SHOW QUERY STATS returns accurate column access counts.
-        // Gated by enable_query_hit_stats (default false) — same as original OriginalPlanner
-        // implementation that was lost when the old planner was deleted (PR #51056).
-        // Skip EXPLAIN queries — they don't execute so should not count toward stats.
-        // Wrapped in try-catch so stats failure never affects query execution.
+        // Record queryHit stats for projected SELECT columns (enable_query_hit_stats gate, skips EXPLAIN).
+        // TODO: record filterHit for predicate columns via olapScan.getConjuncts() (phase 2).
         if (Config.enable_query_hit_stats) {
             StatementBase stmt = context.getStatementContext().getParsedStatement();
             boolean isExplain = stmt != null && stmt.isExplain();
@@ -1072,9 +1069,13 @@ public class PhysicalPlanTranslator extends DefaultPlanVisitor<PlanFragment, Pla
                     long tableId = olapTable.getId();
                     long indexId = olapScan.getSelectedIndexId();
                     StatsDelta delta = new StatsDelta(catalogId, databaseId, tableId, indexId);
-                    for (SlotDescriptor slotDesc : slotDescriptors) {
-                        if (slotDesc.getColumn() != null && !slotDesc.getColumn().getName().isEmpty()) {
-                            delta.addQueryStats(slotDesc.getColumn().getName());
+                    for (Slot slot : olapScan.getOutput()) {
+                        if (slot instanceof SlotReference) {
+                            ((SlotReference) slot).getOriginalColumn().ifPresent(col -> {
+                                if (!col.getName().isEmpty()) {
+                                    delta.addQueryStats(col.getName());
+                                }
+                            });
                         }
                     }
                     Env.getCurrentEnv().getQueryStats().addStats(delta);
