@@ -33,7 +33,6 @@ import org.apache.doris.analysis.SlotDescriptor;
 import org.apache.doris.analysis.SlotId;
 import org.apache.doris.analysis.SlotRef;
 import org.apache.doris.analysis.SortInfo;
-import org.apache.doris.analysis.StatementBase;
 import org.apache.doris.analysis.TableSample;
 import org.apache.doris.analysis.TupleDescriptor;
 import org.apache.doris.analysis.TupleId;
@@ -239,7 +238,6 @@ import org.apache.doris.planner.UnionNode;
 import org.apache.doris.qe.ConnectContext;
 import org.apache.doris.qe.SessionVariable;
 import org.apache.doris.statistics.StatisticConstants;
-import org.apache.doris.statistics.query.StatsDelta;
 import org.apache.doris.tablefunction.TableValuedFunctionIf;
 import org.apache.doris.thrift.TFetchOption;
 import org.apache.doris.thrift.TPartitionType;
@@ -1057,33 +1055,6 @@ public class PhysicalPlanTranslator extends DefaultPlanVisitor<PlanFragment, Pla
         Utils.execWithUncheckedException(olapScanNode::init);
         context.addScanNode(olapScanNode, olapScan);
 
-        // Record queryHit stats for projected SELECT columns (enable_query_hit_stats gate, skips EXPLAIN).
-        if (Config.enable_query_hit_stats) {
-            StatementBase stmt = context.getStatementContext().getParsedStatement();
-            boolean isExplain = stmt != null && stmt.isExplain();
-            if (!isExplain) {
-                try {
-                    long catalogId = olapTable.getCatalogId();
-                    long databaseId = olapScan.getDatabase().getId();
-                    long tableId = olapTable.getId();
-                    long indexId = olapScan.getSelectedIndexId();
-                    StatsDelta delta = new StatsDelta(catalogId, databaseId, tableId, indexId);
-                    for (Slot slot : olapScan.getOutput()) {
-                        if (slot instanceof SlotReference) {
-                            ((SlotReference) slot).getOriginalColumn().ifPresent(col -> {
-                                if (!col.getName().isEmpty()) {
-                                    delta.addQueryStats(col.getName());
-                                }
-                            });
-                        }
-                    }
-                    Env.getCurrentEnv().getQueryStats().addStats(delta);
-                } catch (Exception e) {
-                    LOG.warn("Failed to update query stats for table: {}", olapTable.getName(), e);
-                }
-            }
-        }
-
         translateRuntimeFilter(olapScan, olapScanNode, context);
 
         olapScanNode.setPushDownAggNoGrouping(context.getRelationPushAggOp(olapScan.getRelationId()));
@@ -1639,40 +1610,6 @@ public class PhysicalPlanTranslator extends DefaultPlanVisitor<PlanFragment, Pla
         // in ut, filter.stats may be null
         if (filter.getStats() != null) {
             inputFragment.getPlanRoot().setCardinalityAfterFilter((long) filter.getStats().getRowCount());
-        }
-        // Record filterHit stats for predicate columns when filter sits directly on an OlapScan.
-        // mergeFilterStats does NOT increment the table query count (already done in computePhysicalOlapScan).
-        if (Config.enable_query_hit_stats && filter.child(0) instanceof PhysicalOlapScan) {
-            StatementBase stmt = context.getStatementContext().getParsedStatement();
-            boolean isExplain = stmt != null && stmt.isExplain();
-            if (!isExplain) {
-                try {
-                    PhysicalOlapScan olapScan = (PhysicalOlapScan) filter.child(0);
-                    OlapTable olapTable = olapScan.getTable();
-                    StatsDelta delta = new StatsDelta(
-                            olapTable.getCatalogId(),
-                            olapScan.getDatabase().getId(),
-                            olapTable.getId(),
-                            olapScan.getSelectedIndexId());
-                    for (Expression conjunct : filter.getConjuncts()) {
-                        conjunct.getInputSlots().forEach(slot -> {
-                            if (slot instanceof SlotReference) {
-                                ((SlotReference) slot).getOriginalColumn().ifPresent(col -> {
-                                    if (!col.getName().isEmpty()) {
-                                        delta.addFilterStats(col.getName());
-                                    }
-                                });
-                            }
-                        });
-                    }
-                    if (!delta.empty()) {
-                        Env.getCurrentEnv().getQueryStats().mergeFilterStats(delta);
-                    }
-                } catch (Exception e) {
-                    LOG.warn("Failed to update filter stats for table: {}",
-                            ((PhysicalOlapScan) filter.child(0)).getTable().getName(), e);
-                }
-            }
         }
         return inputFragment;
     }
