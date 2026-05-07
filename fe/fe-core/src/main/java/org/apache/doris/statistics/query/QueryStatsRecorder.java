@@ -24,17 +24,24 @@ import org.apache.doris.catalog.OlapTable;
 import org.apache.doris.common.Config;
 import org.apache.doris.nereids.StatementContext;
 import org.apache.doris.nereids.glue.LogicalPlanAdapter;
+import org.apache.doris.nereids.properties.OrderKey;
+import org.apache.doris.nereids.rules.implementation.LogicalWindowToPhysicalWindow.WindowFrameGroup;
 import org.apache.doris.nereids.trees.expressions.Alias;
-import org.apache.doris.nereids.trees.expressions.Expression;
 import org.apache.doris.nereids.trees.expressions.ExprId;
+import org.apache.doris.nereids.trees.expressions.Expression;
+import org.apache.doris.nereids.trees.expressions.NamedExpression;
+import org.apache.doris.nereids.trees.expressions.OrderExpression;
 import org.apache.doris.nereids.trees.expressions.Slot;
 import org.apache.doris.nereids.trees.expressions.SlotReference;
 import org.apache.doris.nereids.trees.plans.Plan;
 import org.apache.doris.nereids.trees.plans.commands.Command;
+import org.apache.doris.nereids.trees.plans.physical.AbstractPhysicalSort;
 import org.apache.doris.nereids.trees.plans.physical.PhysicalDeferMaterializeOlapScan;
 import org.apache.doris.nereids.trees.plans.physical.PhysicalFilter;
+import org.apache.doris.nereids.trees.plans.physical.PhysicalHashAggregate;
 import org.apache.doris.nereids.trees.plans.physical.PhysicalOlapScan;
 import org.apache.doris.nereids.trees.plans.physical.PhysicalPlan;
+import org.apache.doris.nereids.trees.plans.physical.PhysicalWindow;
 
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
@@ -42,10 +49,13 @@ import org.apache.logging.log4j.Logger;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.Map;
+import java.util.Set;
 
 /**
  * Records column-level query-hit and filter-hit stats from the Nereids physical plan.
  * Called once per query in NereidsPlanner after plan translation.
+ * queryHit: SELECT output columns, GROUP BY keys, ORDER BY keys, window PARTITION BY / ORDER BY keys.
+ * filterHit: WHERE predicate columns.
  * Stats are recorded at plan time, not execution time; identical cached queries count once.
  */
 public class QueryStatsRecorder {
@@ -115,10 +125,9 @@ public class QueryStatsRecorder {
     }
 
     /**
-     * Single-pass tree walk: registers scan output slots into exprIdToScan,
-     * and records filterHit for PhysicalFilter conjuncts.
-     * Children are visited before the current node so scans are registered
-     * before parent filters look them up.
+     * Single-pass tree walk: registers scan output slots, records filterHit for
+     * WHERE predicates, and records queryHit for GROUP BY / ORDER BY / window keys.
+     * Children are visited before the current node so scans are registered first.
      */
     private static void walkPlan(Plan plan,
             Map<ExprId, PhysicalOlapScan> exprIdToScan,
@@ -144,26 +153,84 @@ public class QueryStatsRecorder {
         if (plan instanceof PhysicalFilter) {
             PhysicalFilter<?> filter = (PhysicalFilter<?>) plan;
             for (Expression conjunct : filter.getConjuncts()) {
-                conjunct.getInputSlots().forEach(slot -> {
-                    if (!(slot instanceof SlotReference)) {
-                        return;
-                    }
-                    SlotReference sr = (SlotReference) slot;
-                    PhysicalOlapScan sourceScan = exprIdToScan.get(sr.getExprId());
-                    if (sourceScan == null) {
-                        return;
-                    }
-                    StatsDelta delta = getOrCreateDelta(deltas, sourceScan);
-                    if (delta == null) {
-                        return;
-                    }
-                    sr.getOriginalColumn().ifPresent(col -> {
-                        if (!col.getName().isEmpty()) {
-                            delta.addFilterStats(col.getName());
-                        }
-                    });
-                });
+                recordSlotsAsFilterHit(conjunct.getInputSlots(), exprIdToScan, deltas);
             }
+        }
+        if (plan instanceof PhysicalHashAggregate) {
+            // queryHit for GROUP BY columns not in SELECT output.
+            PhysicalHashAggregate<?> agg = (PhysicalHashAggregate<?>) plan;
+            for (Expression expr : agg.getGroupByExpressions()) {
+                recordSlotsAsQueryHit(expr.getInputSlots(), exprIdToScan, deltas);
+            }
+            // queryHit for columns consumed by aggregate functions (e.g. k4 in SUM(k4)).
+            for (NamedExpression expr : agg.getOutputExpressions()) {
+                recordSlotsAsQueryHit(expr.getInputSlots(), exprIdToScan, deltas);
+            }
+        }
+        if (plan instanceof AbstractPhysicalSort) {
+            // queryHit for ORDER BY columns not in SELECT output.
+            AbstractPhysicalSort<?> sort = (AbstractPhysicalSort<?>) plan;
+            for (OrderKey orderKey : sort.getOrderKeys()) {
+                recordSlotsAsQueryHit(orderKey.getExpr().getInputSlots(), exprIdToScan, deltas);
+            }
+        }
+        if (plan instanceof PhysicalWindow) {
+            // queryHit for window PARTITION BY and ORDER BY columns.
+            WindowFrameGroup wfg = ((PhysicalWindow<?>) plan).getWindowFrameGroup();
+            for (Expression partKey : wfg.getPartitionKeys()) {
+                recordSlotsAsQueryHit(partKey.getInputSlots(), exprIdToScan, deltas);
+            }
+            for (OrderExpression orderExpr : wfg.getOrderKeys()) {
+                recordSlotsAsQueryHit(orderExpr.child().getInputSlots(), exprIdToScan, deltas);
+            }
+        }
+    }
+
+    private static void recordSlotsAsQueryHit(Set<Slot> slots,
+            Map<ExprId, PhysicalOlapScan> exprIdToScan,
+            Map<String, StatsDelta> deltas) {
+        for (Slot slot : slots) {
+            if (!(slot instanceof SlotReference)) {
+                continue;
+            }
+            SlotReference sr = (SlotReference) slot;
+            PhysicalOlapScan sourceScan = exprIdToScan.get(sr.getExprId());
+            if (sourceScan == null) {
+                continue;
+            }
+            StatsDelta delta = getOrCreateDelta(deltas, sourceScan);
+            if (delta == null) {
+                continue;
+            }
+            sr.getOriginalColumn().ifPresent(col -> {
+                if (!col.getName().isEmpty()) {
+                    delta.addQueryStats(col.getName());
+                }
+            });
+        }
+    }
+
+    private static void recordSlotsAsFilterHit(Set<Slot> slots,
+            Map<ExprId, PhysicalOlapScan> exprIdToScan,
+            Map<String, StatsDelta> deltas) {
+        for (Slot slot : slots) {
+            if (!(slot instanceof SlotReference)) {
+                continue;
+            }
+            SlotReference sr = (SlotReference) slot;
+            PhysicalOlapScan sourceScan = exprIdToScan.get(sr.getExprId());
+            if (sourceScan == null) {
+                continue;
+            }
+            StatsDelta delta = getOrCreateDelta(deltas, sourceScan);
+            if (delta == null) {
+                continue;
+            }
+            sr.getOriginalColumn().ifPresent(col -> {
+                if (!col.getName().isEmpty()) {
+                    delta.addFilterStats(col.getName());
+                }
+            });
         }
     }
 
