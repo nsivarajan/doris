@@ -315,6 +315,7 @@ public class StatementContext implements Closeable {
     // When true, data will be collected to a single node to avoid generating too many small files
     private boolean useGatherForIcebergRewrite = false;
     private boolean hasNestedColumns;
+    private boolean queryStatsRecorded = false;
 
     private final Map<String, Integer> lowerCaseTableNamesCache = Maps.newHashMap();
     private final Map<String, Integer> lowerCaseDatabaseNamesCache = Maps.newHashMap();
@@ -1133,6 +1134,14 @@ public class StatementContext implements Closeable {
 
     public boolean isInsert() {
         return isInsert;
+    }
+
+    public boolean isQueryStatsRecorded() {
+        return queryStatsRecorded;
+    }
+
+    public void setQueryStatsRecorded() {
+        queryStatsRecorded = true;
     }
 
     public Optional<Map<TableIf, Set<Expression>>> getMvRefreshPredicates() {
