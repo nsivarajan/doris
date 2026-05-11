@@ -84,7 +84,7 @@ struct MergeSortCursorImpl {
 
         auto tmp_columns = block->get_columns_and_convert();
         columns.reserve(tmp_columns.size());
-        for (auto col : tmp_columns) {
+        for (const auto& col : tmp_columns) {
             columns.push_back(col.get());
         }
         for (auto& column_desc : desc) {
