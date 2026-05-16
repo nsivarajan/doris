@@ -20,6 +20,7 @@ package org.apache.doris.datasource.property.metastore;
 import org.apache.doris.datasource.property.ConnectorPropertiesUtils;
 import org.apache.doris.datasource.property.ConnectorProperty;
 import org.apache.doris.datasource.property.ParamRules;
+import org.apache.doris.datasource.property.credentials.aliyun.AliyunOIDCCredentialResolver;
 import org.apache.doris.datasource.property.credentials.aliyun.AliyunSTSCredentialResolver;
 import org.apache.doris.datasource.property.storage.exception.StoragePropertiesException;
 
@@ -93,6 +94,19 @@ public class AliyunDLFBaseProperties {
                     + "Use sts-vpc.<region>.aliyuncs.com to keep traffic inside VPC.")
     protected String dlfStsEndpoint = "";
 
+    @ConnectorProperty(names = {"dlf.oidc_provider_arn"},
+            required = false,
+            description = "OIDC provider ARN for RRSA (ACK pods). When set, resolves credentials "
+                    + "via sts:AssumeRoleWithOIDC instead of ECS instance profile. "
+                    + "Format: acs:oidc::<account_id>:oidc-provider/<cluster_id>.")
+    protected String dlfOidcProviderArn = "";
+
+    @ConnectorProperty(names = {"dlf.oidc_token_file"},
+            required = false,
+            description = "Path to the OIDC token file for RRSA. "
+                    + "Defaults to ALIBABA_CLOUD_OIDC_TOKEN_FILE env var.")
+    protected String dlfOidcTokenFile = "";
+
     // TODO: use dlfCredentialExpiration to auto-renew STS credentials before expiry.
     protected String dlfCredentialExpiration = "";
 
@@ -136,8 +150,10 @@ public class AliyunDLFBaseProperties {
     // Resolves STS credentials lazily at connection time. Idempotent: skips if already resolved or AK/SK path.
     public synchronized void resolveCredentials() {
         if (StringUtils.isNotBlank(dlfRoleArn) && StringUtils.isBlank(dlfAccessKey)) {
-            AliyunSTSCredentialResolver.Credentials creds =
-                    AliyunSTSCredentialResolver.resolve(dlfRoleArn, dlfRegion, dlfStsEndpoint);
+            AliyunSTSCredentialResolver.Credentials creds = StringUtils.isNotBlank(dlfOidcProviderArn)
+                    ? AliyunOIDCCredentialResolver.resolve(
+                            dlfRoleArn, dlfOidcProviderArn, dlfOidcTokenFile, dlfRegion, dlfStsEndpoint)
+                    : AliyunSTSCredentialResolver.resolve(dlfRoleArn, dlfRegion, dlfStsEndpoint);
             dlfAccessKey = creds.accessKeyId;
             dlfSecretKey = creds.accessKeySecret;
             dlfSessionToken = creds.securityToken;

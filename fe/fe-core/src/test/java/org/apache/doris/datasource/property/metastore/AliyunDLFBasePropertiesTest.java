@@ -145,6 +145,19 @@ public class AliyunDLFBasePropertiesTest {
     }
 
     @Test
+    void testRrsaValidationPassesOnDlf1x() {
+        Map<String, String> props = new HashMap<>();
+        props.put("dlf.role_arn", "acs:ram::123456789:role/my-role");
+        props.put("dlf.region", "cn-hangzhou");
+        props.put("dlf.oidc_provider_arn", "acs:oidc::123456789:oidc-provider/my-cluster");
+
+        // Should succeed. OIDC token resolution is NOT called here — lazy at first catalog use.
+        AliyunDLFBaseProperties dlfProps = AliyunDLFBaseProperties.of(props);
+        Assertions.assertEquals("123456789", dlfProps.dlfUid);
+        Assertions.assertEquals("", dlfProps.dlfAccessKey);
+    }
+
+    @Test
     void testGetSensitiveKeys() {
         Set<String> keys = ConnectorPropertiesUtils.getSensitiveKeys(AliyunDLFBaseProperties.class);
         Assertions.assertTrue(keys.contains("dlf.access_key"));
