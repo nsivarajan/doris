@@ -31,6 +31,7 @@ import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Disabled;
 import org.junit.jupiter.api.Test;
 
+import java.util.HashMap;
 import java.util.Map;
 
 @Disabled("set local DLF test credentials with -Ddoris.test.iceberg.dlf.access-key-id and "
@@ -131,4 +132,118 @@ public class IcebergDlfRestCatalogTest {
      *     'iceberg.rest.auth.type' = 'sigv4'
      * );
      */
+
+    // ---- Role ARN structural validation tests (no network calls) ----
+
+    @Test
+    void testRoleArnRequiresSigningRegion() throws Exception {
+        Map<String, String> props = new HashMap<>();
+        props.put("type", "iceberg");
+        props.put("iceberg.catalog.type", "rest");
+        props.put("iceberg.rest.uri", "http://cn-hangzhou-vpc.dlf.aliyuncs.com/iceberg");
+        props.put("iceberg.rest.sigv4-enabled", "true");
+        props.put("iceberg.rest.signing-name", "DlfNext");
+        props.put("iceberg.rest.credential-provider", "alibaba-cloud-ram-role");
+        props.put("iceberg.rest.role_arn", "acs:ram::123456789:role/doris-dlf-role");
+        // signing-region intentionally omitted
+
+        Exception ex = Assertions.assertThrows(IllegalArgumentException.class,
+                () -> MetastoreProperties.create(props));
+        Assertions.assertTrue(ex.getMessage().contains("iceberg.rest.signing-region is required"));
+    }
+
+    @Test
+    void testRoleArnWithoutCredentialProviderFails() throws Exception {
+        Map<String, String> props = new HashMap<>();
+        props.put("type", "iceberg");
+        props.put("iceberg.catalog.type", "rest");
+        props.put("iceberg.rest.uri", "http://cn-hangzhou-vpc.dlf.aliyuncs.com/iceberg");
+        props.put("iceberg.rest.sigv4-enabled", "true");
+        props.put("iceberg.rest.signing-name", "DlfNext");
+        props.put("iceberg.rest.signing-region", "cn-hangzhou");
+        props.put("iceberg.rest.role_arn", "acs:ram::123456789:role/doris-dlf-role");
+        // credential-provider intentionally omitted
+
+        Exception ex = Assertions.assertThrows(Exception.class,
+                () -> MetastoreProperties.create(props));
+        Assertions.assertTrue(ex.getMessage().contains("iceberg.rest.credential-provider"));
+    }
+
+    @Test
+    void testUnknownCredentialProviderFails() throws Exception {
+        Map<String, String> props = new HashMap<>();
+        props.put("type", "iceberg");
+        props.put("iceberg.catalog.type", "rest");
+        props.put("iceberg.rest.uri", "http://cn-hangzhou-vpc.dlf.aliyuncs.com/iceberg");
+        props.put("iceberg.rest.sigv4-enabled", "true");
+        props.put("iceberg.rest.signing-name", "DlfNext");
+        props.put("iceberg.rest.signing-region", "cn-hangzhou");
+        props.put("iceberg.rest.credential-provider", "unknown-cloud-provider");
+        props.put("iceberg.rest.role_arn", "acs:ram::123456789:role/doris-dlf-role");
+
+        Exception ex = Assertions.assertThrows(Exception.class,
+                () -> MetastoreProperties.create(props));
+        Assertions.assertTrue(ex.getMessage().contains("Unknown iceberg.rest.credential-provider"));
+        Assertions.assertTrue(ex.getMessage().contains("alibaba-cloud-ram-role"));
+        Assertions.assertTrue(ex.getMessage().contains("alibaba-cloud-rrsa"));
+    }
+
+    @Test
+    void testRoleArnValidationPassesWithoutAkSk() throws Exception {
+        Map<String, String> props = new HashMap<>();
+        props.put("type", "iceberg");
+        props.put("iceberg.catalog.type", "rest");
+        props.put("iceberg.rest.uri", "http://cn-hangzhou-vpc.dlf.aliyuncs.com/iceberg");
+        props.put("iceberg.rest.sigv4-enabled", "true");
+        props.put("iceberg.rest.signing-name", "DlfNext");
+        props.put("iceberg.rest.signing-region", "cn-hangzhou");
+        props.put("iceberg.rest.credential-provider", "alibaba-cloud-ram-role");
+        props.put("iceberg.rest.role_arn", "acs:ram::123456789:role/doris-dlf-role");
+        props.put("iceberg.rest.vended-credentials-enabled", "true");
+
+        // Should succeed. STS is NOT called here — lazy at first catalog use.
+        IcebergRestProperties restProps = (IcebergRestProperties) MetastoreProperties.create(props);
+        Assertions.assertNotNull(restProps);
+        Assertions.assertEquals("", restProps.getIcebergRestCatalogProperties()
+                .getOrDefault("rest.access-key-id", ""));
+    }
+
+    @Test
+    void testRrsaRequiresOidcProviderArn() throws Exception {
+        Map<String, String> props = new HashMap<>();
+        props.put("type", "iceberg");
+        props.put("iceberg.catalog.type", "rest");
+        props.put("iceberg.rest.uri", "http://cn-hangzhou-vpc.dlf.aliyuncs.com/iceberg");
+        props.put("iceberg.rest.sigv4-enabled", "true");
+        props.put("iceberg.rest.signing-name", "DlfNext");
+        props.put("iceberg.rest.signing-region", "cn-hangzhou");
+        props.put("iceberg.rest.credential-provider", "alibaba-cloud-rrsa");
+        props.put("iceberg.rest.role_arn", "acs:ram::123456789:role/doris-dlf-role");
+        // oidc_provider_arn intentionally omitted
+
+        Exception ex = Assertions.assertThrows(IllegalArgumentException.class,
+                () -> MetastoreProperties.create(props));
+        Assertions.assertTrue(ex.getMessage().contains("iceberg.rest.oidc_provider_arn is required"));
+    }
+
+    @Test
+    void testRrsaValidationPassesWithoutAkSk() throws Exception {
+        Map<String, String> props = new HashMap<>();
+        props.put("type", "iceberg");
+        props.put("iceberg.catalog.type", "rest");
+        props.put("iceberg.rest.uri", "http://cn-hangzhou-vpc.dlf.aliyuncs.com/iceberg");
+        props.put("iceberg.rest.sigv4-enabled", "true");
+        props.put("iceberg.rest.signing-name", "DlfNext");
+        props.put("iceberg.rest.signing-region", "cn-hangzhou");
+        props.put("iceberg.rest.credential-provider", "alibaba-cloud-rrsa");
+        props.put("iceberg.rest.role_arn", "acs:ram::123456789:role/doris-dlf-role");
+        props.put("iceberg.rest.oidc_provider_arn", "acs:oidc::123456789:oidc-provider/my-cluster");
+        props.put("iceberg.rest.vended-credentials-enabled", "true");
+
+        // Should succeed. OIDC token resolution is NOT called here — lazy at first catalog use.
+        IcebergRestProperties restProps = (IcebergRestProperties) MetastoreProperties.create(props);
+        Assertions.assertNotNull(restProps);
+        Assertions.assertEquals("", restProps.getIcebergRestCatalogProperties()
+                .getOrDefault("rest.access-key-id", ""));
+    }
 }

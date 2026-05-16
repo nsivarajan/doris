@@ -20,6 +20,8 @@ package org.apache.doris.datasource.property.metastore;
 import org.apache.doris.datasource.iceberg.IcebergExternalCatalog;
 import org.apache.doris.datasource.property.ConnectorProperty;
 import org.apache.doris.datasource.property.ParamRules;
+import org.apache.doris.datasource.property.credentials.RestCatalogCredentialContext;
+import org.apache.doris.datasource.property.credentials.RestCatalogCredentialProviderFactory;
 import org.apache.doris.datasource.property.storage.StorageProperties;
 
 import lombok.Getter;
@@ -35,7 +37,8 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
-public class IcebergRestProperties extends AbstractIcebergProperties {
+public class IcebergRestProperties extends AbstractIcebergProperties
+        implements RestCatalogCredentialContext {
 
     // REST catalog property constants
     private static final String PREFIX_PROPERTY = "prefix";
@@ -125,7 +128,7 @@ public class IcebergRestProperties extends AbstractIcebergProperties {
     // The following properties are specific to AWS Glue Rest Catalog
     @ConnectorProperty(names = {"iceberg.rest.sigv4-enabled"},
             required = false,
-            description = "True for Glue Rest Catalog")
+            description = "Enable AWS SigV4 request signing for the REST catalog (e.g. AWS Glue, Alibaba Cloud DLF).")
     private String icebergRestSigV4Enabled = "";
 
     @ConnectorProperty(names = {"iceberg.rest.signing-name"},
@@ -149,6 +152,49 @@ public class IcebergRestProperties extends AbstractIcebergProperties {
             description = "The secret access key for the iceberg rest catalog service.")
     private String icebergRestSecretAccessKey = "";
 
+    @ConnectorProperty(names = {"iceberg.rest.session-token"},
+            required = false,
+            sensitive = true,
+            description = "Session token for temporary STS credentials used in SigV4 signing.")
+    private String icebergRestSessionToken = "";
+
+    @ConnectorProperty(names = {"iceberg.rest.role_arn"},
+            required = false,
+            description = "Role ARN for AssumeRole. Requires iceberg.rest.credential-provider "
+                    + "and iceberg.rest.signing-region to be set.")
+    private String icebergRestRoleArn = "";
+
+    @ConnectorProperty(names = {"iceberg.rest.sts_endpoint"},
+            required = false,
+            description = "Custom STS endpoint for AssumeRole. If not set, the credential provider "
+                    + "derives the default endpoint from iceberg.rest.signing-region.")
+    private String icebergRestStsEndpoint = "";
+
+    @ConnectorProperty(names = {"iceberg.rest.credential-provider"},
+            required = false,
+            description = "Credential provider for resolving signing credentials when role_arn is set. "
+                    + "Supported: alibaba-cloud-ram-role (ECS), alibaba-cloud-rrsa (ACK).")
+    private String icebergRestCredentialProvider = "";
+
+    @ConnectorProperty(names = {"iceberg.rest.oidc_provider_arn"},
+            required = false,
+            description = "OIDC provider ARN for alibaba-cloud-rrsa. "
+                    + "Format: acs:oidc::<account_id>:oidc-provider/<cluster_id>.")
+    private String icebergRestOidcProviderArn = "";
+
+    @ConnectorProperty(names = {"iceberg.rest.oidc_token_file"},
+            required = false,
+            description = "Path to the OIDC token file for alibaba-cloud-rrsa. "
+                    + "Defaults to ALIBABA_CLOUD_OIDC_TOKEN_FILE env var.")
+    private String icebergRestOidcTokenFile = "";
+
+    // TODO: use icebergRestCredentialExpiration to auto-renew STS credentials before expiry.
+    private String icebergRestCredentialExpiration = "";
+
+    public String getCredentialExpiration() {
+        return icebergRestCredentialExpiration;
+    }
+
     @ConnectorProperty(names = {"iceberg.rest.connection-timeout-ms"},
             required = false,
             description = "Connection timeout in milliseconds for the REST catalog HTTP client. Default: 10000 (10s).")
@@ -171,6 +217,8 @@ public class IcebergRestProperties extends AbstractIcebergProperties {
     @Override
     public Catalog initCatalog(String catalogName, Map<String, String> catalogProps,
             List<StorageProperties> storagePropertiesList) {
+        resolveRoleCredentials();
+        addGlueRestCatalogProperties();
         catalogProps.putAll(getIcebergRestCatalogProperties());
         Configuration configuration = new Configuration();
         toFileIOProperties(storagePropertiesList, catalogProps, configuration);
@@ -226,6 +274,7 @@ public class IcebergRestProperties extends AbstractIcebergProperties {
                         icebergRestSigV4Enabled},
                 "Rest Catalog requires signing-region, access-key-id, secret-access-key "
                         + "and sigv4-enabled set to true when signing-name is glue");
+        RestCatalogCredentialProviderFactory.validate(rules, this);
         return rules;
     }
 
@@ -302,7 +351,55 @@ public class IcebergRestProperties extends AbstractIcebergProperties {
             icebergRestCatalogProperties.put("rest.access-key-id", icebergRestAccessKeyId);
             icebergRestCatalogProperties.put("rest.secret-access-key", icebergRestSecretAccessKey);
             icebergRestCatalogProperties.put("rest.signing-region", icebergRestSigningRegion);
+            if (Strings.isNotBlank(icebergRestSessionToken)) {
+                icebergRestCatalogProperties.put("rest.session-token", icebergRestSessionToken);
+            }
         }
+    }
+
+    // Resolves cloud-specific credentials lazily at connection time.
+    private synchronized void resolveRoleCredentials() {
+        RestCatalogCredentialProviderFactory.resolve(this);
+    }
+
+    // Public accessors for RestCatalogCredentialProvider implementations
+    public String getCredentialProvider() {
+        return icebergRestCredentialProvider;
+    }
+
+    public String getOidcProviderArn() {
+        return icebergRestOidcProviderArn;
+    }
+
+    public String getOidcTokenFile() {
+        return icebergRestOidcTokenFile;
+    }
+
+    public String getRoleArn() {
+        return icebergRestRoleArn;
+    }
+
+    public String getSigningName() {
+        return icebergRestSigningName;
+    }
+
+    public String getSigningRegion() {
+        return icebergRestSigningRegion;
+    }
+
+    public String getStsEndpoint() {
+        return icebergRestStsEndpoint;
+    }
+
+    public String getAccessKeyId() {
+        return icebergRestAccessKeyId;
+    }
+
+    public void setResolvedCredentials(String ak, String sk, String token, String expiration) {
+        this.icebergRestAccessKeyId = ak;
+        this.icebergRestSecretAccessKey = sk;
+        this.icebergRestSessionToken = token;
+        this.icebergRestCredentialExpiration = expiration;
     }
 
     public Map<String, String> getIcebergRestCatalogProperties() {

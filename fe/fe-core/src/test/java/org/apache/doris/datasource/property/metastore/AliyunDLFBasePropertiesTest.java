@@ -106,12 +106,52 @@ public class AliyunDLFBasePropertiesTest {
     }
 
     @Test
+    void testRoleArnRequiresRegion() {
+        Map<String, String> props = new HashMap<>();
+        props.put("dlf.role_arn", "acs:ram::123456789:role/my-role");
+
+        Exception ex = Assertions.assertThrows(
+                IllegalArgumentException.class,
+                () -> AliyunDLFBaseProperties.of(props)
+        );
+        Assertions.assertTrue(ex.getMessage().contains("dlf.region is required when dlf.role_arn is set"));
+    }
+
+    @Test
+    void testRoleArnExtractsUidAndDerivesEndpoint() {
+        Map<String, String> props = new HashMap<>();
+        props.put("dlf.role_arn", "acs:ram::123456789:role/my-role");
+        props.put("dlf.region", "cn-hangzhou");
+
+        AliyunDLFBaseProperties dlfProps = AliyunDLFBaseProperties.of(props);
+        Assertions.assertEquals("123456789", dlfProps.dlfUid);
+        Assertions.assertEquals("123456789", dlfProps.dlfCatalogId);
+        Assertions.assertEquals("dlf-vpc.cn-hangzhou.aliyuncs.com", dlfProps.dlfEndpoint);
+        // STS is resolved lazily at first catalog use (resolveCredentials()), not at validation time.
+        Assertions.assertEquals("", dlfProps.dlfAccessKey);
+    }
+
+    @Test
+    void testRoleArnInvalidFormatThrows() {
+        Map<String, String> props = new HashMap<>();
+        props.put("dlf.role_arn", "invalid-arn-format");
+        props.put("dlf.region", "cn-hangzhou");
+
+        StoragePropertiesException ex = Assertions.assertThrows(
+                StoragePropertiesException.class,
+                () -> AliyunDLFBaseProperties.of(props)
+        );
+        Assertions.assertTrue(ex.getMessage().contains("Invalid dlf.role_arn format"));
+    }
+
+    @Test
     void testGetSensitiveKeys() {
         Set<String> keys = ConnectorPropertiesUtils.getSensitiveKeys(AliyunDLFBaseProperties.class);
-        System.out.println(keys);
-        Assertions.assertTrue(keys.contains("dlf.catalog.sessionToken"));
-        Assertions.assertTrue(keys.contains("dlf.catalog.accessKeySecret"));
+        Assertions.assertTrue(keys.contains("dlf.access_key"));
+        Assertions.assertTrue(keys.contains("dlf.catalog.accessKeyId"));
         Assertions.assertTrue(keys.contains("dlf.secret_key"));
+        Assertions.assertTrue(keys.contains("dlf.catalog.accessKeySecret"));
         Assertions.assertTrue(keys.contains("dlf.session_token"));
+        Assertions.assertTrue(keys.contains("dlf.catalog.sessionToken"));
     }
 }

@@ -44,19 +44,28 @@ public class HiveAliyunDLFMetaStoreProperties extends AbstractHiveProperties {
 
     private void initHiveConf() {
         // @see com.aliyun.datalake.metastore.hive.common.utils.ConfigUtils
-        // todo support other parameters
         hiveConf = new HiveConf();
         hiveConf.addResource(ossProperties.hadoopStorageConfig);
         hiveConf.set(DataLakeConfig.CATALOG_ACCESS_KEY_ID, baseProperties.dlfAccessKey);
         hiveConf.set(DataLakeConfig.CATALOG_ACCESS_KEY_SECRET, baseProperties.dlfSecretKey);
+        hiveConf.set(DataLakeConfig.CATALOG_SECURITY_TOKEN, baseProperties.dlfSessionToken);
         hiveConf.set(DataLakeConfig.CATALOG_ENDPOINT, baseProperties.dlfEndpoint);
         hiveConf.set(DataLakeConfig.CATALOG_REGION_ID, baseProperties.dlfRegion);
-        hiveConf.set(DataLakeConfig.CATALOG_SECURITY_TOKEN, baseProperties.dlfSessionToken);
         hiveConf.set(DataLakeConfig.CATALOG_USER_ID, baseProperties.dlfUid);
         hiveConf.set(DataLakeConfig.CATALOG_ID, baseProperties.dlfCatalogId);
         hiveConf.set(DataLakeConfig.CATALOG_PROXY_MODE, baseProperties.dlfProxyMode);
         hiveConf.set("hive.metastore.type", "dlf");
         hiveConf.set("type", "hms");
+    }
+
+    // Overrides Lombok getter: resolves STS credentials lazily and refreshes them in-place before returning.
+    @Override
+    public HiveConf getHiveConf() {
+        baseProperties.resolveCredentials();
+        hiveConf.set(DataLakeConfig.CATALOG_ACCESS_KEY_ID, baseProperties.dlfAccessKey);
+        hiveConf.set(DataLakeConfig.CATALOG_ACCESS_KEY_SECRET, baseProperties.dlfSecretKey);
+        hiveConf.set(DataLakeConfig.CATALOG_SECURITY_TOKEN, baseProperties.dlfSessionToken);
+        return hiveConf;
     }
 
 }

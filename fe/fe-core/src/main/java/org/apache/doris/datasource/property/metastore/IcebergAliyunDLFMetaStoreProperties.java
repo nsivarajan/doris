@@ -32,7 +32,6 @@ public class IcebergAliyunDLFMetaStoreProperties extends AbstractIcebergProperti
 
     private AliyunDLFBaseProperties baseProperties;
 
-
     protected IcebergAliyunDLFMetaStoreProperties(Map<String, String> props) {
         super(props);
         super.initNormalizeAndCheckProps();
@@ -47,14 +46,15 @@ public class IcebergAliyunDLFMetaStoreProperties extends AbstractIcebergProperti
     @Override
     public Catalog initCatalog(String catalogName, Map<String, String> catalogProps,
                                List<StorageProperties> storagePropertiesList) {
+        baseProperties.resolveCredentials();
         DLFCatalog dlfCatalog = new DLFCatalog();
         // @see com.aliyun.datalake.metastore.hive.common.utils.ConfigUtils
         Configuration conf = new Configuration();
         conf.set(DataLakeConfig.CATALOG_ACCESS_KEY_ID, baseProperties.dlfAccessKey);
         conf.set(DataLakeConfig.CATALOG_ACCESS_KEY_SECRET, baseProperties.dlfSecretKey);
+        conf.set(DataLakeConfig.CATALOG_SECURITY_TOKEN, baseProperties.dlfSessionToken);
         conf.set(DataLakeConfig.CATALOG_ENDPOINT, baseProperties.dlfEndpoint);
         conf.set(DataLakeConfig.CATALOG_REGION_ID, baseProperties.dlfRegion);
-        conf.set(DataLakeConfig.CATALOG_SECURITY_TOKEN, baseProperties.dlfSessionToken);
         conf.set(DataLakeConfig.CATALOG_USER_ID, baseProperties.dlfUid);
         conf.set(DataLakeConfig.CATALOG_ID, baseProperties.dlfCatalogId);
         conf.set(DataLakeConfig.CATALOG_PROXY_MODE, baseProperties.dlfProxyMode);
