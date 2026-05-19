@@ -86,6 +86,10 @@ public class AliyunSTSCredentialResolver {
                 String msg = cred.has("Message") ? cred.get("Message").getAsString() : "unknown";
                 throw new StoragePropertiesException("ECS metadata error: " + msg);
             }
+            if (!cred.has("AccessKeyId") || !cred.has("AccessKeySecret") || !cred.has("SecurityToken")) {
+                throw new StoragePropertiesException(
+                        "ECS metadata response missing required credential fields.");
+            }
 
             DefaultProfile profile = DefaultProfile.getProfile(region);
             DefaultAcsClient stsClient = new DefaultAcsClient(profile,
@@ -93,20 +97,23 @@ public class AliyunSTSCredentialResolver {
                             cred.get("AccessKeyId").getAsString(),
                             cred.get("AccessKeySecret").getAsString(),
                             cred.get("SecurityToken").getAsString())));
+            try {
+                AssumeRoleRequest request = new AssumeRoleRequest();
+                request.setRoleArn(roleArn);
+                request.setRoleSessionName("doris-dlf-" + System.currentTimeMillis());
+                request.setDurationSeconds(3600L);
+                request.setSysEndpoint(StringUtils.isNotBlank(stsEndpoint)
+                        ? stsEndpoint : "sts." + region + ".aliyuncs.com");
 
-            AssumeRoleRequest request = new AssumeRoleRequest();
-            request.setRoleArn(roleArn);
-            request.setRoleSessionName("doris-dlf-" + System.currentTimeMillis());
-            request.setDurationSeconds(3600L);
-            request.setSysEndpoint(StringUtils.isNotBlank(stsEndpoint)
-                    ? stsEndpoint : "sts." + region + ".aliyuncs.com");
-
-            AssumeRoleResponse.Credentials assumed = stsClient.getAcsResponse(request).getCredentials();
-            return new Credentials(
-                    assumed.getAccessKeyId(),
-                    assumed.getAccessKeySecret(),
-                    assumed.getSecurityToken(),
-                    assumed.getExpiration());
+                AssumeRoleResponse.Credentials assumed = stsClient.getAcsResponse(request).getCredentials();
+                return new Credentials(
+                        assumed.getAccessKeyId(),
+                        assumed.getAccessKeySecret(),
+                        assumed.getSecurityToken(),
+                        assumed.getExpiration());
+            } finally {
+                stsClient.shutdown();
+            }
         } catch (StoragePropertiesException e) {
             throw e;
         } catch (Exception e) {
@@ -117,8 +124,9 @@ public class AliyunSTSCredentialResolver {
 
     // Returns null on failure; callers pass null to imdsGet which omits the token header (IMDSv1 fallback).
     private static String fetchImdsV2Token() {
+        HttpURLConnection conn = null;
         try {
-            HttpURLConnection conn = (HttpURLConnection) new URL(IMDS_HOST + IMDS_TOKEN_PATH).openConnection();
+            conn = (HttpURLConnection) new URL(IMDS_HOST + IMDS_TOKEN_PATH).openConnection();
             conn.setRequestMethod("PUT");
             conn.setRequestProperty("X-aliyun-ecs-metadata-token-ttl-seconds",
                     String.valueOf(IMDS_TOKEN_TTL_SECONDS));
@@ -127,21 +135,29 @@ public class AliyunSTSCredentialResolver {
             return conn.getResponseCode() == 200 ? readResponse(conn) : null;
         } catch (Exception e) {
             return null;
+        } finally {
+            if (conn != null) {
+                conn.disconnect();
+            }
         }
     }
 
     private static String imdsGet(String url, String imdsToken) throws IOException {
         HttpURLConnection conn = (HttpURLConnection) new URL(url).openConnection();
-        conn.setRequestMethod("GET");
-        if (imdsToken != null) {
-            conn.setRequestProperty("X-aliyun-ecs-metadata-token", imdsToken);
+        try {
+            conn.setRequestMethod("GET");
+            if (imdsToken != null) {
+                conn.setRequestProperty("X-aliyun-ecs-metadata-token", imdsToken);
+            }
+            conn.setConnectTimeout(IMDS_TIMEOUT_MS);
+            conn.setReadTimeout(IMDS_TIMEOUT_MS);
+            if (conn.getResponseCode() != 200) {
+                throw new IOException("IMDS GET failed: HTTP " + conn.getResponseCode() + " url=" + url);
+            }
+            return readResponse(conn);
+        } finally {
+            conn.disconnect();
         }
-        conn.setConnectTimeout(IMDS_TIMEOUT_MS);
-        conn.setReadTimeout(IMDS_TIMEOUT_MS);
-        if (conn.getResponseCode() != 200) {
-            throw new IOException("IMDS GET failed: HTTP " + conn.getResponseCode() + " url=" + url);
-        }
-        return readResponse(conn);
     }
 
     private static String readResponse(HttpURLConnection conn) throws IOException {

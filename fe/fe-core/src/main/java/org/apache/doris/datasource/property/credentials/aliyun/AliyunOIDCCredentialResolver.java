@@ -60,23 +60,26 @@ public class AliyunOIDCCredentialResolver {
             DefaultProfile profile = DefaultProfile.getProfile(region);
             DefaultAcsClient client = new DefaultAcsClient(profile,
                     new StaticCredentialsProvider(new BasicCredentials("", "")));
+            try {
+                AssumeRoleWithOIDCRequest request = new AssumeRoleWithOIDCRequest();
+                request.setRoleArn(roleArn);
+                request.setOIDCProviderArn(oidcProviderArn);
+                request.setOIDCToken(oidcToken);
+                request.setRoleSessionName("doris-rrsa-" + System.currentTimeMillis());
+                request.setDurationSeconds(3600L);
+                request.setSysEndpoint(StringUtils.isNotBlank(stsEndpoint)
+                        ? stsEndpoint : "sts." + region + ".aliyuncs.com");
 
-            AssumeRoleWithOIDCRequest request = new AssumeRoleWithOIDCRequest();
-            request.setRoleArn(roleArn);
-            request.setOIDCProviderArn(oidcProviderArn);
-            request.setOIDCToken(oidcToken);
-            request.setRoleSessionName("doris-rrsa-" + System.currentTimeMillis());
-            request.setDurationSeconds(3600L);
-            request.setSysEndpoint(StringUtils.isNotBlank(stsEndpoint)
-                    ? stsEndpoint : "sts." + region + ".aliyuncs.com");
-
-            AssumeRoleWithOIDCResponse.Credentials assumed =
-                    client.getAcsResponse(request).getCredentials();
-            return new AliyunSTSCredentialResolver.Credentials(
-                    assumed.getAccessKeyId(),
-                    assumed.getAccessKeySecret(),
-                    assumed.getSecurityToken(),
-                    assumed.getExpiration());
+                AssumeRoleWithOIDCResponse.Credentials assumed =
+                        client.getAcsResponse(request).getCredentials();
+                return new AliyunSTSCredentialResolver.Credentials(
+                        assumed.getAccessKeyId(),
+                        assumed.getAccessKeySecret(),
+                        assumed.getSecurityToken(),
+                        assumed.getExpiration());
+            } finally {
+                client.shutdown();
+            }
         } catch (StoragePropertiesException e) {
             throw e;
         } catch (Exception e) {

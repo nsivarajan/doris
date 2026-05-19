@@ -34,8 +34,6 @@ import org.junit.jupiter.api.Test;
 import java.util.HashMap;
 import java.util.Map;
 
-@Disabled("set local DLF test credentials with -Ddoris.test.iceberg.dlf.access-key-id and "
-        + "-Ddoris.test.iceberg.dlf.secret-access-key before running the test")
 public class IcebergDlfRestCatalogTest {
 
     private static final String DLF_ACCESS_KEY_ID_PROPERTY = "doris.test.iceberg.dlf.access-key-id";
@@ -51,6 +49,8 @@ public class IcebergDlfRestCatalogTest {
             DLF_SECRET_ACCESS_KEY_PROPERTY, "<your-secret-access-key>");
 
     @Test
+    @Disabled("requires live DLF endpoint; set -Ddoris.test.iceberg.dlf.access-key-id and "
+            + "-Ddoris.test.iceberg.dlf.secret-access-key before running")
     public void testIcebergDlfRestCatalog() {
         Catalog dlfRestCatalog = initIcebergDlfRestCatalog();
         SupportsNamespaces nsCatalog = (SupportsNamespaces) dlfRestCatalog;
