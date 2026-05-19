@@ -148,7 +148,17 @@ public abstract class IcebergExternalCatalog extends ExternalCatalog {
      */
     public Catalog getCatalog() {
         makeSureInitialized();
+        ensureCredentialsFresh();
         return ((IcebergMetadataOps) metadataOps).getCatalog();
+    }
+
+    /** Re-initializes catalog and table cache when credentials are expired or expiring soon. */
+    public void ensureCredentialsFresh() {
+        if (msProperties != null && msProperties.needsCredentialRefresh()) {
+            LOG.info("Credentials for catalog {} are expiring, re-initializing.", getName());
+            resetToUninitialized(true);
+            makeSureInitialized();
+        }
     }
 
     public String getIcebergCatalogType() {

@@ -32,6 +32,8 @@ import org.apache.iceberg.catalog.Catalog;
 import org.apache.iceberg.rest.auth.OAuth2Properties;
 import org.apache.logging.log4j.util.Strings;
 
+import java.time.Instant;
+import java.time.format.DateTimeParseException;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
@@ -188,12 +190,7 @@ public class IcebergRestProperties extends AbstractIcebergProperties
                     + "Defaults to ALIBABA_CLOUD_OIDC_TOKEN_FILE env var.")
     private String icebergRestOidcTokenFile = "";
 
-    // TODO: use icebergRestCredentialExpiration to auto-renew STS credentials before expiry.
     private String icebergRestCredentialExpiration = "";
-
-    public String getCredentialExpiration() {
-        return icebergRestCredentialExpiration;
-    }
 
     @ConnectorProperty(names = {"iceberg.rest.connection-timeout-ms"},
             required = false,
@@ -360,6 +357,18 @@ public class IcebergRestProperties extends AbstractIcebergProperties
     // Resolves cloud-specific credentials lazily at connection time.
     private synchronized void resolveRoleCredentials() {
         RestCatalogCredentialProviderFactory.resolve(this);
+    }
+
+    @Override
+    public boolean needsCredentialRefresh() {
+        if (Strings.isBlank(icebergRestCredentialExpiration)) {
+            return false;
+        }
+        try {
+            return Instant.now().isAfter(Instant.parse(icebergRestCredentialExpiration).minusSeconds(300));
+        } catch (DateTimeParseException e) {
+            return true;
+        }
     }
 
     // Public accessors for RestCatalogCredentialProvider implementations

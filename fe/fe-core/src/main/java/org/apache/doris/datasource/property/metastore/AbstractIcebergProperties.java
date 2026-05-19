@@ -277,4 +277,9 @@ public abstract class AbstractIcebergProperties extends MetastoreProperties {
         Preconditions.checkArgument(options.containsKey(CatalogProperties.CATALOG_IMPL));
         return CatalogUtil.buildIcebergCatalog(catalogName, options, conf);
     }
+
+    /** Returns true when credentials are expired or expiring soon and the catalog needs re-init. */
+    public boolean needsCredentialRefresh() {
+        return false;
+    }
 }

@@ -26,6 +26,7 @@ import org.apache.doris.catalog.PartitionType;
 import org.apache.doris.common.AnalysisException;
 import org.apache.doris.common.DdlException;
 import org.apache.doris.common.util.Util;
+import org.apache.doris.datasource.ExternalCatalog;
 import org.apache.doris.datasource.ExternalTable;
 import org.apache.doris.datasource.SchemaCacheKey;
 import org.apache.doris.datasource.SchemaCacheValue;
@@ -143,6 +144,11 @@ public class IcebergExternalTable extends ExternalTable implements MTMVRelatedTa
     }
 
     public Table getIcebergTable() {
+        // Refresh STS credentials before cache lookup; clears table cache if expired so a fresh table is loaded.
+        ExternalCatalog catalog = getCatalog();
+        if (catalog instanceof IcebergExternalCatalog) {
+            ((IcebergExternalCatalog) catalog).ensureCredentialsFresh();
+        }
         return IcebergUtils.getIcebergTable(this);
     }
 
