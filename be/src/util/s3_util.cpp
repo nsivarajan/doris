@@ -644,6 +644,12 @@ Status S3ClientFactory::convert_properties_to_s3_conf(
 
     if (auto it = properties.find(S3_CREDENTIALS_PROVIDER_TYPE); it != properties.end()) {
         s3_conf->client_conf.cred_provider_type = cred_provider_type_from_string(it->second);
+    } else if (!s3_conf->client_conf.ak.empty() && !s3_conf->client_conf.sk.empty()) {
+        // FE explicitly passed AK/SK (vended or STS-resolved credentials from scan range params).
+        // Use Simple so the credentials are used directly instead of falling through to the
+        // provider chain (IMDS/env-vars). Paths that need INSTANCE_PROFILE always set
+        // AWS_CREDENTIALS_PROVIDER_TYPE explicitly, so they are handled by the branch above.
+        s3_conf->client_conf.cred_provider_type = CredProviderType::Simple;
     }
 
     if (auto st = is_s3_conf_valid(s3_conf->client_conf); !st.ok()) {
