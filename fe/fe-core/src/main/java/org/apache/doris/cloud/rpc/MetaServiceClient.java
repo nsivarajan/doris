@@ -573,4 +573,14 @@ public class MetaServiceClient {
         return blockingStub.withDeadlineAfter(Config.meta_service_brpc_timeout_ms, TimeUnit.MILLISECONDS)
                 .cloneInstance(request);
     }
+
+    public Cloud.CompactSnapshotResponse compactSnapshot(Cloud.CompactSnapshotRequest request) {
+        return blockingStub.withDeadlineAfter(Config.meta_service_brpc_timeout_ms, TimeUnit.MILLISECONDS)
+                .compactSnapshot(request);
+    }
+
+    public Cloud.ImportTableMetaResponse importTableMeta(Cloud.ImportTableMetaRequest request) {
+        return blockingStub.withDeadlineAfter(Config.meta_service_brpc_timeout_ms, TimeUnit.MILLISECONDS)
+                .importTableMeta(request);
+    }
 }

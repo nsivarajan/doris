@@ -105,7 +105,7 @@ import java.util.stream.Collectors;
 /**
  * create synchronized materialized view
  */
-public class CreateMaterializedViewCommand extends Command implements ForwardWithSync {
+public class CreateMaterializedViewCommand extends Command implements ForwardWithSync, SchemaChangingCommand {
     private static final String SYNC_MV_PLANER_DISABLE_RULES = "HAVING_TO_FILTER";
     private final TableNameInfo name;
 

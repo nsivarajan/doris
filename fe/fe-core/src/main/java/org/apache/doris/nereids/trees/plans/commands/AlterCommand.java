@@ -25,7 +25,7 @@ import org.apache.doris.qe.StmtExecutor;
 /**
  * base class for all Alter commands
  */
-public abstract class AlterCommand extends Command implements ForwardWithSync {
+public abstract class AlterCommand extends Command implements ForwardWithSync, SchemaChangingCommand {
     public AlterCommand(PlanType type) {
         super(type);
     }

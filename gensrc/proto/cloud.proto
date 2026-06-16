@@ -889,7 +889,43 @@ message SnapshotPB {
     optional int64 snapshot_retained_data_size = 19;
     optional int64 snapshot_billable_data_size = 20;
 
-    // TODO: add the referenced resources
+    // Granular snapshot: which DBs/tables/partitions have rowset ref counts seeded.
+    // Empty = full-cluster snapshot (all tablets protected).
+    repeated int64 protected_db_ids = 21;
+    repeated int64 protected_table_ids = 22;
+
+    // Set to true once seed_rowset_ref_counts() completes for this snapshot.
+    optional bool rowset_refs_seeded = 23;
+
+    // Partition IDs protected by this snapshot (partition-level granularity).
+    repeated int64 protected_partition_ids = 24;
+
+    // Set to true once export_table_meta() writes fdb_meta.pb to S3.
+    // Same-cluster restore only available after this is true.
+    optional bool table_meta_exported = 25;
+
+    // FE-captured OlapTable schemas: table_id → OlapTable.write() Gson JSON bytes.
+    // Written at commit_snapshot time; read by export_table_meta to embed in each blob.
+    map<int64, bytes> table_schema_jsons = 26;
+
+    // Table name list captured inside the quiesce window — used for dropped-DB restore
+    // so the caller can iterate all tables without needing the source catalog.
+    repeated CapturedTableInfo captured_tables = 27;
+
+    // Timestamp when snapshot became usable for same-cluster restore (absent on full-cluster/old).
+    optional int64 exported_at = 28;
+
+    // Instance multi_version_status at snapshot time: ENABLED/READ_WRITE → DataAsOf=create_at,
+    // else → DataAsOf=exported_at.
+    optional MultiVersionStatus snapshot_cluster_version = 29;
+}
+
+// Table name metadata captured at snapshot creation time.
+// Stored in SnapshotPB so a fully dropped DB can be restored without catalog access.
+message CapturedTableInfo {
+    optional int64  table_id   = 1;
+    optional string table_name = 2;
+    optional string db_name    = 3;
 }
 
 //==============================================================================
@@ -1877,6 +1913,14 @@ enum MetaServiceCode {
 
     SCHEMA_DICT_NOT_FOUND = 11001;
 
+    // begin_snapshot commit returned TXN_MAYBE_COMMITTED: the snapshot may or may not have been
+    // created. The FE must retry begin_snapshot (NOT call abort_snapshot) — the PREPARE
+    // deduplication guard will find the existing snapshot if it was committed.
+    // Note: new error codes sent to older FE clients default to OK per the warning below;
+    // this code is safe because the FE will not retry and will instead surface a user error,
+    // which is preferable to the old behaviour of silently aborting a committed snapshot.
+    SNAPSHOT_PREPARE_MAYBE_COMMITTED = 12001;
+
     // WARNING: Before adding a new MetaServiceCode, consider backward compatibility.
     // This is a proto2 optional enum field. If an older client receives an unrecognized
     // enum value, the field is treated as unset and defaults to OK (= 0), silently
@@ -2111,6 +2155,11 @@ message BeginSnapshotRequest {
     optional int64 ttl_seconds = 5;
     optional string request_ip = 6;
     optional string vault_name = 7;
+
+    // Granular snapshot filter. Empty = full cluster (all tablets protected).
+    repeated int64 included_db_ids = 8;
+    repeated int64 included_table_ids = 9;
+    repeated int64 included_partition_ids = 10;
 }
 
 message BeginSnapshotResponse {
@@ -2122,11 +2171,15 @@ message BeginSnapshotResponse {
 
 message UpdateSnapshotRequest {
     optional string cloud_unique_id = 1;
-    optional string snapshot_id = 2;
+    optional string snapshot_id    = 2;
     // record the multipart upload file_name and upload_id, used for aborting multipart upload
-    optional string upload_file = 3;
-    optional string upload_id = 4;
-    optional string request_ip = 5;
+    optional string upload_file    = 3;
+    optional string upload_id      = 4;
+    optional string request_ip     = 5;
+    // New TTL in seconds from exported_at (or create_at for full-cluster snapshots that have
+    // no FDB export step).  Must be positive and ≤ snapshot_max_ttl_seconds.
+    // When set, replaces the snapshot's current ttl_seconds. Accepted on NORMAL (READY) snapshots.
+    optional int64  ttl_seconds    = 6;
 }
 
 message UpdateSnapshotResponse {
@@ -2141,6 +2194,13 @@ message CommitSnapshotRequest {
     optional string request_ip = 5;
     optional int64 snapshot_meta_image_size = 6;
     optional int64 snapshot_logical_data_size = 7;
+
+    // FE-captured OlapTable schemas: table_id → OlapTable.write() Gson JSON bytes.
+    // Stored in SnapshotPB so export_table_meta can embed them without FE access.
+    map<int64, bytes> table_schema_jsons = 8;
+
+    // Table name list captured inside the quiesce window (mirrors SnapshotPB.captured_tables).
+    repeated CapturedTableInfo captured_tables = 9;
 }
 
 message CommitSnapshotResponse {
@@ -2180,6 +2240,97 @@ message SnapshotInfoPB {
     optional int64 snapshot_retained_data_size = 18;
     optional int64 snapshot_billable_data_size = 19;
     optional string resource_id = 20;
+    // Granular snapshot filter — mirrors SnapshotPB fields 21-25.
+    repeated int64 protected_db_ids = 21;
+    repeated int64 protected_table_ids = 22;
+
+    optional bool rowset_refs_seeded = 23;
+
+    repeated int64 protected_partition_ids = 24;
+
+    optional bool table_meta_exported = 25;
+
+    // Mirrors SnapshotPB fields 26-28.
+    repeated CapturedTableInfo captured_tables = 26;
+    optional int64 exported_at = 27;
+    optional MultiVersionStatus snapshot_cluster_version = 28;
+}
+
+// Partition version with its partition_id — used in TableFdbMetaPB so import_table_meta
+// can reconstruct the partition_version_key without relying on positional ordering.
+message PartitionVersionPB {
+    optional int64     partition_id = 1;
+    optional VersionPB version      = 2;
+}
+
+// FDB metadata for one table exported to S3 for same-cluster restore.
+message TableFdbMetaPB {
+    repeated doris.TabletMetaCloudPB   tablets            = 1;
+    repeated TabletIndexPB             tablet_indexes     = 2;
+    repeated doris.RowsetMetaCloudPB   load_rowsets       = 3;
+    repeated doris.RowsetMetaCloudPB   compact_rowsets    = 4;
+    repeated TabletStatsPB             load_stats         = 5;
+    repeated TabletStatsPB             compact_stats      = 6;
+    reserved                                                7;   // was repeated VersionPB (no partition_id)
+    optional int64                     snapshot_vs_high   = 8;  // versionstamp bytes 0-7 (big-endian uint64)
+    optional int32                     snapshot_vs_low    = 9;  // versionstamp bytes 8-9 (big-endian uint16)
+
+    // Self-describing identifier — which table this export covers.
+    optional int64                     table_id           = 10;
+
+    // If non-empty, only these partition IDs are included (partition-level export).
+    repeated int64                     partition_ids      = 11;
+
+    // Partition versions keyed by partition_id (field 7 was repeated VersionPB without partition_id).
+    repeated PartitionVersionPB        partition_versions = 12;
+
+    // FE-captured OlapTable schema bytes (Doris binary serialization via OlapTable.write()).
+    // Required for dropped-table restore; absent means only new-table restore (with remap) is supported.
+    // NOTE: field name says "_json" for historical reasons; content is binary, not JSON.
+    //       Rename to fe_table_schema_bytes in a future major proto version.
+    optional bytes                     fe_table_schema_json  = 13;
+
+    // MoW delete bitmap entries at snapshot time; only version ≤ V_snapshot included.
+    repeated DeleteBitmapEntryPB       delete_bitmaps     = 14;
+}
+
+// One delete bitmap entry.
+// TODO: add is_binlog_delvec field (CDC only, not query correctness).
+message DeleteBitmapEntryPB {
+    optional int64  tablet_id  = 1;
+    optional string rowset_id  = 2;
+    optional int64  version    = 3;
+    optional int64  segment_id = 4;
+    optional bytes  bitmap     = 5;  // roaringbitmap serialized bytes
+}
+
+message ImportTableMetaRequest {
+    optional string cloud_unique_id = 1;
+    optional int64 table_id = 2;
+    optional bytes fdb_meta_pb = 4;
+    optional string request_ip = 5;
+
+    // If empty, restore all partitions in the blob; otherwise restrict to these IDs.
+    repeated int64 partition_ids = 3;
+
+    // Tablet ID remap: old_tablet_id → new_tablet_id. rowset_id_v2 is NOT remapped —
+    // S3 path = {rowset_id_v2}_{seg}.dat stays identical so tables share S3 files (zero copy).
+    map<int64, int64> tablet_id_remap = 6;
+
+    // Partition ID remap: old_partition_id → new_partition_id.
+    // Prevents import from overwriting the source table's partition versions in FDB.
+    map<int64, int64> partition_id_remap = 7;
+
+    // Target table_id for Path A restore (source table still exists, tablet IDs remapped).
+    // Required on V1 so 0x01 tablet meta and partition version keys use the correct table_id.
+    optional int64 target_table_id = 8;
+}
+
+message ImportTableMetaResponse {
+    optional MetaServiceResponseStatus status = 1;
+    optional int64 tablets_restored = 2;
+    optional int64 rowsets_restored = 3;
+    optional int64 partitions_restored = 4;
 }
 
 message ListSnapshotRequest {
@@ -2383,6 +2534,7 @@ service MetaService {
     rpc list_snapshot(ListSnapshotRequest) returns (ListSnapshotResponse);
     rpc clone_instance(CloneInstanceRequest) returns (CloneInstanceResponse);
     rpc compact_snapshot(CompactSnapshotRequest) returns (CompactSnapshotResponse);
+    rpc import_table_meta(ImportTableMetaRequest) returns (ImportTableMetaResponse);
 
     rpc update_packed_file_info(UpdatePackedFileInfoRequest) returns (UpdatePackedFileInfoResponse);
 };

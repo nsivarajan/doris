@@ -320,6 +320,12 @@ const std::unordered_map<std::string_view, HttpHandlerInfo>& get_http_handlers()
                               return process_compact_snapshot((MS*)s, c);
                           },
                   .role = HttpRole::META_SERVICE}},
+                {"import_table_meta",
+                 {.handler =
+                          [](void* s, brpc::Controller* c) {
+                              return process_import_table_meta((MS*)s, c);
+                          },
+                  .role = HttpRole::META_SERVICE}},
                 {"decouple_instance",
                  {.handler =
                           [](void* s, brpc::Controller* c) {
@@ -1066,6 +1072,15 @@ HttpResponse process_compact_snapshot(MetaServiceImpl* service, brpc::Controller
     req.set_instance_id(instance_id);
     CompactSnapshotResponse resp;
     service->compact_snapshot(ctrl, &req, &resp, nullptr);
+    return http_json_reply(resp.status());
+}
+
+HttpResponse process_import_table_meta(MetaServiceImpl* service, brpc::Controller* ctrl) {
+    // fdb_meta_pb is base64-encoded over HTTP; use gRPC (MetaServiceClient) for large blobs.
+    ImportTableMetaRequest req;
+    PARSE_MESSAGE_OR_RETURN(ctrl, req);
+    ImportTableMetaResponse resp;
+    service->import_table_meta(ctrl, &req, &resp, nullptr);
     return http_json_reply(resp.status());
 }
 

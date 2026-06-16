@@ -41,7 +41,8 @@ import java.util.Map;
 /**
  * CreateDatabaseCommand
  */
-public class CreateDatabaseCommand extends Command implements ForwardWithSync, NeedAuditEncryption {
+public class CreateDatabaseCommand extends Command
+        implements ForwardWithSync, NeedAuditEncryption, SchemaChangingCommand {
     private boolean ifNotExists;
     private String ctlName;
     private String dbName;

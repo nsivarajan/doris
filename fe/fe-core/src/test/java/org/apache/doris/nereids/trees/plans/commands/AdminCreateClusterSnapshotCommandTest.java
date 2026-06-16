@@ -172,4 +172,81 @@ public class AdminCreateClusterSnapshotCommandTest {
         Assertions.assertThrows(AnalysisException.class, () -> command.validate(connectContext),
                 "Access denied; you need (at least one of) the (ADMIN) privilege(s) for this operation");
     }
+
+    @Test
+    public void testValidateDrPropertiesBothSet() throws Exception {
+        // Both dr_instance_id and dr_vault_name set → validation passes.
+        Mockito.when(connectContext.isSkipAuth()).thenReturn(true);
+        Mockito.when(connectContext.getCurrentUserIdentity()).thenReturn(UserIdentity.ROOT);
+        Config.deploy_mode = "cloud";
+
+        Map<String, String> props = ImmutableMap.of(
+                "ttl", "3600",
+                "label", "my-snap",
+                "dr_instance_id", "dr-standby",
+                "dr_vault_name", "dr-vault");
+        AdminCreateClusterSnapshotCommand cmd = new AdminCreateClusterSnapshotCommand(props);
+        Assertions.assertDoesNotThrow(() -> cmd.validate(connectContext));
+    }
+
+    @Test
+    public void testValidateDrInstanceIdWithoutVaultName() {
+        // dr_instance_id set but dr_vault_name omitted → AnalysisException.
+        Mockito.when(connectContext.isSkipAuth()).thenReturn(true);
+        Mockito.when(connectContext.getCurrentUserIdentity()).thenReturn(UserIdentity.ROOT);
+        Config.deploy_mode = "cloud";
+
+        Map<String, String> props = ImmutableMap.of(
+                "ttl", "3600",
+                "label", "my-snap",
+                "dr_instance_id", "dr-standby");
+        AdminCreateClusterSnapshotCommand cmd = new AdminCreateClusterSnapshotCommand(props);
+        Assertions.assertThrows(AnalysisException.class, () -> cmd.validate(connectContext),
+                "Properties 'dr_instance_id' and 'dr_vault_name' must both be set or both omitted");
+    }
+
+    @Test
+    public void testValidateDrVaultNameWithoutInstanceId() {
+        // dr_vault_name set but dr_instance_id omitted → AnalysisException.
+        Mockito.when(connectContext.isSkipAuth()).thenReturn(true);
+        Mockito.when(connectContext.getCurrentUserIdentity()).thenReturn(UserIdentity.ROOT);
+        Config.deploy_mode = "cloud";
+
+        Map<String, String> props = ImmutableMap.of(
+                "ttl", "3600",
+                "label", "my-snap",
+                "dr_vault_name", "dr-vault");
+        AdminCreateClusterSnapshotCommand cmd = new AdminCreateClusterSnapshotCommand(props);
+        Assertions.assertThrows(AnalysisException.class, () -> cmd.validate(connectContext),
+                "Properties 'dr_instance_id' and 'dr_vault_name' must both be set or both omitted");
+    }
+
+    @Test
+    public void testMaxTtlEnforced() {
+        Mockito.when(connectContext.isSkipAuth()).thenReturn(true);
+        Mockito.when(connectContext.getCurrentUserIdentity()).thenReturn(UserIdentity.ROOT);
+        Config.deploy_mode = "cloud";
+        long originalMax = Config.cloud_snapshot_max_ttl_seconds;
+        try {
+            Config.cloud_snapshot_max_ttl_seconds = 86400; // 1 day cap for this test
+
+            // Exactly at cap: allowed.
+            Assertions.assertDoesNotThrow(() ->
+                    new AdminCreateClusterSnapshotCommand(ImmutableMap.of(
+                            "ttl", "86400", "label", "snap1")).validate(connectContext));
+
+            // One second over: rejected.
+            Assertions.assertThrows(AnalysisException.class, () ->
+                    new AdminCreateClusterSnapshotCommand(ImmutableMap.of(
+                            "ttl", "86401", "label", "snap2")).validate(connectContext));
+
+            // cap = 0 disables the limit: any positive ttl is allowed.
+            Config.cloud_snapshot_max_ttl_seconds = 0;
+            Assertions.assertDoesNotThrow(() ->
+                    new AdminCreateClusterSnapshotCommand(ImmutableMap.of(
+                            "ttl", "999999999", "label", "snap3")).validate(connectContext));
+        } finally {
+            Config.cloud_snapshot_max_ttl_seconds = originalMax;
+        }
+    }
 }

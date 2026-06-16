@@ -20,7 +20,8 @@ package org.apache.doris.nereids.trees.plans.commands;
 import org.apache.doris.analysis.RedirectStatus;
 
 /**
- * forward to master and wait sync metadata.
+ * Marker interface for commands that execute on the master FE and wait for
+ * BDB-JE metadata to sync to followers.
  */
 public interface ForwardWithSync extends Forward {
     @Override

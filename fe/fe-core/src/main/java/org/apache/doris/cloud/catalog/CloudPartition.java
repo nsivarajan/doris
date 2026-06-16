@@ -113,9 +113,19 @@ public class CloudPartition extends Partition {
             super.setVisibleVersionAndTime(version, versionUpdateTimeMs);
         }
         lock.unlock();
-
         // versionUpdateTimeMs is the version mtime in MS, which is unlikely equal to lastVersionCachedTimeMs in FE
         lastVersionCachedTimeMs = System.currentTimeMillis();
+    }
+
+    /**
+     * Force reset cached visible version to -1 so getVisibleVersion() queries MS fresh,
+     * bypassing the monotonic guard in setCachedVisibleVersion(). Used on snapshot restore.
+     */
+    public void forceResetVisibleVersion() {
+        lock.lock();
+        super.setVisibleVersionAndTime(-1L, 0L);
+        lock.unlock();
+        lastVersionCachedTimeMs = 0;
     }
 
     @Override
@@ -249,11 +259,14 @@ public class CloudPartition extends Partition {
         int size = versions.size();
         for (int i = 0; i < size; ++i) {
             Long version = versions.get(i);
+            if (LOG.isDebugEnabled()) {
+                LOG.debug("getSnapshotVisibleVersionFromMs db={} table={} partition={} version={}",
+                        dbIds.get(i), tableIds.get(i), partitionIds.get(i), version);
+            }
             if (version > Partition.PARTITION_INIT_VERSION) {
-                // For compatibility, the existing partitions may not have mtime
                 long mTime = versions.size() == versionUpdateTimesMs.size() ? versionUpdateTimesMs.get(i) : 0;
                 partitions.get(i).setCachedVisibleVersion(versions.get(i), mTime);
-            } else { // No data has been written to this partition
+            } else {
                 partitions.get(i).setCachedVisibleVersion(Partition.PARTITION_INIT_VERSION, System.currentTimeMillis());
             }
         }

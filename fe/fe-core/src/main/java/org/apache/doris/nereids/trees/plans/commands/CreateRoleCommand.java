@@ -35,7 +35,7 @@ import com.google.common.base.Strings;
 /**
  * Create role command
  */
-public class CreateRoleCommand extends Command implements ForwardWithSync {
+public class CreateRoleCommand extends Command implements ForwardWithSync, SchemaChangingCommand {
     private boolean ifNotExists;
     private String role;
     private String comment;

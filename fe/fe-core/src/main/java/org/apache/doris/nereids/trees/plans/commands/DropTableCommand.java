@@ -34,7 +34,7 @@ import com.google.common.base.Strings;
 /**
  * drop table command
  */
-public class DropTableCommand extends Command implements ForwardWithSync {
+public class DropTableCommand extends Command implements ForwardWithSync, SchemaChangingCommand {
 
     private boolean ifExists;
     private boolean mustTemporary;

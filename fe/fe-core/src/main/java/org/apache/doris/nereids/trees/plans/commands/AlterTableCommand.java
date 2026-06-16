@@ -72,7 +72,7 @@ import java.util.Map;
 /**
  * AlterTableCommand
  */
-public class AlterTableCommand extends Command implements ForwardWithSync {
+public class AlterTableCommand extends Command implements ForwardWithSync, SchemaChangingCommand {
     private TableNameInfo tbl;
     private List<AlterTableOp> ops;
     private List<AlterTableOp> originOps;

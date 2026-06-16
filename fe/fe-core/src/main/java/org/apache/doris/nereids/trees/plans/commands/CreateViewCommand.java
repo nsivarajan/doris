@@ -26,7 +26,7 @@ import org.apache.doris.qe.ConnectContext;
 import org.apache.doris.qe.StmtExecutor;
 
 /** CreateViewCommand */
-public class CreateViewCommand extends Command implements ForwardWithSync {
+public class CreateViewCommand extends Command implements ForwardWithSync, SchemaChangingCommand {
     private final CreateViewInfo createViewInfo;
 
     public CreateViewCommand(CreateViewInfo createViewInfo) {

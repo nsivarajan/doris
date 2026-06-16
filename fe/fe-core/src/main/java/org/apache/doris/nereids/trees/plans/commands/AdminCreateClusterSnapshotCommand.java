@@ -39,19 +39,33 @@ import java.util.Map;
 import java.util.Objects;
 
 /**
- * ADMIN CREATE CLUSTER SNAPSHOT PROPERTIES('ttl' = '3600', 'label' = 'test_snapshot');
+ * ADMIN CREATE CLUSTER SNAPSHOT PROPERTIES(
+ *   'ttl'              = '3600',
+ *   'label'            = 'my-snap',
+ *   'vault_name'       = 'my-vault',          -- optional: storage vault for the image
+ *   'for_dbs'          = 'orders,payments',   -- optional: protect only these DBs' rowsets
+ *   'for_tables'       = 'db.t1,db.t2',       -- optional: protect only these tables' rowsets
+ *   'for_partitions'   = 'db.t1.p1,db.t1.p2'  -- optional: protect only these partitions' rowsets
+ * );
+ * for_dbs, for_tables, and for_partitions are mutually exclusive. Omitting all = full-cluster snapshot.
  */
 public class AdminCreateClusterSnapshotCommand extends Command implements ForwardWithSync {
 
     public static final String PROP_TTL = "ttl";
     public static final String PROP_LABEL = "label";
     public static final String PROP_VAULT_NAME = "vault_name";
+    public static final String PROP_FOR_DBS = "for_dbs";
+    public static final String PROP_FOR_TABLES = "for_tables";
+    public static final String PROP_FOR_PARTITIONS = "for_partitions";
     private static final Logger LOG = LogManager.getLogger(AdminCreateClusterSnapshotCommand.class);
 
     private Map<String, String> properties;
     private long ttl;
     private String label = null;
     private String vaultName = null;
+    private String forDbs = null;        // comma-separated DB names
+    private String forTables = null;     // comma-separated db.table names
+    private String forPartitions = null; // comma-separated db.table.partition names
 
     /**
      * AdminCreateClusterSnapshotCommand
@@ -66,7 +80,7 @@ public class AdminCreateClusterSnapshotCommand extends Command implements Forwar
     public void run(ConnectContext ctx, StmtExecutor executor) throws Exception {
         validate(ctx);
         CloudSnapshotHandler cloudSnapshotHandler = ((CloudEnv) ctx.getEnv()).getCloudSnapshotHandler();
-        cloudSnapshotHandler.submitJob(ttl, label, vaultName);
+        cloudSnapshotHandler.submitJob(ttl, label, vaultName, forDbs, forTables, forPartitions);
     }
 
     /**
@@ -95,13 +109,18 @@ public class AdminCreateClusterSnapshotCommand extends Command implements Forwar
         for (Map.Entry<String, String> entry : properties.entrySet()) {
             if (entry.getKey().equalsIgnoreCase(PROP_TTL)) {
                 try {
-                    ttl = Long.valueOf(entry.getValue());
+                    ttl = Long.parseLong(entry.getValue());
                 } catch (NumberFormatException e) {
                     throw new AnalysisException(
                             "Invalid value: " + entry.getValue() + " of property: " + entry.getKey());
                 }
                 if (ttl <= 0) {
                     throw new AnalysisException("Property 'ttl' must be positive: " + entry.getValue());
+                }
+                long maxTtl = Config.cloud_snapshot_max_ttl_seconds;
+                if (maxTtl > 0 && ttl > maxTtl) {
+                    throw new AnalysisException("'ttl' exceeds maximum of " + maxTtl
+                            + "s — raise cloud_snapshot_max_ttl_seconds in fe.conf if needed");
                 }
             } else if (entry.getKey().equalsIgnoreCase(PROP_LABEL)) {
                 label = entry.getValue();
@@ -113,6 +132,21 @@ public class AdminCreateClusterSnapshotCommand extends Command implements Forwar
                 if (vaultName == null || vaultName.isEmpty()) {
                     throw new AnalysisException("Property 'vault_name' cannot be empty");
                 }
+            } else if (entry.getKey().equalsIgnoreCase(PROP_FOR_DBS)) {
+                forDbs = entry.getValue();
+                if (forDbs == null || forDbs.trim().isEmpty()) {
+                    throw new AnalysisException("Property 'for_dbs' cannot be empty");
+                }
+            } else if (entry.getKey().equalsIgnoreCase(PROP_FOR_TABLES)) {
+                forTables = entry.getValue();
+                if (forTables == null || forTables.trim().isEmpty()) {
+                    throw new AnalysisException("Property 'for_tables' cannot be empty");
+                }
+            } else if (entry.getKey().equalsIgnoreCase(PROP_FOR_PARTITIONS)) {
+                forPartitions = entry.getValue();
+                if (forPartitions == null || forPartitions.trim().isEmpty()) {
+                    throw new AnalysisException("Property 'for_partitions' cannot be empty");
+                }
             } else {
                 throw new AnalysisException("Unknown property: " + entry.getKey());
             }
@@ -123,6 +157,18 @@ public class AdminCreateClusterSnapshotCommand extends Command implements Forwar
         }
         if (label == null || label.isEmpty()) {
             throw new AnalysisException("Property 'label' is required");
+        }
+        if (forDbs != null && forTables != null) {
+            throw new AnalysisException(
+                    "Properties 'for_dbs' and 'for_tables' are mutually exclusive");
+        }
+        if (forDbs != null && forPartitions != null) {
+            throw new AnalysisException(
+                    "Properties 'for_dbs' and 'for_partitions' are mutually exclusive");
+        }
+        if (forTables != null && forPartitions != null) {
+            throw new AnalysisException(
+                    "Properties 'for_tables' and 'for_partitions' are mutually exclusive");
         }
     }
 

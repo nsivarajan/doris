@@ -28,7 +28,8 @@ import org.apache.doris.qe.StmtExecutor;
 /**
  * create resource command
  */
-public class CreateResourceCommand extends Command implements ForwardWithSync, NeedAuditEncryption {
+public class CreateResourceCommand extends Command
+        implements ForwardWithSync, NeedAuditEncryption, SchemaChangingCommand {
     private final CreateResourceInfo info;
 
     public CreateResourceCommand(CreateResourceInfo info) {

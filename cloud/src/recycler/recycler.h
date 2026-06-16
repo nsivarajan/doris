@@ -424,6 +424,11 @@ public:
                                        Versionstamp snapshot_version,
                                        const SnapshotPB& snapshot_pb);
 
+    // Export FDB metadata for protected tables/partitions to S3.
+    // Returns 0 on success, -1 on error (safe to retry next recycler cycle).
+    int export_table_meta(const std::string& instance_id, const std::string& resource_id,
+                          Versionstamp snapshot_vs, const SnapshotPB& snap);
+
 private:
     // returns 0 for success otherwise error
     int init_obj_store_accessors();
@@ -518,9 +523,6 @@ private:
 
     // Cleanup metadata for deleted rowsets, return 0 for success otherwise error
     int cleanup_rowset_metadata(const std::vector<RowsetDeleteTask>& tasks);
-
-    // Whether the instance has any snapshots, return 0 for success otherwise error.
-    int has_cluster_snapshots(bool* any);
 
     // Whether need to recycle versioned keys
     bool should_recycle_versioned_keys() const;

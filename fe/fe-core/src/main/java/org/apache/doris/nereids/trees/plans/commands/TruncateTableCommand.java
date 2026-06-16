@@ -37,7 +37,7 @@ import java.util.Optional;
 /**
  * TRUNCATE TABLE tbl [PARTITION(p1, p2, ...)]
  */
-public class TruncateTableCommand extends Command implements ForwardWithSync {
+public class TruncateTableCommand extends Command implements ForwardWithSync, SchemaChangingCommand {
     private final TableNameInfo tableNameInfo;
     private final Optional<PartitionNamesInfo> partitionNamesInfo;
     private final boolean forceDrop;

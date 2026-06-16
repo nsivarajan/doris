@@ -94,6 +94,11 @@ public:
 
     void set_tablet_id(int64_t tablet_id) { _rowset_meta_pb.set_tablet_id(tablet_id); }
 
+    // source_tablet_id / source_rowset_id: set by import_table_meta for path-A snapshot
+    // restore so the BE can resolve the correct S3 path (files remain at the original prefix).
+    bool has_source_tablet_id() const { return _rowset_meta_pb.has_source_tablet_id(); }
+    int64_t source_tablet_id() const { return _rowset_meta_pb.source_tablet_id(); }
+
     int64_t db_id() const { return _rowset_meta_pb.db_id(); }
 
     void set_db_id(int64_t db_id) { _rowset_meta_pb.set_db_id(db_id); }

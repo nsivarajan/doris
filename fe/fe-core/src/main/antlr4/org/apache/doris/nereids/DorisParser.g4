@@ -409,6 +409,10 @@ supportedShowStatement
     | SHOW GRANTS FOR userIdentify                                                  #showGrantsForUser
     | SHOW CREATE USER userIdentify                                                 #showCreateUser
     | SHOW SNAPSHOT ON repo=identifier wildWhere?                                   #showSnapshot
+    | SHOW CLUSTER SNAPSHOTS                                                        #showClusterSnapshots
+    | SHOW CLUSTER SNAPSHOT HISTORY                                                 #showClusterSnapshotHistory
+    | SHOW CLUSTER SNAPSHOTS HISTORY                                                #showClusterSnapshotHistory
+    | SHOW CLUSTER SNAPSHOTS FOR DR                                                 #showClusterSnapshotsForDr
     | SHOW LOAD PROFILE loadIdPath=STRING_LITERAL? limitClause?                     #showLoadProfile
     | SHOW CREATE REPOSITORY FOR identifier                                         #showCreateRepository
     | SHOW VIEW
@@ -665,9 +669,20 @@ supportedAdminStatement
     | ADMIN SET TABLE name=multipartIdentifier
         PARTITION VERSION properties=propertyClause?                                #adminSetPartitionVersion
     | ADMIN CREATE CLUSTER SNAPSHOT propertyClause?                                 #adminCreateClusterSnapshot
+    | ADMIN ALTER CLUSTER SNAPSHOT WHERE (key=identifier) EQ (value=STRING_LITERAL)
+        SET propertyClause                                                           #adminAlterClusterSnapshot
     | ADMIN SET AUTO CLUSTER SNAPSHOT propertyClause?                               #adminSetAutoClusterSnapshot
-    | ADMIN DROP CLUSTER SNAPSHOT WHERE (key=identifier) EQ (value=STRING_LITERAL)  #adminDropClusterSnapshot
-    | ADMIN SET CLUSTER SNAPSHOT FEATURE (ON | OFF)                                 #adminSetClusterSnapshotFeatureSwitch
+    | ADMIN DROP CLUSTER SNAPSHOT WHERE (key=identifier) EQ (value=STRING_LITERAL)    #adminDropClusterSnapshot
+    | ADMIN RESTORE CLUSTER SNAPSHOT WHERE (key=identifier) EQ (value=STRING_LITERAL) #adminRestoreClusterSnapshot
+    | ADMIN SET CLUSTER SNAPSHOT FEATURE (ON | OFF)                                   #adminSetClusterSnapshotFeatureSwitch
+    | ADMIN RESTORE CLUSTER SNAPSHOT WHERE (key=identifier) EQ snapshotId=STRING_LITERAL
+        FOR TABLE tableName=multipartIdentifier
+        (PARTITIONS LEFT_PAREN partitionNames+=identifier
+            (COMMA partitionNames+=identifier)* RIGHT_PAREN)?
+        (AS targetTableName=multipartIdentifier)?                                      #adminRestoreTableSnapshot
+    | ADMIN RESTORE CLUSTER SNAPSHOT WHERE (key=identifier) EQ snapshotId=STRING_LITERAL
+        FOR DATABASE sourceDb=identifier
+        (AS targetDb=identifier)?                                                       #adminRestoreDbSnapshot
     | ADMIN ROTATE TDE ROOT KEY properties=propertyClause?                          #adminRotateTdeRootKey
     ;
 
@@ -2092,6 +2107,7 @@ nonReserved
     | DORIS_INTERNAL_TABLE_ID
     | DOW
     | DOY
+    | DR
     | DUAL
     | DYNAMIC
     | E
@@ -2134,6 +2150,7 @@ nonReserved
     | HELP
     | HINT_END
     | HINT_START
+    | HISTORY
     | HISTOGRAM
     | HLL_UNION
     | HOSTNAME

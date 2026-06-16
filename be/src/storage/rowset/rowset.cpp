@@ -154,7 +154,13 @@ Result<std::string> Rowset::segment_path(int64_t seg_id) {
     }
 
     return _rowset_meta->remote_storage_resource().transform([=, this](auto&& storage_resource) {
-        return storage_resource->remote_segment_path(_rowset_meta->tablet_id(),
+        // source_tablet_id is set by import_table_meta for path-A snapshot restore.
+        // Must check > 0: pb_convert.cpp copies it unconditionally even when unset (default 0).
+        int64_t tid = (_rowset_meta->has_source_tablet_id()
+                               && _rowset_meta->source_tablet_id() > 0)
+                              ? _rowset_meta->source_tablet_id()
+                              : _rowset_meta->tablet_id();
+        return storage_resource->remote_segment_path(tid,
                                                      _rowset_meta->rowset_id().to_string(), seg_id);
     });
 }

@@ -863,16 +863,8 @@ int InstanceRecycler::recycle_deleted_instance() {
         return -1;
     }
 
-    // Step 4: Check if there are still cluster snapshots
-    bool has_snapshots = false;
-    if (has_cluster_snapshots(&has_snapshots) != 0) {
-        LOG(WARNING) << "check instance cluster snapshots failed, instance_id=" << instance_id_;
-        ret = -1;
-        return -1;
-    } else if (has_snapshots) {
-        LOG(INFO) << "instance has cluster snapshots, skip recycling, instance_id=" << instance_id_;
-        return 0;
-    }
+    // Step 4: Per-rowset ref counts protect snapshot data (no global gate).
+    // recycle_rowset_meta_and_data() decrements ref_count instead of deleting when ref_count > 1.
 
     bool snapshot_enabled = instance_info().has_snapshot_switch_status() &&
                             instance_info().snapshot_switch_status() !=

@@ -42,7 +42,8 @@ import java.util.Objects;
 /**
  * Command to create a catalog in the Nereids planner.
  */
-public class CreateCatalogCommand extends Command implements ForwardWithSync, NeedAuditEncryption {
+public class CreateCatalogCommand extends Command
+        implements ForwardWithSync, NeedAuditEncryption, SchemaChangingCommand {
     private final String catalogName;
     private final boolean ifNotExists;
     private final String resourceName;

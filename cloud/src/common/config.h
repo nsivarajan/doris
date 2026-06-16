@@ -408,8 +408,9 @@ CONF_mBool(enable_logging_conflict_keys, "false");
 CONF_Int64(prune_aborted_snapshot_seconds, "3600"); // 1h
 
 // Snapshot configuration limits
-CONF_Int32(snapshot_min_interval_seconds, "3600"); // 1h min interval limit
-CONF_Int32(snapshot_max_reserved_num, "35");       // max reserved snapshots limit
+CONF_Int32(snapshot_min_interval_seconds, "3600");  // 1h min interval limit
+CONF_Int32(snapshot_max_reserved_num, "35");        // max reserved snapshots limit
+CONF_Int64(snapshot_max_ttl_seconds, "2592000");    // 30d max TTL; 0 = no cap
 // New instance enable multi version status by default.
 // The new instance multi version status will be set to MULTI_VERSION_READ_WRITE.
 CONF_Bool(enable_multi_version_status, "false");
@@ -431,6 +432,11 @@ CONF_Int32(snapshot_chain_compactor_concurrent, "2");
 // - Increases CPU usage (proportional to parallelism)
 // - Increases FDB load and may raise conflict rate
 CONF_Int32(snapshot_migrate_parallelism, "2");
+CONF_mInt32(snapshot_migrate_batch_size, "500");
+CONF_mInt32(snapshot_compact_batch_size, "500");
+CONF_mInt32(snapshot_seed_batch_size, "500");
+// Smaller than snapshot_seed_batch_size — import payloads (bitmaps + partition versions) are larger.
+CONF_mInt32(snapshot_import_batch_size, "200");
 CONF_Int32(snapshot_compact_parallelism, "2");
 
 CONF_mString(aws_credentials_provider_version, "v2");

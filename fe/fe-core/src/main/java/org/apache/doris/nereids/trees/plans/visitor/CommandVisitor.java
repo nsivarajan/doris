@@ -18,6 +18,7 @@
 package org.apache.doris.nereids.trees.plans.visitor;
 
 import org.apache.doris.nereids.trees.plans.commands.AddConstraintCommand;
+import org.apache.doris.nereids.trees.plans.commands.AdminAlterClusterSnapshotCommand;
 import org.apache.doris.nereids.trees.plans.commands.AdminCancelRebalanceDiskCommand;
 import org.apache.doris.nereids.trees.plans.commands.AdminCancelRepairTableCommand;
 import org.apache.doris.nereids.trees.plans.commands.AdminCheckTabletsCommand;
@@ -28,6 +29,9 @@ import org.apache.doris.nereids.trees.plans.commands.AdminCreateClusterSnapshotC
 import org.apache.doris.nereids.trees.plans.commands.AdminDropClusterSnapshotCommand;
 import org.apache.doris.nereids.trees.plans.commands.AdminRebalanceDiskCommand;
 import org.apache.doris.nereids.trees.plans.commands.AdminRepairTableCommand;
+import org.apache.doris.nereids.trees.plans.commands.AdminRestoreClusterSnapshotCommand;
+import org.apache.doris.nereids.trees.plans.commands.AdminRestoreDbSnapshotCommand;
+import org.apache.doris.nereids.trees.plans.commands.AdminRestoreTableSnapshotCommand;
 import org.apache.doris.nereids.trees.plans.commands.AdminRotateTdeRootKeyCommand;
 import org.apache.doris.nereids.trees.plans.commands.AdminSetAutoClusterSnapshotCommand;
 import org.apache.doris.nereids.trees.plans.commands.AdminSetClusterSnapshotFeatureSwitchCommand;
@@ -185,6 +189,8 @@ import org.apache.doris.nereids.trees.plans.commands.ShowBuiltinFunctionsCommand
 import org.apache.doris.nereids.trees.plans.commands.ShowCatalogCommand;
 import org.apache.doris.nereids.trees.plans.commands.ShowCatalogRecycleBinCommand;
 import org.apache.doris.nereids.trees.plans.commands.ShowCharsetCommand;
+import org.apache.doris.nereids.trees.plans.commands.ShowClusterSnapshotsCommand;
+import org.apache.doris.nereids.trees.plans.commands.ShowClusterSnapshotsForDrCommand;
 import org.apache.doris.nereids.trees.plans.commands.ShowClustersCommand;
 import org.apache.doris.nereids.trees.plans.commands.ShowCollationCommand;
 import org.apache.doris.nereids.trees.plans.commands.ShowColumnHistogramStatsCommand;
@@ -1268,6 +1274,36 @@ public interface CommandVisitor<R, C> {
     default R visitAdminDropClusterSnapshotCommand(
             AdminDropClusterSnapshotCommand adminDropClusterSnapshotCommand, C context) {
         return visitCommand(adminDropClusterSnapshotCommand, context);
+    }
+
+    default R visitAdminAlterClusterSnapshotCommand(
+            AdminAlterClusterSnapshotCommand adminAlterClusterSnapshotCommand, C context) {
+        return visitCommand(adminAlterClusterSnapshotCommand, context);
+    }
+
+    default R visitAdminRestoreClusterSnapshotCommand(
+            AdminRestoreClusterSnapshotCommand adminRestoreClusterSnapshotCommand, C context) {
+        return visitCommand(adminRestoreClusterSnapshotCommand, context);
+    }
+
+    default R visitAdminRestoreTableSnapshotCommand(
+            AdminRestoreTableSnapshotCommand adminRestoreTableSnapshotCommand, C context) {
+        return visitCommand(adminRestoreTableSnapshotCommand, context);
+    }
+
+    default R visitAdminRestoreDbSnapshotCommand(
+            AdminRestoreDbSnapshotCommand adminRestoreDbSnapshotCommand, C context) {
+        return visitCommand(adminRestoreDbSnapshotCommand, context);
+    }
+
+    default R visitShowClusterSnapshotsCommand(
+            ShowClusterSnapshotsCommand showClusterSnapshotsCommand, C context) {
+        return visitCommand(showClusterSnapshotsCommand, context);
+    }
+
+    default R visitShowClusterSnapshotsForDrCommand(
+            ShowClusterSnapshotsForDrCommand command, C context) {
+        return visitCommand(command, context);
     }
 
     default R visitAdminRepairTableCommand(AdminRepairTableCommand adminRepairTableCommand, C context) {

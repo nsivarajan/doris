@@ -279,12 +279,17 @@ public class AuditLogHelper {
                 .setCloudCluster(Strings.isNullOrEmpty(cluster) ? "UNKNOWN" : cluster)
                 .setWorkloadGroup(ctx.getWorkloadGroupName());
 
+        // Strip 0x1F/0x1E (AuditLoader CSV separators) to prevent row corruption.
+        SessionVariable sv = ctx.getSessionVariable();
+        auditEventBuilder.setSessionContext(sv != null
+                ? truncateByBytes(sv.sessionContext.replace('\u001F', ' ').replace('\u001E', ' '), 1024, "...") : "");
+
         // sql mode
-        if (ctx.sessionVariable != null) {
+        if (sv != null) {
             try {
-                auditEventBuilder.setSqlMode(SqlModeHelper.decode(ctx.sessionVariable.getSqlMode()));
+                auditEventBuilder.setSqlMode(SqlModeHelper.decode(sv.getSqlMode()));
             } catch (Exception e) {
-                LOG.warn("decode sql mode {} failed.", ctx.sessionVariable.getSqlMode(), e);
+                LOG.warn("decode sql mode {} failed.", sv.getSqlMode(), e);
             }
         }
 

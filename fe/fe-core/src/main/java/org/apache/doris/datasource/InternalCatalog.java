@@ -1326,8 +1326,8 @@ public class InternalCatalog implements CatalogIf<Database> {
             long tableId = table.getId();
             for (Partition partition : olapTable.getAllPartitions()) {
                 long partitionId = partition.getId();
-                TStorageMedium medium = olapTable.getPartitionInfo().getDataProperty(partitionId)
-                        .getStorageMedium();
+                DataProperty dp = olapTable.getPartitionInfo().getDataProperty(partitionId);
+                TStorageMedium medium = (dp != null) ? dp.getStorageMedium() : TStorageMedium.HDD;
                 for (MaterializedIndex mIndex : partition.getMaterializedIndices(IndexExtState.ALL)) {
                     long indexId = mIndex.getId();
                     int schemaHash = olapTable.getSchemaHashByIndexId(indexId);
@@ -1345,6 +1345,35 @@ public class InternalCatalog implements CatalogIf<Database> {
             if (!Env.isCheckpointThread()) {
                 DynamicPartitionUtil.registerOrRemoveDynamicPartitionTable(dbId, olapTable, true);
             }
+        }
+    }
+
+    /** Populates TabletInvertedIndex for a table already registered in the catalog.
+     *  Use instead of replayCreateTable when the table is already registered — avoids a
+     *  redundant createTableWithLock call while still making tablets immediately visible to DML. */
+    public void populateTabletInvertedIndex(Database db, OlapTable olapTable) {
+        long dbId = db.getId();
+        long tableId = olapTable.getId();
+        TabletInvertedIndex invertedIndex = Env.getCurrentInvertedIndex();
+        for (Partition partition : olapTable.getAllPartitions()) {
+            long partitionId = partition.getId();
+            DataProperty dp = olapTable.getPartitionInfo().getDataProperty(partitionId);
+            TStorageMedium medium = (dp != null) ? dp.getStorageMedium() : TStorageMedium.HDD;
+            for (MaterializedIndex mIndex : partition.getMaterializedIndices(IndexExtState.ALL)) {
+                long indexId = mIndex.getId();
+                int schemaHash = olapTable.getSchemaHashByIndexId(indexId);
+                for (Tablet tablet : mIndex.getTablets()) {
+                    long tabletId = tablet.getId();
+                    invertedIndex.addTablet(tabletId, new TabletMeta(dbId, tableId, partitionId,
+                            indexId, schemaHash, medium));
+                    for (Replica replica : tablet.getReplicas()) {
+                        invertedIndex.addReplica(tabletId, replica);
+                    }
+                }
+            }
+        }
+        if (!Env.isCheckpointThread()) {
+            DynamicPartitionUtil.registerOrRemoveDynamicPartitionTable(dbId, olapTable, true);
         }
     }
 

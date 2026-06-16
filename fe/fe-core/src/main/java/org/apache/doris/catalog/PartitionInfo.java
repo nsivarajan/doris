@@ -212,6 +212,34 @@ public class PartitionInfo {
         return partitionItem;
     }
 
+    /**
+     * Update all partition-ID-keyed maps from oldId to newId after setIdForRestore()
+     * to prevent NPE during EditLog replay on follower FEs.
+     */
+    public void renamePartitionId(long oldId, long newId) {
+        if (idToItem.containsKey(oldId)) {
+            idToItem.put(newId, idToItem.remove(oldId));
+        }
+        if (idToTempItem.containsKey(oldId)) {
+            idToTempItem.put(newId, idToTempItem.remove(oldId));
+        }
+        if (idToDataProperty.containsKey(oldId)) {
+            idToDataProperty.put(newId, idToDataProperty.remove(oldId));
+        }
+        if (idToReplicaAllocation.containsKey(oldId)) {
+            idToReplicaAllocation.put(newId, idToReplicaAllocation.remove(oldId));
+        }
+        if (idToInMemory.containsKey(oldId)) {
+            idToInMemory.put(newId, idToInMemory.remove(oldId));
+        }
+        if (idToStoragePolicy.containsKey(oldId)) {
+            idToStoragePolicy.put(newId, idToStoragePolicy.remove(oldId));
+        }
+        if (idToTabletType != null && idToTabletType.containsKey(oldId)) {
+            idToTabletType.put(newId, idToTabletType.remove(oldId));
+        }
+    }
+
     public PartitionItem createAndCheckPartitionItem(SinglePartitionDesc desc, boolean isTemp) throws DdlException {
         return null;
     }

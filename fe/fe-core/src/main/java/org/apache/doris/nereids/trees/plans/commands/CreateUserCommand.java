@@ -26,7 +26,7 @@ import org.apache.doris.qe.ConnectContext;
 import org.apache.doris.qe.StmtExecutor;
 
 /** CreateUserCommand */
-public class CreateUserCommand extends Command implements ForwardWithSync, NeedAuditEncryption {
+public class CreateUserCommand extends Command implements ForwardWithSync, NeedAuditEncryption, SchemaChangingCommand {
     private final CreateUserInfo info;
 
     public CreateUserCommand(CreateUserInfo info) {

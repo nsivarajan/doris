@@ -68,7 +68,7 @@ import java.util.stream.Collectors;
  * create table command
  */
 @Developing
-public class CreateTableCommand extends Command implements NeedAuditEncryption, ForwardWithSync {
+public class CreateTableCommand extends Command implements NeedAuditEncryption, ForwardWithSync, SchemaChangingCommand {
     public static final Logger LOG = LogManager.getLogger(CreateTableCommand.class);
 
     private final Optional<LogicalPlan> ctasQuery;

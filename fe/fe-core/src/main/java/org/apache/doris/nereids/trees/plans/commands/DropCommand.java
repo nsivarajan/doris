@@ -25,7 +25,7 @@ import org.apache.doris.qe.StmtExecutor;
 /**
  * base class for all drop commands
  */
-public abstract class DropCommand extends Command implements ForwardWithSync {
+public abstract class DropCommand extends Command implements ForwardWithSync, SchemaChangingCommand {
     public DropCommand(PlanType type) {
         super(type);
     }

@@ -609,4 +609,14 @@ public class MetaServiceProxy {
     public Cloud.CloneInstanceResponse cloneInstance(Cloud.CloneInstanceRequest request) throws RpcException {
         return executeWithMetrics("cloneInstance", (client) -> client.cloneInstance(request));
     }
+
+    public Cloud.CompactSnapshotResponse compactSnapshot(Cloud.CompactSnapshotRequest request)
+            throws RpcException {
+        return executeWithMetrics("compactSnapshot", (client) -> client.compactSnapshot(request));
+    }
+
+    public Cloud.ImportTableMetaResponse importTableMeta(Cloud.ImportTableMetaRequest request)
+            throws RpcException {
+        return executeWithMetrics("importTableMeta", (client) -> client.importTableMeta(request));
+    }
 }

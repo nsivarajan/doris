@@ -161,6 +161,10 @@ public class AuditEvent {
     @AuditField(value = "ComputeGroupName", colName = "compute_group")
     public String cloudClusterName = "";
 
+    // Client-set connection tag. SET session_context = "app:MCP;trace_id:xyz"
+    @AuditField(value = "SessionContext", colName = "session_context")
+    public String sessionContext = "";
+
     // stmt should be last one
     @AuditField(value = "Stmt", colName = "stmt")
     public String stmt = "";
@@ -395,6 +399,11 @@ public class AuditEvent {
 
         public AuditEventBuilder setChosenMViews(String chosenMViews) {
             auditEvent.chosenMViews = chosenMViews;
+            return this;
+        }
+
+        public AuditEventBuilder setSessionContext(String sessionContext) {
+            auditEvent.sessionContext = sessionContext == null ? "" : sessionContext;
             return this;
         }
 

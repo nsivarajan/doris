@@ -19,6 +19,9 @@
 
 #include <gen_cpp/cloud.pb.h>
 
+#include <cstdint>
+#include <vector>
+
 #include "meta-store/txn_kv.h"
 #include "meta-store/versionstamp.h"
 
@@ -109,6 +112,27 @@ public:
     // Compress snapshot chains for the instance.
     // Return 0 for success otherwise error.
     virtual int compact_snapshot_chains(InstanceChainCompactor* compactor);
+
+    // Seed ref counts after commit_snapshot; empty ids = full-cluster.
+    int seed_rowset_ref_counts(std::string_view instance_id, Versionstamp snapshot_vs,
+                               const std::vector<int64_t>& included_db_ids,
+                               const std::vector<int64_t>& included_table_ids,
+                               const std::vector<int64_t>& included_partition_ids);
+
+    // Unseed per-rowset ref counts when a snapshot expires or is dropped.
+    int unseed_rowset_ref_counts(std::string_view instance_id, Versionstamp snapshot_vs);
+
+    // Export FDB metadata to S3 blobs after seeding; retry-safe.
+    int export_table_meta(std::string_view instance_id, StorageVaultAccessor* accessor,
+                          Versionstamp snapshot_vs, const SnapshotPB& snap);
+
+    // Import FDB metadata from S3 blob for same-cluster restore.
+    void import_table_meta(std::string_view instance_id, const ImportTableMetaRequest& request,
+                           ImportTableMetaResponse* response, bool is_versioned_write = false);
+
+    // Write DR runbook and JSON manifest to S3 for full-cluster snapshots.
+    void upload_dr_manifest(StorageVaultAccessor* accessor, const SnapshotPB& snap,
+                             Versionstamp snapshot_vs, const std::string& instance_id);
 
 protected:
     SnapshotManager(const SnapshotManager&) = delete;

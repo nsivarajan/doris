@@ -519,13 +519,17 @@ void MetaServiceImpl::batch_get_version(::google::protobuf::RpcController* contr
                 }
             } else {
                 std::vector<VersionPB> partition_versions;
-                for (auto&& value : version_values) {
+                for (size_t k = 0; k < version_values.size(); ++k) {
                     VersionPB version_pb;
-                    if (!value.has_value()) {
-                        // return -1 if the target version is not exists.
+                    if (!version_values[k].has_value()) {
                         version_pb.set_version(-1);
                         version_pb.set_update_time_ms(-1);
-                    } else if (!version_pb.ParseFromString(*value)) {
+                        VLOG_DEBUG << "batch_get_version: partition_version_key not found"
+                                   << " instance_id=" << instance_id
+                                   << " db_id=" << request->db_ids(i + k)
+                                   << " table_id=" << request->table_ids(i + k)
+                                   << " partition_id=" << request->partition_ids(i + k);
+                    } else if (!version_pb.ParseFromString(*version_values[k])) {
                         code = MetaServiceCode::PROTOBUF_PARSE_ERR;
                         msg = "malformed version value";
                         break;

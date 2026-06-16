@@ -497,7 +497,8 @@ public class CloudEnv extends Env {
     @Override
     protected void cloneClusterSnapshot() throws Exception {
         if (this.clusterSnapshotFile != null) {
-            this.cloudSnapshotHandler.cloneSnapshot(this.clusterSnapshotFile);
+            throw new org.apache.doris.common.NotImplementedException(
+                    "Full cluster restore via --cluster_snapshot is not yet implemented.");
         }
     }
 

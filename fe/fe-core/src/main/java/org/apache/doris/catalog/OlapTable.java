@@ -1323,6 +1323,17 @@ public class OlapTable extends Table implements MTMVRelatedTableIf, GsonPostProc
         nameToPartition.put(partition.getName(), partition);
     }
 
+    /**
+     * Rekey idToPartition after setIdForRestore() so getPartition(newId) succeeds
+     * and the query planner can locate tablets for the restored table.
+     */
+    public void renamePartitionId(long oldId, long newId) {
+        Partition partition = idToPartition.remove(oldId);
+        if (partition != null) {
+            idToPartition.put(newId, partition);
+        }
+    }
+
     // This is a private method.
     // Call public "dropPartitionAndReserveTablet" and "dropPartition"
     private Partition dropPartition(long dbId, String partitionName, boolean isForceDrop, boolean reserveTablets) {

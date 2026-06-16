@@ -173,6 +173,9 @@ const std::unordered_map<std::string_view, HttpHandlerInfo>& get_http_handlers()
 [[maybe_unused]] HttpResponse process_set_snapshot_property(MetaServiceImpl* service,
                                                             brpc::Controller* ctrl);
 
+[[maybe_unused]] HttpResponse process_import_table_meta(MetaServiceImpl* service,
+                                                        brpc::Controller* ctrl);
+
 [[maybe_unused]] HttpResponse process_set_multi_version_status(MetaServiceImpl* service,
                                                                brpc::Controller* ctrl);
 

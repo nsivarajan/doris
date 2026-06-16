@@ -36,7 +36,7 @@ import java.util.Map;
 /**
  * Command for creating a dictionary.
  */
-public class CreateDictionaryCommand extends Command implements ForwardWithSync {
+public class CreateDictionaryCommand extends Command implements ForwardWithSync, SchemaChangingCommand {
     private static final Logger LOG = LogManager.getLogger(CreateDictionaryCommand.class);
 
     private final CreateDictionaryInfo createDictionaryInfo;

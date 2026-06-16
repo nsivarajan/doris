@@ -330,6 +330,10 @@ using SnapshotFullKeyInfo = BasicKeyInfo<__LINE__, std::tuple<std::string>>;
 //                                                      0:instance_id  1:timestamp  2:ref_instance_id
 using SnapshotReferenceKeyInfo = BasicKeyInfo<__LINE__, std::tuple<std::string, Versionstamp, std::string>>;
 
+// 0x03 "snapshot" ${instance_id} "rowset_ref" ${snapshot_vs} ${tablet_id} ${rowset_id} → rowset protected by snapshot
+//                                                      0:instance_id  1:snapshot_vs  2:tablet_id  3:rowset_id
+using SnapshotRowsetRefKeyInfo = BasicKeyInfo<__LINE__, std::tuple<std::string, Versionstamp, int64_t, std::string>>;
+
 // 0x03 "log" ${instance_id} ${timestamp}                                   -> OperationLogPB
 //                                                      0:instance_id
 using LogKeyInfo = BasicKeyInfo<__LINE__, std::tuple<std::string>>;
@@ -536,6 +540,11 @@ void snapshot_reference_key(const SnapshotReferenceKeyInfo& in, std::string* out
 static inline std::string snapshot_reference_key(const SnapshotReferenceKeyInfo& in) { std::string s; snapshot_reference_key(in, &s); return s; }
 std::string snapshot_reference_key_prefix(std::string_view instance_id, Versionstamp timestamp);
 std::string snapshot_reference_key_prefix(std::string_view instance_id);
+
+void snapshot_rowset_ref_key(const SnapshotRowsetRefKeyInfo& in, std::string* out);
+static inline std::string snapshot_rowset_ref_key(const SnapshotRowsetRefKeyInfo& in) { std::string s; snapshot_rowset_ref_key(in, &s); return s; }
+// Returns the scan prefix for all rowset-ref keys belonging to a specific snapshot versionstamp.
+std::string snapshot_rowset_ref_key_prefix(std::string_view instance_id, Versionstamp snapshot_vs);
 
 void log_key(const LogKeyInfo& in, std::string* out);
 static inline std::string log_key(const LogKeyInfo& in) { std::string s; log_key(in, &s); return s; }

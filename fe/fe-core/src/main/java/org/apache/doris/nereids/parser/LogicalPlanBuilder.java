@@ -625,6 +625,7 @@ import org.apache.doris.nereids.trees.plans.algebra.OneRowRelation;
 import org.apache.doris.nereids.trees.plans.algebra.Repeat.RepeatType;
 import org.apache.doris.nereids.trees.plans.algebra.SetOperation.Qualifier;
 import org.apache.doris.nereids.trees.plans.commands.AddConstraintCommand;
+import org.apache.doris.nereids.trees.plans.commands.AdminAlterClusterSnapshotCommand;
 import org.apache.doris.nereids.trees.plans.commands.AdminCancelRebalanceDiskCommand;
 import org.apache.doris.nereids.trees.plans.commands.AdminCancelRepairTableCommand;
 import org.apache.doris.nereids.trees.plans.commands.AdminCheckTabletsCommand;
@@ -635,6 +636,9 @@ import org.apache.doris.nereids.trees.plans.commands.AdminCreateClusterSnapshotC
 import org.apache.doris.nereids.trees.plans.commands.AdminDropClusterSnapshotCommand;
 import org.apache.doris.nereids.trees.plans.commands.AdminRebalanceDiskCommand;
 import org.apache.doris.nereids.trees.plans.commands.AdminRepairTableCommand;
+import org.apache.doris.nereids.trees.plans.commands.AdminRestoreClusterSnapshotCommand;
+import org.apache.doris.nereids.trees.plans.commands.AdminRestoreDbSnapshotCommand;
+import org.apache.doris.nereids.trees.plans.commands.AdminRestoreTableSnapshotCommand;
 import org.apache.doris.nereids.trees.plans.commands.AdminRotateTdeRootKeyCommand;
 import org.apache.doris.nereids.trees.plans.commands.AdminSetAutoClusterSnapshotCommand;
 import org.apache.doris.nereids.trees.plans.commands.AdminSetClusterSnapshotFeatureSwitchCommand;
@@ -799,6 +803,8 @@ import org.apache.doris.nereids.trees.plans.commands.ShowBuiltinFunctionsCommand
 import org.apache.doris.nereids.trees.plans.commands.ShowCatalogCommand;
 import org.apache.doris.nereids.trees.plans.commands.ShowCatalogRecycleBinCommand;
 import org.apache.doris.nereids.trees.plans.commands.ShowCharsetCommand;
+import org.apache.doris.nereids.trees.plans.commands.ShowClusterSnapshotsCommand;
+import org.apache.doris.nereids.trees.plans.commands.ShowClusterSnapshotsForDrCommand;
 import org.apache.doris.nereids.trees.plans.commands.ShowClustersCommand;
 import org.apache.doris.nereids.trees.plans.commands.ShowCollationCommand;
 import org.apache.doris.nereids.trees.plans.commands.ShowColumnHistogramStatsCommand;
@@ -8896,9 +8902,103 @@ public class LogicalPlanBuilder extends DorisParserBaseVisitor<Object> {
     @Override
     public LogicalPlan visitAdminDropClusterSnapshot(
             DorisParser.AdminDropClusterSnapshotContext ctx) {
-        String key = ctx.key == null ? null : stripQuotes(ctx.key.getText());
+        String key = ctx.key == null ? null : ctx.key.getText();
         String value = ctx.value == null ? null : stripQuotes(ctx.value.getText());
         return new AdminDropClusterSnapshotCommand(key, value);
+    }
+
+    @Override
+    public LogicalPlan visitAdminAlterClusterSnapshot(
+            DorisParser.AdminAlterClusterSnapshotContext ctx) {
+        String key = ctx.key == null ? null : ctx.key.getText();
+        String snapshotId = ctx.value == null ? null : stripQuotes(ctx.value.getText());
+        Map<String, String> properties = visitPropertyClause(ctx.propertyClause());
+        try {
+            return new AdminAlterClusterSnapshotCommand(key, snapshotId, properties);
+        } catch (org.apache.doris.common.AnalysisException e) {
+            throw new ParseException(e.getMessage(), ctx);
+        }
+    }
+
+    @Override
+    public LogicalPlan visitAdminRestoreClusterSnapshot(
+            DorisParser.AdminRestoreClusterSnapshotContext ctx) {
+        String key = ctx.key == null ? null : ctx.key.getText();
+        String value = ctx.value == null ? null : stripQuotes(ctx.value.getText());
+        return new AdminRestoreClusterSnapshotCommand(key, value);
+    }
+
+    @Override
+    public LogicalPlan visitShowClusterSnapshots(
+            DorisParser.ShowClusterSnapshotsContext ctx) {
+        return new ShowClusterSnapshotsCommand(false);
+    }
+
+    @Override
+    public LogicalPlan visitShowClusterSnapshotHistory(
+            DorisParser.ShowClusterSnapshotHistoryContext ctx) {
+        return new ShowClusterSnapshotsCommand(true);
+    }
+
+    @Override
+    public LogicalPlan visitShowClusterSnapshotsForDr(
+            DorisParser.ShowClusterSnapshotsForDrContext ctx) {
+        return new ShowClusterSnapshotsForDrCommand();
+    }
+
+    @Override
+    public LogicalPlan visitAdminRestoreTableSnapshot(
+            DorisParser.AdminRestoreTableSnapshotContext ctx) {
+        String key = ctx.key == null ? null : ctx.key.getText();
+        if (key == null || !key.equalsIgnoreCase("snapshot_id")) {
+            throw new ParseException("Where clause must be: snapshot_id = \"<id from SHOW CLUSTER SNAPSHOTS>\"",
+                    ctx);
+        }
+        String snapshotId = stripQuotes(ctx.snapshotId.getText());
+        List<String> parts = visitMultipartIdentifier(ctx.tableName);
+        if (parts.size() > 2) {
+            throw new ParseException("only support [<db>.]<table> — catalog prefix not allowed",
+                    ctx.tableName);
+        }
+        String dbName = parts.size() > 1 ? parts.get(0) : null;
+        String tableName = parts.get(parts.size() - 1);
+        if (dbName == null || dbName.isEmpty()) {
+            dbName = ConnectContext.get() != null ? ConnectContext.get().getDatabase() : null;
+            if (dbName == null || dbName.isEmpty()) {
+                throw new ParseException(
+                        "No database selected. Specify the full table name as db.tbl.", ctx);
+            }
+        }
+        List<String> partitionNames = ctx.partitionNames.isEmpty()
+                ? Collections.emptyList()
+                : ctx.partitionNames.stream()
+                        .map(p -> p.getText())
+                        .collect(Collectors.toList());
+
+        // Resolve optional AS targetTableName clause.
+        String targetDbName = null;
+        String targetTableName = null;
+        if (ctx.targetTableName != null) {
+            List<String> targetParts = visitMultipartIdentifier(ctx.targetTableName);
+            targetDbName = targetParts.size() > 1 ? targetParts.get(0) : dbName;
+            targetTableName = targetParts.get(targetParts.size() - 1);
+        }
+        return new AdminRestoreTableSnapshotCommand(snapshotId, dbName, tableName, partitionNames,
+                targetDbName, targetTableName);
+    }
+
+    @Override
+    public LogicalPlan visitAdminRestoreDbSnapshot(
+            DorisParser.AdminRestoreDbSnapshotContext ctx) {
+        String key = ctx.key == null ? null : ctx.key.getText();
+        if (key == null || !key.equalsIgnoreCase("snapshot_id")) {
+            throw new ParseException("Where clause must be: snapshot_id = \"<id from SHOW CLUSTER SNAPSHOTS>\"",
+                    ctx);
+        }
+        String snapshotId = stripQuotes(ctx.snapshotId.getText());
+        String sourceDb = ctx.sourceDb == null ? null : ctx.sourceDb.getText();
+        String targetDb = ctx.targetDb == null ? null : ctx.targetDb.getText();
+        return new AdminRestoreDbSnapshotCommand(snapshotId, sourceDb, targetDb);
     }
 
     @Override

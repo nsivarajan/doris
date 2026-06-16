@@ -216,6 +216,7 @@ public class AuditLoader extends Plugin implements AuditPlugin {
         if (LOG.isDebugEnabled()) {
             LOG.debug("receive audit event with stmt: {}", stmt);
         }
+        logBuffer.append(event.sessionContext).append(AUDIT_TABLE_COL_SEPARATOR);
         logBuffer.append(stmt).append(AUDIT_TABLE_LINE_DELIMITER);
     }
 

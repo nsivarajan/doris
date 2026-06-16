@@ -51,7 +51,7 @@ import java.util.Optional;
 /**
  * Create policy command use for row policy and storage policy.
  */
-public class CreatePolicyCommand extends Command implements ForwardWithSync {
+public class CreatePolicyCommand extends Command implements ForwardWithSync, SchemaChangingCommand {
 
     private final PolicyTypeEnum policyType;
     private final String policyName;

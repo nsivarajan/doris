@@ -37,7 +37,7 @@ import java.util.Objects;
 /**
  * drop sync materialized view
  */
-public class DropMaterializedViewCommand extends Command implements ForwardWithSync {
+public class DropMaterializedViewCommand extends Command implements ForwardWithSync, SchemaChangingCommand {
     private final TableNameInfo tableName;
     private final boolean ifExists;
     private final String mvName;

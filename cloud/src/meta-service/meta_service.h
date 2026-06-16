@@ -428,6 +428,11 @@ public:
                           const CompactSnapshotRequest* request, CompactSnapshotResponse* response,
                           ::google::protobuf::Closure* done) override;
 
+    void import_table_meta(::google::protobuf::RpcController* controller,
+                           const ImportTableMetaRequest* request,
+                           ImportTableMetaResponse* response,
+                           ::google::protobuf::Closure* done) override;
+
 private:
     std::pair<MetaServiceCode, std::string> alter_instance(
             const AlterInstanceRequest* request,
@@ -1017,6 +1022,12 @@ public:
                           const CompactSnapshotRequest* request, CompactSnapshotResponse* response,
                           ::google::protobuf::Closure* done) override {
         call_impl(&cloud::MetaService::compact_snapshot, controller, request, response, done);
+    }
+
+    void import_table_meta(::google::protobuf::RpcController* controller,
+                           const ImportTableMetaRequest* request, ImportTableMetaResponse* response,
+                           ::google::protobuf::Closure* done) override {
+        call_impl(&cloud::MetaService::import_table_meta, controller, request, response, done);
     }
 
 private:

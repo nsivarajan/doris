@@ -58,29 +58,18 @@ int InstanceRecycler::recycle_snapshot_meta_and_data(const std::string& instance
             instance_id, resource_id, it->second.get(), snapshot_version, snapshot_pb);
 }
 
-int InstanceRecycler::has_cluster_snapshots(bool* any) {
-    std::string snapshot_key = versioned::snapshot_full_key({instance_id_});
-    std::string begin_key = encode_versioned_key(snapshot_key, Versionstamp::min());
-    std::string end_key = encode_versioned_key(snapshot_key, Versionstamp::max());
-
-    std::unique_ptr<Transaction> txn;
-    TxnErrorCode err = txn_kv_->create_txn(&txn);
-    if (err != TxnErrorCode::TXN_OK) {
-        LOG(WARNING) << "failed to create txn. instance_id=" << instance_id_ << ", err=" << err;
+int InstanceRecycler::export_table_meta(const std::string& instance_id,
+                                         const std::string& resource_id, Versionstamp snapshot_vs,
+                                         const SnapshotPB& snap) {
+    auto it = accessor_map_.find(resource_id);
+    if (it == accessor_map_.end()) {
+        LOG(WARNING) << "no accessor for resource, cannot export table meta"
+                     << ", instance_id=" << instance_id << ", resource_id=" << resource_id;
         return -1;
     }
-
-    std::unique_ptr<RangeGetIterator> iter;
-    err = txn->get(begin_key, end_key, &iter, false, 1);
-    if (err != TxnErrorCode::TXN_OK) {
-        LOG(WARNING) << "failed to get snapshot key. instance_id=" << instance_id_
-                     << ", err=" << err;
-        return -1;
-    }
-
-    *any = iter->has_next();
-    return 0;
+    return snapshot_manager_->export_table_meta(instance_id, it->second.get(), snapshot_vs, snap);
 }
+
 
 bool InstanceRecycler::should_recycle_versioned_keys() const {
     if (!instance_info_.has_multi_version_status()) {

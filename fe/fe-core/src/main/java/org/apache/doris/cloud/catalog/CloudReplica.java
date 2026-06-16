@@ -527,8 +527,16 @@ public class CloudReplica extends Replica implements GsonPostProcessable {
         return tableId;
     }
 
+    public void setTableId(long tableId) {
+        this.tableId = tableId;
+    }
+
     public long getPartitionId() {
         return partitionId;
+    }
+
+    public void setPartitionId(long partitionId) {
+        this.partitionId = partitionId;
     }
 
     public long getIdx() {

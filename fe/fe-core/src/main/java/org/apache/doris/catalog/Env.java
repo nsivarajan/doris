@@ -350,6 +350,7 @@ import java.util.concurrent.ConcurrentLinkedQueue;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicLong;
+import java.util.concurrent.locks.ReentrantReadWriteLock;
 import java.util.function.Supplier;
 import java.util.stream.Collectors;
 
@@ -433,6 +434,14 @@ public class Env {
     // canRead can be true even if isReady is false.
     // for example: OBSERVER transfer to UNKNOWN, then isReady will be set to false, but canRead can still be true
     private AtomicBoolean canRead = new AtomicBoolean(false);
+
+    // Cloud-mode snapshot quiesce lock.
+    // DDL operations acquire the READ lock for their duration.
+    // ADMIN CREATE CLUSTER SNAPSHOT acquires the WRITE lock to pause DDL and
+    // capture a consistent BDB-JE + FDB anchor point.
+    // Fair mode ensures: once the WRITE lock is waiting, new READ acquirers
+    // (new DDL) are queued behind it — preventing writer starvation.
+    private final ReentrantReadWriteLock snapshotQuiesceLock = new ReentrantReadWriteLock(true);
     private String toMasterProgress = "";
     private BlockingQueue<FrontendNodeType> typeTransferQueue;
 
@@ -5175,6 +5184,99 @@ public class Env {
 
     public EditLog getEditLog() {
         return editLog;
+    }
+
+    // -------------------------------------------------------------------------
+    // Cloud-mode snapshot DDL quiesce
+    // -------------------------------------------------------------------------
+
+    /**
+     * Functional interface for the snapshot critical section.
+     * Unlike {@link Runnable}, this allows the body to throw checked exceptions
+     * (DdlException, IOException, RpcException) that occur during BDB-JE flush
+     * and meta-service RPC calls inside submitJob().
+     */
+    @FunctionalInterface
+    public interface QuiesceRunnable {
+        void run() throws Exception;
+    }
+
+    /**
+     * Called at the entry of every schema-changing DDL operation in cloud mode.
+     * Acquires the READ side of the snapshot quiesce lock (non-blocking try).
+     * Throws DdlException if ADMIN CREATE CLUSTER SNAPSHOT is currently quiescing.
+     *
+     * <p>Every caller MUST pair this with {@link #releaseDdlPermit()} in a finally block.
+     *
+     * <p>Non-cloud deployments return immediately without any locking.
+     */
+    public void acquireDdlPermit() throws DdlException {
+        if (!Config.isCloudMode()) {
+            return;
+        }
+        // Use tryLock(0, SECONDS) — not tryLock() — so that the fair ordering is respected.
+        // When a snapshot WRITE lock is waiting, tryLock(0) correctly returns false (DDL backs off).
+        // tryLock() (non-timed) always barges past a waiting writer regardless of fair=true,
+        // which would starve the snapshot and cause it to time out.
+        try {
+            if (!snapshotQuiesceLock.readLock().tryLock(0, TimeUnit.SECONDS)) {
+                throw new DdlException(
+                        "DDL is temporarily paused while a cluster snapshot is being taken. "
+                        + "Retry in a few seconds.");
+            }
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            throw new DdlException("DDL permit acquisition interrupted");
+        }
+    }
+
+    /**
+     * Releases the DDL permit acquired by {@link #acquireDdlPermit()}.
+     * Must be called in a finally block to prevent lock leaks.
+     */
+    public void releaseDdlPermit() {
+        if (!Config.isCloudMode()) {
+            return;
+        }
+        snapshotQuiesceLock.readLock().unlock();
+    }
+
+    /**
+     * Acquires the exclusive snapshot quiesce lock, waits for all in-flight DDL
+     * to complete, then runs {@code criticalSection} (BDB-JE flush + begin_snapshot).
+     *
+     * <p>The WRITE lock blocks until all DDL threads have released their READ locks,
+     * guaranteeing that BDB-JE is fully consistent before the snapshot anchor is taken.
+     *
+     * <p>Only used in cloud mode. Non-cloud deployments run criticalSection directly.
+     *
+     * @throws Exception if the lock cannot be acquired within the configured timeout,
+     *                   or if the critical section itself throws
+     */
+    public void quiesceForSnapshot(QuiesceRunnable criticalSection) throws Exception {
+        if (!Config.isCloudMode()) {
+            criticalSection.run();
+            return;
+        }
+        boolean acquired;
+        try {
+            acquired = snapshotQuiesceLock.writeLock()
+                    .tryLock(Config.cloud_backup_quiesce_timeout_seconds, TimeUnit.SECONDS);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            throw new DdlException("Snapshot quiesce interrupted");
+        }
+        if (!acquired) {
+            throw new DdlException(
+                    "Snapshot quiesce timed out after "
+                    + Config.cloud_backup_quiesce_timeout_seconds + "s: "
+                    + "DDL operations did not complete in time");
+        }
+        try {
+            criticalSection.run();
+        } finally {
+            snapshotQuiesceLock.writeLock().unlock();
+        }
     }
 
     // Get the next available, needn't lock because of nextId is atomic.

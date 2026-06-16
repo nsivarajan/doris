@@ -38,7 +38,7 @@ import org.apache.commons.lang3.StringUtils;
 /**
  * drop database command
  */
-public class DropDatabaseCommand extends Command implements ForwardWithSync {
+public class DropDatabaseCommand extends Command implements ForwardWithSync, SchemaChangingCommand {
     private final DropDatabaseInfo dropDatabaseInfo;
 
     public DropDatabaseCommand(DropDatabaseInfo dropDatabaseInfo) {

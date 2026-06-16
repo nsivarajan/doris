@@ -3630,10 +3630,16 @@ public class Config extends ConfigBase {
     public static int cloud_snapshot_handler_interval_second = 3600;
     @ConfField(mutable = true)
     public static long cloud_snapshot_timeout_seconds = 600;
+    @ConfField(mutable = true,
+            description = {"Maximum seconds to wait for in-flight DDL to complete when taking a "
+                    + "cluster snapshot. If DDL does not release within this window the backup is aborted."})
+    public static int cloud_backup_quiesce_timeout_seconds = 30;
     @ConfField(mutable = true)
     public static long cloud_auto_snapshot_max_reversed_num = 35;
     @ConfField(mutable = true)
     public static long cloud_auto_snapshot_min_interval_seconds = 3600;
+    @ConfField(mutable = true)
+    public static long cloud_snapshot_max_ttl_seconds = 2592000; // 30 days; 0 = no cap
 
     @ConfField(mutable = true, description = {"The minimum privilege required for cluster snapshot operations. "
             + "Valid values: 'root' (only root user can execute)"

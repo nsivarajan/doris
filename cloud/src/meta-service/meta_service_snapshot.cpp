@@ -177,7 +177,7 @@ void MetaServiceImpl::drop_snapshot(::google::protobuf::RpcController* controlle
         msg = "empty instance_id";
         return;
     }
-    RPC_RATE_LIMIT(clone_instance);
+    RPC_RATE_LIMIT(drop_snapshot);
 
     snapshot_manager_->drop_snapshot(instance_id, *request, response);
     code = response->status().code();
@@ -208,6 +208,32 @@ void MetaServiceImpl::compact_snapshot(::google::protobuf::RpcController* contro
     RPC_RATE_LIMIT(compact_snapshot);
 
     std::tie(code, msg) = snapshot_manager_->compact_snapshot(instance_id);
+}
+
+void MetaServiceImpl::import_table_meta(::google::protobuf::RpcController* controller,
+                                         const ImportTableMetaRequest* request,
+                                         ImportTableMetaResponse* response,
+                                         ::google::protobuf::Closure* done) {
+    RPC_PREPROCESS(import_table_meta, get, put);
+    if (!request->has_cloud_unique_id() || request->cloud_unique_id().empty()) {
+        code = MetaServiceCode::INVALID_ARGUMENT;
+        msg = "cloud_unique_id not set";
+        return;
+    }
+
+    instance_id = get_instance_id(resource_mgr_, request->cloud_unique_id());
+    if (instance_id.empty()) {
+        code = MetaServiceCode::INVALID_ARGUMENT;
+        msg = "empty instance_id";
+        return;
+    }
+
+    RPC_RATE_LIMIT(import_table_meta);
+
+    bool is_versioned_write = is_version_write_enabled(instance_id);
+    snapshot_manager_->import_table_meta(instance_id, *request, response, is_versioned_write);
+    code = response->status().code();
+    msg = response->status().msg();
 }
 
 } // namespace doris::cloud

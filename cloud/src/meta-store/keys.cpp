@@ -101,6 +101,7 @@ static const char* META_ROWSET_REF_COUNT_KEY_INFIX      = "rowset_ref_count";
 
 static const char* SNAPSHOT_FULL_KEY_INFIX              = "full";
 static const char* SNAPSHOT_REFERENCE_KEY_INFIX         = "reference";
+static const char* SNAPSHOT_ROWSET_REF_KEY_INFIX        = "rowset_ref";
 
 // clang-format on
 
@@ -860,6 +861,27 @@ std::string snapshot_reference_key_prefix(std::string_view instance_id) {
     encode_bytes(SNAPSHOT_KEY_PREFIX, &out);          // "snapshot"
     encode_bytes(instance_id, &out);                  // instance_id
     encode_bytes(SNAPSHOT_REFERENCE_KEY_INFIX, &out); // "reference"
+    return out;
+}
+
+void snapshot_rowset_ref_key(const SnapshotRowsetRefKeyInfo& in, std::string* out) {
+    out->push_back(CLOUD_VERSIONED_KEY_SPACE03);
+    encode_bytes(SNAPSHOT_KEY_PREFIX, out);             // "snapshot"
+    encode_bytes(std::get<0>(in), out);                 // instance_id
+    encode_bytes(SNAPSHOT_ROWSET_REF_KEY_INFIX, out);   // "rowset_ref"
+    encode_versionstamp(std::get<1>(in), out);           // snapshot_versionstamp
+    encode_int64(std::get<2>(in), out);                  // tablet_id
+    encode_bytes(std::get<3>(in), out);                  // rowset_id
+}
+
+std::string snapshot_rowset_ref_key_prefix(std::string_view instance_id,
+                                            Versionstamp snapshot_vs) {
+    std::string out;
+    out.push_back(CLOUD_VERSIONED_KEY_SPACE03);
+    encode_bytes(SNAPSHOT_KEY_PREFIX, &out);            // "snapshot"
+    encode_bytes(instance_id, &out);                    // instance_id
+    encode_bytes(SNAPSHOT_ROWSET_REF_KEY_INFIX, &out);  // "rowset_ref"
+    encode_versionstamp(snapshot_vs, &out);              // snapshot_versionstamp
     return out;
 }
 

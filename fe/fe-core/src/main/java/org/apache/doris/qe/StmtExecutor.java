@@ -102,6 +102,7 @@ import org.apache.doris.nereids.trees.plans.commands.Forward;
 import org.apache.doris.nereids.trees.plans.commands.LoadCommand;
 import org.apache.doris.nereids.trees.plans.commands.PrepareCommand;
 import org.apache.doris.nereids.trees.plans.commands.Redirect;
+import org.apache.doris.nereids.trees.plans.commands.SchemaChangingCommand;
 import org.apache.doris.nereids.trees.plans.commands.TransactionCommand;
 import org.apache.doris.nereids.trees.plans.commands.UpdateCommand;
 import org.apache.doris.nereids.trees.plans.commands.insert.BatchInsertIntoTableCommand;
@@ -763,9 +764,18 @@ public class StmtExecutor {
             // t2: client issues query sql to observer fe, the query would fail due to not exist table in plan phase.
             // t3: observer fe receive editlog creating the table from the master fe
             syncJournalIfNeeded(context);
+            Command command = (Command) logicalPlan;
+            // Cloud-mode snapshot quiesce: schema-changing commands hold the READ permit
+            // so ADMIN CREATE CLUSTER SNAPSHOT can take a consistent BDB-JE + FDB snapshot.
+            boolean needPermit = command instanceof SchemaChangingCommand;
+            boolean permitAcquired = false;
             try {
-                ((Command) logicalPlan).verifyCommandSupported(context);
-                ((Command) logicalPlan).run(context, this);
+                command.verifyCommandSupported(context);
+                if (needPermit) {
+                    Env.getCurrentEnv().acquireDdlPermit();
+                    permitAcquired = true;
+                }
+                command.run(context, this);
             } catch (QueryStateException e) {
                 if (LOG.isDebugEnabled()) {
                     LOG.debug("Command({}) process failed.", originStmt.originStmt, e);
@@ -792,6 +802,10 @@ public class StmtExecutor {
                 context.getState().setError(ErrorCode.ERR_UNKNOWN_ERROR, e.getMessage());
                 throw new NereidsException("Command (" + originStmt.originStmt + ") process failed.",
                         new AnalysisException(e.getMessage() == null ? e.toString() : e.getMessage(), e));
+            } finally {
+                if (permitAcquired) {
+                    Env.getCurrentEnv().releaseDdlPermit();
+                }
             }
         } else {
             context.getState().setIsQuery(true);

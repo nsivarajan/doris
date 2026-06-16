@@ -26,7 +26,7 @@ import org.apache.doris.qe.ConnectContext;
 import org.apache.doris.qe.StmtExecutor;
 
 /**AlterViewCommand*/
-public class AlterViewCommand extends Command implements ForwardWithSync {
+public class AlterViewCommand extends Command implements ForwardWithSync, SchemaChangingCommand {
     private final AlterViewInfo alterViewInfo;
 
     public AlterViewCommand(AlterViewInfo alterViewInfo) {

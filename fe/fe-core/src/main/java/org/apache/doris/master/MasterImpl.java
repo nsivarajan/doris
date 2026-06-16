@@ -380,13 +380,8 @@ public class MasterImpl {
             return;
         }
 
-        // push finish type:
-        //                  numOfFinishTabletInfos  tabletId schemaHash
-        // Normal:                     1                   /          /
-        // SchemaChangeHandler         2                 same      diff
-        // RollupHandler               2                 diff      diff
-        //
-        // reuse enum 'PartitionState' here as 'push finish type'
+        // push finish type: 1 tablet = Normal, 2 same tabletId = SchemaChange, 2 diff tabletIds = Rollup.
+        // Reuse PartitionState to represent push result type.
         PartitionState pushState = null;
         if (finishTabletInfos.size() == 1) {
             pushState = PartitionState.NORMAL;
@@ -433,6 +428,15 @@ public class MasterImpl {
             List<TabletMeta> tabletMetaList = Env.getCurrentInvertedIndex().getTabletMetaList(tabletIds);
 
             if (pushTask.getPushType() == TPushType.DELETE) {
+                if (LOG.isDebugEnabled()) {
+                    LOG.debug("finishRealtimePush DELETE: pushTabletId={} finishTabletIds={} "
+                            + "tabletMetaList={} tableId={} partitionId={}",
+                            pushTabletId, tabletIds,
+                            tabletMetaList.stream()
+                                    .map(m -> m == null ? "null" : String.valueOf(m.getIndexId()))
+                                    .collect(java.util.stream.Collectors.toList()),
+                            tableId, partitionId);
+                }
                 DeleteJob deleteJob = Env.getCurrentEnv().getDeleteHandler().getDeleteJob(transactionId);
                 if (deleteJob == null) {
                     throw new MetaNotFoundException("cannot find delete job, job[" + transactionId + "]");
@@ -440,8 +444,33 @@ public class MasterImpl {
                 for (int i = 0; i < tabletMetaList.size(); i++) {
                     TabletMeta tabletMeta = tabletMetaList.get(i);
                     long tabletId = tabletIds.get(i);
+                    // tabletMeta is null when the BE reports a tablet ID not in the inverted index
+                    // (e.g. source_tablet_id on a snapshot-restored tablet). Resolve via pushTabletId.
+                    if (tabletMeta == null) {
+                        if (tabletId == pushTabletId) continue;
+                        tabletMeta = Env.getCurrentInvertedIndex().getTabletMeta(pushTabletId);
+                        if (tabletMeta == null) continue;
+                        tabletId = pushTabletId;
+                    }
                     Replica replica = findRelatedReplica(olapTable, partition,
                             backendId, tabletId, tabletMeta.getIndexId());
+                    if (LOG.isDebugEnabled()) {
+                        LOG.debug("finishRealtimePush DELETE loop: tabletId={} pushTabletId={} "
+                                + "indexId={} replica={}",
+                                tabletId, pushTabletId,
+                                tabletMeta.getIndexId(), replica != null ? "found" : "null");
+                    }
+                    // For snapshot-restored tablets, BE may report source_tablet_id in
+                    // finish_tablet_infos instead of the new restored tablet ID. Fall back
+                    // to pushTabletId (what the FE sent) when findRelatedReplica fails.
+                    if (replica == null && tabletId != pushTabletId) {
+                        TabletMeta pushTabletMeta =
+                                Env.getCurrentInvertedIndex().getTabletMeta(pushTabletId);
+                        if (pushTabletMeta != null) {
+                            replica = findRelatedReplica(olapTable, partition,
+                                    backendId, pushTabletId, pushTabletMeta.getIndexId());
+                        }
+                    }
                     if (replica != null) {
                         deleteJob.addFinishedReplica(partitionId, pushTabletId, replica);
                         pushTask.countDownLatch(backendId, pushTabletId);
@@ -478,11 +507,9 @@ public class MasterImpl {
     private void checkReplica(TTabletInfo tTabletInfo, TabletMeta tabletMeta)
             throws MetaNotFoundException {
         long tabletId = tTabletInfo.getTabletId();
-        // during finishing stage, index's schema hash switched, when old schema hash finished
-        // current index hash != old schema hash and alter job's new schema hash != old schema hash
-        // the check replica will failed
-        // should use tabletid not pushTabletid because in rollup state, the push tabletid != tabletid
-        // and tablet meta will not contain rollupindex's schema hash
+        // During finishing, index schema hash may switch; old != current != alter hash.
+        // Use tabletId (not pushTabletId): in rollup state they differ, and tablet meta
+        // does not contain the rollup index schema hash.
         if (tabletMeta == null || tabletMeta == TabletInvertedIndex.NOT_EXIST_TABLET_META) {
             // rollup may be dropped
             throw new MetaNotFoundException("tablet " + tabletId + " does not exist");
@@ -500,16 +527,12 @@ public class MasterImpl {
         }
         MaterializedIndex index = partition.getIndex(indexId);
         if (index == null) {
-            // In alter job v2 case
-            // alter job is always == null, so that we could remove the condition
-            // if alter job is always null, then could not covert it to a rollup
-            // job, will throw exception, so just throw exception in this case
+            // In alter job v2 the alter job is always null; if it cannot be
+            // converted to a rollup job, throw rather than silently returning.
             if (olapTable.getState() == OlapTableState.ROLLUP) {
-                // this happens when:
-                // a rollup job is finish and a delete job is the next first job (no load job before)
-                // and delete task is first send to base tablet, so it will return 2 tablets info.
-                // the second tablet is rollup tablet and it is no longer exist in alterJobs queue.
-                // just ignore the rollup tablet info. it will be handled in rollup tablet delete task report.
+                // Rollup job finished; delete on base tablet returns 2 tablet infos.
+                // The second (rollup) tablet is gone from alterJobs — ignore it here,
+                // it will be handled in the rollup tablet delete task report.
 
                 // add log to observe
                 LOG.warn("Cannot find table[{}].", olapTable.getId());
