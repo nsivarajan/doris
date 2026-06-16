@@ -444,14 +444,6 @@ public class MasterImpl {
                 for (int i = 0; i < tabletMetaList.size(); i++) {
                     TabletMeta tabletMeta = tabletMetaList.get(i);
                     long tabletId = tabletIds.get(i);
-                    // tabletMeta is null when the BE reports a tablet ID not in the inverted index
-                    // (e.g. source_tablet_id on a snapshot-restored tablet). Resolve via pushTabletId.
-                    if (tabletMeta == null) {
-                        if (tabletId == pushTabletId) continue;
-                        tabletMeta = Env.getCurrentInvertedIndex().getTabletMeta(pushTabletId);
-                        if (tabletMeta == null) continue;
-                        tabletId = pushTabletId;
-                    }
                     Replica replica = findRelatedReplica(olapTable, partition,
                             backendId, tabletId, tabletMeta.getIndexId());
                     if (LOG.isDebugEnabled()) {
@@ -459,17 +451,6 @@ public class MasterImpl {
                                 + "indexId={} replica={}",
                                 tabletId, pushTabletId,
                                 tabletMeta.getIndexId(), replica != null ? "found" : "null");
-                    }
-                    // For snapshot-restored tablets, BE may report source_tablet_id in
-                    // finish_tablet_infos instead of the new restored tablet ID. Fall back
-                    // to pushTabletId (what the FE sent) when findRelatedReplica fails.
-                    if (replica == null && tabletId != pushTabletId) {
-                        TabletMeta pushTabletMeta =
-                                Env.getCurrentInvertedIndex().getTabletMeta(pushTabletId);
-                        if (pushTabletMeta != null) {
-                            replica = findRelatedReplica(olapTable, partition,
-                                    backendId, pushTabletId, pushTabletMeta.getIndexId());
-                        }
                     }
                     if (replica != null) {
                         deleteJob.addFinishedReplica(partitionId, pushTabletId, replica);

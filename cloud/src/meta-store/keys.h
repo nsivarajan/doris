@@ -334,6 +334,12 @@ using SnapshotReferenceKeyInfo = BasicKeyInfo<__LINE__, std::tuple<std::string, 
 //                                                      0:instance_id  1:snapshot_vs  2:tablet_id  3:rowset_id
 using SnapshotRowsetRefKeyInfo = BasicKeyInfo<__LINE__, std::tuple<std::string, Versionstamp, int64_t, std::string>>;
 
+// 0x03 "snapshot" ${instance_id} "rowset_meta" ${snapshot_vs} ${tablet_id} ${rowset_id} → RowsetMetaCloudPB
+// Written at seed time (inside commit_snapshot) so export_table_meta can retrieve
+// snapshot-time rowset metadata regardless of compaction or recycler state.
+//                                                      0:instance_id  1:snapshot_vs  2:tablet_id  3:rowset_id
+using SnapshotRowsetMetaKeyInfo = BasicKeyInfo<__LINE__, std::tuple<std::string, Versionstamp, int64_t, std::string>>;
+
 // 0x03 "log" ${instance_id} ${timestamp}                                   -> OperationLogPB
 //                                                      0:instance_id
 using LogKeyInfo = BasicKeyInfo<__LINE__, std::tuple<std::string>>;
@@ -545,6 +551,11 @@ void snapshot_rowset_ref_key(const SnapshotRowsetRefKeyInfo& in, std::string* ou
 static inline std::string snapshot_rowset_ref_key(const SnapshotRowsetRefKeyInfo& in) { std::string s; snapshot_rowset_ref_key(in, &s); return s; }
 // Returns the scan prefix for all rowset-ref keys belonging to a specific snapshot versionstamp.
 std::string snapshot_rowset_ref_key_prefix(std::string_view instance_id, Versionstamp snapshot_vs);
+
+void snapshot_rowset_meta_key(const SnapshotRowsetMetaKeyInfo& in, std::string* out);
+static inline std::string snapshot_rowset_meta_key(const SnapshotRowsetMetaKeyInfo& in) { std::string s; snapshot_rowset_meta_key(in, &s); return s; }
+// Returns prefix for all rowset-meta keys for a specific (snapshot, tablet).
+std::string snapshot_rowset_meta_key_prefix(std::string_view instance_id, Versionstamp snapshot_vs, int64_t tablet_id);
 
 void log_key(const LogKeyInfo& in, std::string* out);
 static inline std::string log_key(const LogKeyInfo& in) { std::string s; log_key(in, &s); return s; }

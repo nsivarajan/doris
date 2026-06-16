@@ -75,23 +75,6 @@ struct WriteBatch {
     }
 };
 
-// All versionstamped key types processed by migrate_to_versioned_keys.
-// Plain-put index keys and non-versionstamped schema keys are excluded.
-constexpr KeySetType MIGRATION_KEY_TYPES[] = {
-        MULTI_VERSION_INDEX_TABLET,     MULTI_VERSION_INDEX_PARTITION,
-        MULTI_VERSION_INDEX_INDEX,      MULTI_VERSION_META_PARTITION,
-        MULTI_VERSION_META_INDEX,       MULTI_VERSION_META_TABLET,
-        MULTI_VERSION_META_SCHEMA,      MULTI_VERSION_META_ROWSET,
-        MULTI_VERSION_TABLET_STATS,     MULTI_VERSION_PARTITION_VERSION,
-        MULTI_VERSION_TABLE_VERSION};
-
-// All versionstamped key types processed by compact_snapshot_chains.
-constexpr KeySetType COMPACTION_KEY_TYPES[] = {
-        MULTI_VERSION_META_ROWSET,      MULTI_VERSION_META_TABLET,
-        MULTI_VERSION_TABLET_STATS,     MULTI_VERSION_META_PARTITION,
-        MULTI_VERSION_META_INDEX,       MULTI_VERSION_PARTITION_VERSION,
-        MULTI_VERSION_TABLE_VERSION};
-
 } // anonymous namespace
 
 // Forward declaration — defined below after the snapshot RPCs.
@@ -1254,27 +1237,26 @@ int SnapshotManager::export_table_meta(std::string_view instance_id_sv,
             if (err  != TxnErrorCode::TXN_OK && err  != TxnErrorCode::TXN_KEY_NOT_FOUND) { ++errors; continue; }
             if (err2 != TxnErrorCode::TXN_OK && err2 != TxnErrorCode::TXN_KEY_NOT_FOUND) { ++errors; continue; }
 
-            // V1 fallback: scan legacy 0x01 meta_rowset_key if 0x03 has no rowsets.
-            // Seeding of V1 rowsets is handled by seed_rowset_ref_counts in commit_snapshot.
+            // V1 fallback: rowset metadata was stored in snapshot_rowset_meta_key at
+            // seed time (inside commit_snapshot, before compaction can interfere).
+            // This is fully agnostic to compaction and recycler state.
             if (load_rs.empty() && compact_rs.empty()) {
-                std::string rs_begin = meta_rowset_key({instance_id, tablet_id, 0});
-                std::string rs_end   = meta_rowset_key({instance_id, tablet_id + 1, 0});
+                std::string meta_pfx = versioned::snapshot_rowset_meta_key_prefix(
+                        instance_id, snapshot_vs, tablet_id);
+                std::string meta_end = meta_pfx;
+                meta_end.push_back('\xff');
                 FullRangeGetOptions opts(txn_kv_);
                 opts.prefetch = true;
-                auto it = txn_kv_->full_range_get(rs_begin, rs_end, std::move(opts));
-                for (auto kv = it->next(); kv.has_value(); kv = it->next()) {
+                auto meta_it = txn_kv_->full_range_get(meta_pfx, meta_end, std::move(opts));
+                for (auto kv = meta_it->next(); kv.has_value(); kv = meta_it->next()) {
                     auto [k, v] = *kv;
                     RowsetMetaCloudPB rs_meta;
                     if (rs_meta.ParseFromArray(v.data(), v.size())) {
                         *fdb_meta.add_load_rowsets() = std::move(rs_meta);
-                    } else {
-                        LOG_WARNING("export_table_meta: failed to parse V1 rowset")
-                                .tag("instance_id", instance_id)
-                                .tag("tablet_id", tablet_id);
                     }
                 }
-                if (!it->is_valid()) {
-                    LOG_WARNING("export_table_meta: V1 rowset scan error")
+                if (!meta_it->is_valid()) {
+                    LOG_WARNING("export_table_meta: V1 snapshot rowset meta scan error")
                             .tag("instance_id", instance_id)
                             .tag("tablet_id", tablet_id);
                     ++errors;
@@ -1350,8 +1332,6 @@ int SnapshotManager::export_table_meta(std::string_view instance_id_sv,
                         reader.get_partition_versions(pv_txn.get(), pids, &versions, &pv_vss, true);
                 if (pv_err == TxnErrorCode::TXN_OK) {
                     for (auto& [pid, ver] : versions) {
-                        // Store partition_id alongside VersionPB so import_table_meta
-                        // can reconstruct the partition_version_key without positional ordering.
                         auto* pv = fdb_meta.add_partition_versions();
                         pv->set_partition_id(pid);
                         *pv->mutable_version() = std::move(ver);
@@ -1364,9 +1344,6 @@ int SnapshotManager::export_table_meta(std::string_view instance_id_sv,
                     ++errors;
                 }
 
-                // V1: partition versions are in legacy 0x01 space; get_partition_versions reads
-                // only 0x03. Fallback on TXN_OK+empty (0x03 exists but empty) or TXN_KEY_NOT_FOUND
-                // (0x03 never written). Other errors indicate real read failures — don't treat as V1.
                 bool is_v1_cluster = (pv_err == TxnErrorCode::TXN_OK && versions.empty())
                                   || (pv_err == TxnErrorCode::TXN_KEY_NOT_FOUND);
                 if (is_v1_cluster) {
@@ -1390,8 +1367,6 @@ int SnapshotManager::export_table_meta(std::string_view instance_id_sv,
                             VersionPB ver;
                             if (ver.ParseFromString(v1_val)) {
                                 // Clear lazy-commit txn IDs from the source cluster (don't exist post-restore).
-                                // V2 advances pending txns via get_partition_versions; clearing here
-                                // keeps V1 consistent — only the committed base version is exported.
                                 ver.clear_pending_txn_ids();
                                 auto* pv = fdb_meta.add_partition_versions();
                                 pv->set_partition_id(pid);
@@ -1969,18 +1944,27 @@ void SnapshotManager::import_table_meta(std::string_view instance_id_sv,
     }
 
     // Write table_version_key so CloudSyncVersionDaemon gets a positive version (>0).
-    // Without this, get_version returns -1 (key absent) for the restored table, causing
-    // the FE to mishandle the version in getVisibleVersionFromMeta.
+    // Use the max snapshot partition version (not just +1): the daemon reads this value
+    // as the partition visible version; if it's lower than the rowset end_version the
+    // BE returns 0 rows even though data exists.
     if (!batch_broken && partitions_written > 0) {
         int64_t tv_db_id = -1, tv_tbl_id = -1;
+        int64_t max_part_version = 0;
         for (auto& [pid, dbt] : part_to_db_tbl) {
             tv_db_id = dbt.first;
             tv_tbl_id = (target_table_id > 0) ? target_table_id : dbt.second;
             break;
         }
+        for (auto& pv : fdb_meta.partition_versions()) {
+            if (pv.has_version() && pv.version().version() > max_part_version) {
+                max_part_version = pv.version().version();
+            }
+        }
+        // atomic_add from 0 (new table key) by max_part_version gives exactly max_part_version.
+        int64_t tv_increment = std::max(int64_t(1), max_part_version);
         if (tv_db_id > 0) {
             std::string ver_key = table_version_key({instance_id, tv_db_id, tv_tbl_id});
-            wb.txn->atomic_add(ver_key, 1);
+            wb.txn->atomic_add(ver_key, tv_increment);
             if (is_versioned_write) {
                 std::string v3_key = versioned::table_version_key({instance_id, tv_tbl_id});
                 versioned_put(wb.txn.get(), v3_key, "");
@@ -2076,786 +2060,10 @@ int SnapshotManager::migrate_to_versioned_keys(InstanceDataMigrator* migrator) {
     LOG(WARNING) << "Migrate to versioned keys is not implemented";
     return -1;
 }
-    for (int32_t kt : migrator->instance_info().migrated_key_sets()) {
-        migrated.insert(kt);
-    }
-
-    auto need_migrate = [&](KeySetType kt) {
-        return !migrated.count(static_cast<int32_t>(kt));
-    };
-
-    // Mark done: TXN_MAYBE_COMMITTED treated as success (repeated field deduplicates).
-    auto mark_done_batch = [&](std::initializer_list<KeySetType> types) -> int {
-        for (int attempt = 0; attempt < 3; ++attempt) {
-            std::unique_ptr<Transaction> txn;
-            if (txn_kv_->create_txn(&txn) != TxnErrorCode::TXN_OK) continue;
-            std::string ikey = instance_key({instance_id});
-            std::string ival;
-            if (txn->get(ikey, &ival) != TxnErrorCode::TXN_OK) continue;
-            InstanceInfoPB inst;
-            if (!inst.ParseFromString(ival)) return -1;
-            for (auto kt : types) {
-                // Only add types not already recorded to avoid proto bloat.
-                if (!migrated.count(static_cast<int32_t>(kt))) {
-                    inst.add_migrated_key_sets(kt);
-                }
-            }
-            txn->put(ikey, inst.SerializeAsString());
-            txn->atomic_add(system_meta_service_instance_update_key(), 1);
-            TxnErrorCode err = txn->commit();
-            if (err == TxnErrorCode::TXN_OK || err == TxnErrorCode::TXN_MAYBE_COMMITTED) {
-                for (auto kt : types) {
-                    migrated.insert(static_cast<int32_t>(kt));
-                }
-                return 0;
-            }
-        }
-        LOG_WARNING("migrate: failed to mark key types done").tag("instance_id", instance_id);
-        return -1;
-    };
-
-    auto mark_done = [&](KeySetType kt) -> int { return mark_done_batch({kt}); };
-
-    // Migrate meta_tablet_idx_key: old 0x01 → 5 versioned key types.
-    bool need_pass1 = need_migrate(MULTI_VERSION_INDEX_TABLET) ||
-                      need_migrate(MULTI_VERSION_INDEX_PARTITION) ||
-                      need_migrate(MULTI_VERSION_INDEX_INDEX) ||
-                      need_migrate(MULTI_VERSION_META_PARTITION) ||
-                      need_migrate(MULTI_VERSION_META_INDEX);
-
-    if (!migrator->stopped() && need_pass1) {
-        LOG_INFO("migrate: starting pass1 (tablet_idx scan)").tag("instance_id", instance_id);
-        WriteBatch wb(txn_kv_.get());
-        if (wb.init() != 0) {
-            LOG_WARNING("migrate: failed to init write batch for pass1")
-                    .tag("instance_id", instance_id);
-            return -1;
-        }
-
-        // emplace() keeps first mapping per partition/index (all tablets share same db/table).
-        std::unordered_map<int64_t, std::pair<int64_t, int64_t>> partition_to_dbtbl;
-        std::unordered_map<int64_t, std::pair<int64_t, int64_t>> index_to_dbtbl;
-
-        std::string begin_key = meta_tablet_idx_key({instance_id, 0});
-        std::string end_key = meta_tablet_idx_key({instance_id, INT64_MAX});
-        FullRangeGetOptions opts(txn_kv_);
-        opts.prefetch = true;
-        auto it = txn_kv_->full_range_get(begin_key, end_key, std::move(opts));
-
-        int64_t num_scanned = 0;
-        bool error = false;
-        for (auto kv = it->next(); kv.has_value() && !migrator->stopped(); kv = it->next()) {
-            auto [k, v] = *kv;
-            ++num_scanned;
-
-            TabletIndexPB idx_pb;
-            if (!idx_pb.ParseFromArray(v.data(), v.size())) {
-                LOG_WARNING("migrate pass1: malformed tablet_idx").tag("key", hex(k));
-                continue;
-            }
-            int64_t tablet_id = idx_pb.tablet_id();
-            int64_t partition_id = idx_pb.partition_id();
-            int64_t index_id = idx_pb.index_id();
-            int64_t db_id = idx_pb.db_id();
-            int64_t table_id = idx_pb.table_id();
-
-            partition_to_dbtbl.emplace(partition_id, std::make_pair(db_id, table_id));
-            index_to_dbtbl.emplace(index_id, std::make_pair(db_id, table_id));
-
-            // INDEX_TABLET: plain put — matches production txn->put() writes.
-            if (need_migrate(MULTI_VERSION_INDEX_TABLET)) {
-                std::string new_key = versioned::tablet_index_key({instance_id, tablet_id});
-                wb.txn->put(new_key, std::string(v.data(), v.size()));
-                if (wb.bump(config::snapshot_migrate_batch_size) != 0) {
-                    error = true;
-                    break;
-                }
-                // Inverted tablet index: written alongside tablet_index_key in production.
-                // Required by snapshot_data_size_calculator and recycler reads.
-                std::string inv_key = versioned::tablet_inverted_index_key(
-                        {instance_id, db_id, table_id, index_id, partition_id, tablet_id});
-                wb.txn->put(inv_key, "");
-                if (wb.bump(config::snapshot_migrate_batch_size) != 0) {
-                    error = true;
-                    break;
-                }
-            }
-        }
-
-        // Post-scan: write per-partition and per-index keys from the dedup maps.
-        if (!error && !migrator->stopped()) {
-            for (auto& [pid, dbtbl] : partition_to_dbtbl) {
-                if (migrator->stopped()) break;
-                auto [db_id, table_id] = dbtbl;
-
-                // INDEX_PARTITION: plain put — matches production txn->put() writes.
-                if (need_migrate(MULTI_VERSION_INDEX_PARTITION)) {
-                    std::string new_key = versioned::partition_index_key({instance_id, pid});
-                    PartitionIndexPB part_pb;
-                    part_pb.set_db_id(db_id);
-                    part_pb.set_table_id(table_id);
-                    std::string part_val;
-                    if (!part_pb.SerializeToString(&part_val)) {
-                        LOG_WARNING("migrate pass1: failed to serialize PartitionIndexPB")
-                                .tag("partition_id", pid);
-                        error = true;
-                        break;
-                    }
-                    wb.txn->put(new_key, part_val);
-                    if (wb.bump(config::snapshot_migrate_batch_size) != 0) {
-                        error = true;
-                        break;
-                    }
-                    // Inverted partition index: written alongside partition_index_key
-                    // in production. Read by recycler to detect empty tables.
-                    std::string inv_key = versioned::partition_inverted_index_key(
-                            {instance_id, db_id, table_id, pid});
-                    wb.txn->put(inv_key, "");
-                    if (wb.bump(config::snapshot_migrate_batch_size) != 0) {
-                        error = true;
-                        break;
-                    }
-                }
-
-                // META_PARTITION: versioned_put — matches production versioned_put() writes.
-                if (need_migrate(MULTI_VERSION_META_PARTITION)) {
-                    std::string new_key = versioned::meta_partition_key({instance_id, pid});
-                    versioned_put(wb.txn.get(), new_key, Versionstamp::min(), "");
-                    if (wb.bump(config::snapshot_migrate_batch_size) != 0) {
-                        error = true;
-                        break;
-                    }
-                }
-            }
-        }
-
-        if (!error && !migrator->stopped()) {
-            for (auto& [iid, dbtbl] : index_to_dbtbl) {
-                if (migrator->stopped()) break;
-                auto [db_id, table_id] = dbtbl;
-
-                // INDEX_INDEX: plain put — matches production txn->put() writes.
-                if (need_migrate(MULTI_VERSION_INDEX_INDEX)) {
-                    std::string new_key = versioned::index_index_key({instance_id, iid});
-                    IndexIndexPB idx_idx_pb;
-                    idx_idx_pb.set_db_id(db_id);
-                    idx_idx_pb.set_table_id(table_id);
-                    std::string idx_idx_val;
-                    if (!idx_idx_pb.SerializeToString(&idx_idx_val)) {
-                        LOG_WARNING("migrate pass1: failed to serialize IndexIndexPB")
-                                .tag("index_id", iid);
-                        error = true;
-                        break;
-                    }
-                    wb.txn->put(new_key, idx_idx_val);
-                    if (wb.bump(config::snapshot_migrate_batch_size) != 0) {
-                        error = true;
-                        break;
-                    }
-                    // Inverted index key: written alongside index_index_key in production.
-                    // Read by MetaReader::has_no_indexes() to detect empty tables.
-                    std::string inv_key =
-                            versioned::index_inverted_key({instance_id, db_id, table_id, iid});
-                    wb.txn->put(inv_key, "");
-                    if (wb.bump(config::snapshot_migrate_batch_size) != 0) {
-                        error = true;
-                        break;
-                    }
-                }
-
-                // META_INDEX: versioned_put — matches production versioned_put() writes.
-                if (need_migrate(MULTI_VERSION_META_INDEX)) {
-                    std::string new_key = versioned::meta_index_key({instance_id, iid});
-                    versioned_put(wb.txn.get(), new_key, Versionstamp::min(), "");
-                    if (wb.bump(config::snapshot_migrate_batch_size) != 0) {
-                        error = true;
-                        break;
-                    }
-                }
-            }
-        }
-
-        if (wb.flush() != 0) error = true;
-
-        if (!it->is_valid()) {
-            LOG_WARNING("migrate pass1: iterator error").tag("instance_id", instance_id);
-            error = true;
-        }
-        if (error || migrator->stopped()) return -1;
-
-        LOG_INFO("migrate: pass1 complete")
-                .tag("instance_id", instance_id)
-                .tag("num_scanned", num_scanned)
-                .tag("unique_partitions", partition_to_dbtbl.size())
-                .tag("unique_indexes", index_to_dbtbl.size());
-
-        // All 5 pass-1 types in a single FDB transaction (avoid 5 separate round-trips).
-        if (mark_done_batch({MULTI_VERSION_INDEX_TABLET, MULTI_VERSION_INDEX_PARTITION,
-                              MULTI_VERSION_INDEX_INDEX, MULTI_VERSION_META_PARTITION,
-                              MULTI_VERSION_META_INDEX}) != 0) {
-            return -1;
-        }
-    }
-
-    // Migrate meta_tablet_key: old 0x01 → versioned::meta_tablet_key.
-    if (!migrator->stopped() && need_migrate(MULTI_VERSION_META_TABLET)) {
-        LOG_INFO("migrate: starting pass2 (meta_tablet scan)").tag("instance_id", instance_id);
-        WriteBatch wb(txn_kv_.get());
-        if (wb.init() != 0) return -1;
-
-        std::string begin_key = meta_tablet_key({instance_id, 0LL, 0LL, 0LL, 0LL});
-        std::string end_key =
-                meta_tablet_key({instance_id, INT64_MAX, INT64_MAX, INT64_MAX, INT64_MAX});
-        FullRangeGetOptions opts(txn_kv_);
-        opts.prefetch = true;
-        auto it = txn_kv_->full_range_get(begin_key, end_key, std::move(opts));
-
-        int64_t num_scanned = 0;
-        bool error = false;
-        for (auto kv = it->next(); kv.has_value() && !migrator->stopped(); kv = it->next()) {
-            auto [k, v] = *kv;
-            ++num_scanned;
-
-            std::string_view key_view(k.data(), k.size());
-            int64_t table_id = 0, index_id = 0, partition_id = 0, tablet_id = 0;
-            if (!decode_meta_tablet_key(&key_view, &table_id, &index_id, &partition_id,
-                                        &tablet_id)) {
-                LOG_WARNING("migrate pass2: failed to decode meta_tablet_key")
-                        .tag("key", hex(k));
-                continue;
-            }
-
-            doris::TabletMetaCloudPB tablet_meta;
-            if (!tablet_meta.ParseFromArray(v.data(), v.size())) {
-                LOG_WARNING("migrate pass2: failed to parse TabletMetaCloudPB")
-                        .tag("tablet_id", tablet_id);
-                continue;
-            }
-
-            std::string new_key = versioned::meta_tablet_key({instance_id, tablet_id});
-            if (!versioned::document_put(wb.txn.get(), new_key, Versionstamp::min(),
-                                         std::move(tablet_meta))) {
-                LOG_WARNING("migrate pass2: document_put failed").tag("tablet_id", tablet_id);
-                error = true;
-                break;
-            }
-            if (wb.bump(config::snapshot_migrate_batch_size) != 0) { error = true; break; }
-        }
-
-        if (wb.flush() != 0) error = true;
-        if (!it->is_valid()) error = true;
-        if (error || migrator->stopped()) return -1;
-
-        LOG_INFO("migrate: pass2 complete")
-                .tag("instance_id", instance_id)
-                .tag("num_scanned", num_scanned);
-        if (mark_done(MULTI_VERSION_META_TABLET) != 0) return -1;
-    }
-
-    // Migrate meta_schema_key: old 0x01 → versioned::meta_schema_key (non-versionstamped).
-    if (!migrator->stopped() && need_migrate(MULTI_VERSION_META_SCHEMA)) {
-        LOG_INFO("migrate: starting pass3 (meta_schema scan)").tag("instance_id", instance_id);
-        WriteBatch wb(txn_kv_.get());
-        if (wb.init() != 0) return -1;
-
-        std::string begin_key = meta_schema_key({instance_id, 0LL, 0LL});
-        std::string end_key = meta_schema_key({instance_id, INT64_MAX, INT64_MAX});
-        FullRangeGetOptions opts(txn_kv_);
-        opts.prefetch = true;
-        auto it = txn_kv_->full_range_get(begin_key, end_key, std::move(opts));
-
-        int64_t num_scanned = 0;
-        bool error = false;
-        for (auto kv = it->next(); kv.has_value() && !migrator->stopped(); kv = it->next()) {
-            auto [k, v] = *kv;
-            ++num_scanned;
-
-            std::string_view key_view(k.data(), k.size());
-            int64_t index_id = 0, schema_version = 0;
-            if (!decode_tablet_schema_key(&key_view, &index_id, &schema_version)) {
-                LOG_WARNING("migrate pass3: failed to decode meta_schema_key")
-                        .tag("key", hex(k));
-                continue;
-            }
-
-            doris::TabletSchemaCloudPB schema;
-            if (!schema.ParseFromArray(v.data(), v.size())) {
-                LOG_WARNING("migrate pass3: failed to parse TabletSchemaCloudPB")
-                        .tag("index_id", index_id)
-                        .tag("schema_version", schema_version);
-                continue;
-            }
-
-            std::string new_key =
-                    versioned::meta_schema_key({instance_id, index_id, schema_version});
-            if (!document_put(wb.txn.get(), new_key, std::move(schema))) {
-                LOG_WARNING("migrate pass3: document_put failed")
-                        .tag("index_id", index_id)
-                        .tag("schema_version", schema_version);
-                error = true;
-                break;
-            }
-            if (wb.bump(config::snapshot_migrate_batch_size) != 0) { error = true; break; }
-        }
-
-        if (wb.flush() != 0) error = true;
-        if (!it->is_valid()) error = true;
-        if (error || migrator->stopped()) return -1;
-
-        LOG_INFO("migrate: pass3 complete")
-                .tag("instance_id", instance_id)
-                .tag("num_scanned", num_scanned);
-        if (mark_done(MULTI_VERSION_META_SCHEMA) != 0) return -1;
-    }
-
-    // Migrate meta_rowset_key: old 0x01 → versioned load or compact key.
-    if (!migrator->stopped() && need_migrate(MULTI_VERSION_META_ROWSET)) {
-        LOG_INFO("migrate: starting pass4 (meta_rowset scan)").tag("instance_id", instance_id);
-        WriteBatch wb(txn_kv_.get());
-        if (wb.init() != 0) return -1;
-
-        std::string begin_key = meta_rowset_key({instance_id, 0LL, 0LL});
-        std::string end_key = meta_rowset_key({instance_id, INT64_MAX, INT64_MAX});
-        FullRangeGetOptions opts(txn_kv_);
-        opts.prefetch = true;
-        auto it = txn_kv_->full_range_get(begin_key, end_key, std::move(opts));
-
-        int64_t num_scanned = 0;
-        int64_t num_load = 0, num_compact = 0;
-        bool error = false;
-        for (auto kv = it->next(); kv.has_value() && !migrator->stopped(); kv = it->next()) {
-            auto [k, v] = *kv;
-            ++num_scanned;
-
-            std::string_view key_view(k.data(), k.size());
-            int64_t tablet_id = 0, version = 0;
-            if (!decode_meta_rowset_key(&key_view, &tablet_id, &version)) {
-                LOG_WARNING("migrate pass4: failed to decode meta_rowset_key")
-                        .tag("key", hex(k));
-                continue;
-            }
-
-            doris::RowsetMetaCloudPB rowset;
-            if (!rowset.ParseFromArray(v.data(), v.size())) {
-                LOG_WARNING("migrate pass4: failed to parse RowsetMetaCloudPB")
-                        .tag("tablet_id", tablet_id)
-                        .tag("version", version);
-                continue;
-            }
-
-            // Route based on the rowset type encoded in the payload.
-            std::string new_key;
-            if (rowset.start_version() < rowset.end_version()) {
-                // Compact rowset: written by compaction job, keyed by end_version.
-                new_key = versioned::meta_rowset_compact_key({instance_id, tablet_id, version});
-                ++num_compact;
-            } else {
-                // Load rowset: written by commit_txn, keyed by end_version.
-                new_key = versioned::meta_rowset_load_key({instance_id, tablet_id, version});
-                ++num_load;
-            }
-
-            if (!versioned::document_put(wb.txn.get(), new_key, Versionstamp::min(),
-                                         std::move(rowset))) {
-                LOG_WARNING("migrate pass4: document_put failed")
-                        .tag("tablet_id", tablet_id)
-                        .tag("version", version);
-                error = true;
-                break;
-            }
-            if (wb.bump(config::snapshot_migrate_batch_size) != 0) { error = true; break; }
-        }
-
-        if (wb.flush() != 0) error = true;
-        if (!it->is_valid()) error = true;
-        if (error || migrator->stopped()) return -1;
-
-        LOG_INFO("migrate: pass4 complete")
-                .tag("instance_id", instance_id)
-                .tag("num_scanned", num_scanned)
-                .tag("num_load", num_load)
-                .tag("num_compact", num_compact);
-        if (mark_done(MULTI_VERSION_META_ROWSET) != 0) return -1;
-    }
-
-    // Migrate stats_tablet_key: old 0x01 → versioned load + compact stats keys.
-    if (!migrator->stopped() && need_migrate(MULTI_VERSION_TABLET_STATS)) {
-        LOG_INFO("migrate: starting pass5 (stats scan)").tag("instance_id", instance_id);
-        WriteBatch wb(txn_kv_.get());
-        if (wb.init() != 0) return -1;
-
-        std::string begin_key = stats_tablet_key({instance_id, 0LL, 0LL, 0LL, 0LL});
-        std::string end_key =
-                stats_tablet_key({instance_id, INT64_MAX, INT64_MAX, INT64_MAX, INT64_MAX});
-        FullRangeGetOptions opts(txn_kv_);
-        opts.prefetch = true;
-        auto it = txn_kv_->full_range_get(begin_key, end_key, std::move(opts));
-
-        int64_t num_scanned = 0;
-        bool error = false;
-        for (auto kv = it->next(); kv.has_value() && !migrator->stopped(); kv = it->next()) {
-            auto [k, v] = *kv;
-
-            std::string_view key_view(k.data(), k.size());
-            int64_t table_id = 0, index_id = 0, partition_id = 0, tablet_id = 0;
-            if (!decode_stats_tablet_key(&key_view, &table_id, &index_id, &partition_id,
-                                         &tablet_id)) {
-                // Sub-key suffix (data_size, num_rows, etc.) — skip.
-                continue;
-            }
-            if (v.empty()) continue;
-
-            ++num_scanned;
-            TabletStatsPB stats;
-            if (!stats.ParseFromArray(v.data(), v.size())) {
-                LOG_WARNING("migrate pass5: failed to parse TabletStatsPB")
-                        .tag("tablet_id", tablet_id);
-                continue;
-            }
-
-            std::string load_key = versioned::tablet_load_stats_key({instance_id, tablet_id});
-            std::string compact_key =
-                    versioned::tablet_compact_stats_key({instance_id, tablet_id});
-
-            if (!versioned::document_put(wb.txn.get(), load_key, Versionstamp::min(),
-                                         TabletStatsPB(stats))) {
-                error = true;
-                break;
-            }
-            if (wb.bump(config::snapshot_migrate_batch_size) != 0) { error = true; break; }
-
-            // Write zero compact_stats so merge_tablet_stats() returns the correct total.
-            // The meta service overwrites this on the first compaction commit.
-            if (!versioned::document_put(wb.txn.get(), compact_key, Versionstamp::min(),
-                                         TabletStatsPB {})) {
-                error = true;
-                break;
-            }
-            if (wb.bump(config::snapshot_migrate_batch_size) != 0) { error = true; break; }
-        }
-
-        if (wb.flush() != 0) error = true;
-        if (!it->is_valid()) error = true;
-        if (error || migrator->stopped()) return -1;
-
-        LOG_INFO("migrate: pass5 complete")
-                .tag("instance_id", instance_id)
-                .tag("num_scanned", num_scanned);
-        if (mark_done(MULTI_VERSION_TABLET_STATS) != 0) return -1;
-    }
-
-    // Migrate partition_version_key: old 0x01 {db_id, tbl_id, partition_id} → versioned {partition_id}.
-    if (!migrator->stopped() && need_migrate(MULTI_VERSION_PARTITION_VERSION)) {
-        LOG_INFO("migrate: starting pass6 (partition_version scan)")
-                .tag("instance_id", instance_id);
-        WriteBatch wb(txn_kv_.get());
-        if (wb.init() != 0) return -1;
-
-        std::string begin_key = partition_version_key({instance_id, 0LL, 0LL, 0LL});
-        std::string end_key =
-                partition_version_key({instance_id, INT64_MAX, INT64_MAX, INT64_MAX});
-        FullRangeGetOptions opts(txn_kv_);
-        opts.prefetch = true;
-        auto it = txn_kv_->full_range_get(begin_key, end_key, std::move(opts));
-
-        int64_t num_scanned = 0;
-        bool error = false;
-        for (auto kv = it->next(); kv.has_value() && !migrator->stopped(); kv = it->next()) {
-            auto [k, v] = *kv;
-            ++num_scanned;
-
-            std::string_view key_view(k.data(), k.size());
-            int64_t db_id = 0, tbl_id = 0, partition_id = 0;
-            if (!decode_partition_version_key(&key_view, &db_id, &tbl_id, &partition_id)) {
-                LOG_WARNING("migrate pass6: failed to decode partition_version_key")
-                        .tag("key", hex(k));
-                continue;
-            }
-
-            VersionPB version_pb;
-            if (!version_pb.ParseFromArray(v.data(), v.size())) {
-                LOG_WARNING("migrate pass6: failed to parse VersionPB")
-                        .tag("partition_id", partition_id);
-                continue;
-            }
-
-            std::string new_key = versioned::partition_version_key({instance_id, partition_id});
-            if (!versioned::document_put(wb.txn.get(), new_key, Versionstamp::min(),
-                                         std::move(version_pb))) {
-                error = true;
-                break;
-            }
-            if (wb.bump(config::snapshot_migrate_batch_size) != 0) { error = true; break; }
-        }
-
-        if (wb.flush() != 0) error = true;
-        if (!it->is_valid()) error = true;
-        if (error || migrator->stopped()) return -1;
-
-        LOG_INFO("migrate: pass6 complete")
-                .tag("instance_id", instance_id)
-                .tag("num_scanned", num_scanned);
-        if (mark_done(MULTI_VERSION_PARTITION_VERSION) != 0) return -1;
-    }
-
-    // Migrate table_version_key: old 0x01 {db_id, tbl_id} → versioned {table_id}.
-    if (!migrator->stopped() && need_migrate(MULTI_VERSION_TABLE_VERSION)) {
-        LOG_INFO("migrate: starting pass7 (table_version scan)")
-                .tag("instance_id", instance_id);
-        WriteBatch wb(txn_kv_.get());
-        if (wb.init() != 0) return -1;
-
-        std::string begin_key = table_version_key({instance_id, 0LL, 0LL});
-        std::string end_key = table_version_key({instance_id, INT64_MAX, INT64_MAX});
-        FullRangeGetOptions opts(txn_kv_);
-        opts.prefetch = true;
-        auto it = txn_kv_->full_range_get(begin_key, end_key, std::move(opts));
-
-        int64_t num_scanned = 0;
-        bool error = false;
-        for (auto kv = it->next(); kv.has_value() && !migrator->stopped(); kv = it->next()) {
-            auto [k, v] = *kv;
-            ++num_scanned;
-
-            std::string_view key_view(k.data(), k.size());
-            int64_t db_id = 0, tbl_id = 0;
-            if (!decode_table_version_key(&key_view, &db_id, &tbl_id)) {
-                LOG_WARNING("migrate pass7: failed to decode table_version_key")
-                        .tag("key", hex(k));
-                continue;
-            }
-
-            std::string new_key = versioned::table_version_key({instance_id, tbl_id});
-            versioned_put(wb.txn.get(), new_key, Versionstamp::min(), "");
-            if (wb.bump(config::snapshot_migrate_batch_size) != 0) { error = true; break; }
-        }
-
-        if (wb.flush() != 0) error = true;
-        if (!it->is_valid()) error = true;
-        if (error || migrator->stopped()) return -1;
-
-        LOG_INFO("migrate: pass7 complete")
-                .tag("instance_id", instance_id)
-                .tag("num_scanned", num_scanned);
-        if (mark_done(MULTI_VERSION_TABLE_VERSION) != 0) return -1;
-    }
-
-    // Detect passes skipped due to stopped() — must return -1 to prevent premature completion.
-    for (auto kt : MIGRATION_KEY_TYPES) {
-        if (need_migrate(kt)) {
-            LOG_WARNING("migrate_to_versioned_keys: stopped before all key types were migrated")
-                    .tag("instance_id", instance_id);
-            return -1;
-        }
-    }
-
-    LOG_INFO("migrate_to_versioned_keys: all key types migrated successfully")
-            .tag("instance_id", instance_id);
-    return 0;
-}
 
 int SnapshotManager::compact_snapshot_chains(InstanceChainCompactor* compactor) {
     LOG(WARNING) << "Compact snapshot chains is not implemented";
     return -1;
-}
-    for (int32_t kt : compactor->instance_info().compacted_key_sets()) {
-        compacted.insert(kt);
-    }
-
-    auto need_compact = [&](KeySetType kt) {
-        return !compacted.count(static_cast<int32_t>(kt));
-    };
-
-    // Mark a key type done — same pattern as migrate_to_versioned_keys.
-    auto mark_done = [&](KeySetType kt) -> int {
-        for (int attempt = 0; attempt < 3; ++attempt) {
-            std::unique_ptr<Transaction> txn;
-            if (txn_kv_->create_txn(&txn) != TxnErrorCode::TXN_OK) continue;
-            std::string ikey = instance_key({instance_id});
-            std::string ival;
-            if (txn->get(ikey, &ival) != TxnErrorCode::TXN_OK) continue;
-            InstanceInfoPB inst;
-            if (!inst.ParseFromString(ival)) return -1;
-            if (!compacted.count(static_cast<int32_t>(kt))) {
-                inst.add_compacted_key_sets(kt);
-            }
-            txn->put(ikey, inst.SerializeAsString());
-            txn->atomic_add(system_meta_service_instance_update_key(), 1);
-            TxnErrorCode err = txn->commit();
-            if (err == TxnErrorCode::TXN_OK || err == TxnErrorCode::TXN_MAYBE_COMMITTED) {
-                compacted.insert(static_cast<int32_t>(kt));
-                return 0;
-            }
-        }
-        LOG_WARNING("compact: failed to mark key type done").tag("instance_id", instance_id);
-        return -1;
-    };
-
-    // Reverse-scan versioned keys; first occurrence per prefix = latest version (keep).
-    // All subsequent occurrences are older versions; delete them.
-    auto compact_range = [&](std::string begin_key, std::string end_key, bool is_rowset) -> int {
-        WriteBatch wb(txn_kv_.get());
-        if (wb.init() != 0) return -1;
-
-        FullRangeGetOptions opts(txn_kv_);
-        opts.prefetch = true;
-        opts.reverse = true; // descending: latest versionstamp per key prefix first
-        auto it = txn_kv_->full_range_get(begin_key, end_key, std::move(opts));
-
-        std::string last_prefix;
-        Versionstamp last_kept_vs;
-        Versionstamp last_deleted_vs;
-        bool in_delete = false;
-        int64_t num_deleted = 0;
-        bool error = false;
-
-        for (auto kv = it->next(); kv.has_value() && !compactor->stopped(); kv = it->next()) {
-            auto [k, v] = *kv;
-            std::string_view key_view(k.data(), k.size());
-            Versionstamp vs;
-            if (decode_tailing_versionstamp_end(&key_view) != 0) continue;
-            if (decode_tailing_versionstamp(&key_view, &vs) != 0) continue;
-            std::string key_prefix(key_view);
-
-            if (key_prefix != last_prefix) {
-                // New key prefix: first occurrence in descending scan = latest version → keep.
-                last_prefix = key_prefix;
-                last_kept_vs = vs;
-                in_delete = false;
-            } else if (vs == last_kept_vs) {
-                // Sub-key of the version we're keeping (split document) → skip.
-            } else if (in_delete && vs == last_deleted_vs) {
-                // Sub-key of a version already deleted via document_remove range → skip.
-            } else {
-                // Old version of same key prefix → delete.
-                if (is_rowset) {
-                    versioned::document_remove<doris::RowsetMetaCloudPB>(wb.txn.get(), key_prefix,
-                                                                          vs);
-                } else {
-                    versioned_remove(wb.txn.get(), key_prefix, vs);
-                }
-                last_deleted_vs = vs;
-                in_delete = true;
-                ++num_deleted;
-                if (wb.bump(config::snapshot_compact_batch_size) != 0) {
-                    error = true;
-                    break;
-                }
-            }
-        }
-
-        if (wb.flush() != 0) error = true;
-        if (!it->is_valid()) error = true;
-        if (error || compactor->stopped()) return -1;
-
-        LOG_INFO("compact: range done")
-                .tag("instance_id", instance_id)
-                .tag("num_deleted", num_deleted);
-        return 0;
-    };
-
-    auto versioned_end = [](std::string prefix) {
-        return encode_versioned_key(std::move(prefix), Versionstamp::max());
-    };
-
-    // Compact meta_rowset_load + meta_rowset_compact (RowsetMetaCloudPB, split document).
-    if (!compactor->stopped() && need_compact(MULTI_VERSION_META_ROWSET)) {
-        LOG_INFO("compact: pass1 (rowsets)").tag("instance_id", instance_id);
-        if (compact_range(versioned::meta_rowset_load_key({instance_id, 0LL, 0LL}),
-                          versioned_end(versioned::meta_rowset_load_key(
-                                  {instance_id, INT64_MAX, INT64_MAX})),
-                          /*is_rowset=*/true) != 0)
-            return -1;
-        if (compact_range(versioned::meta_rowset_compact_key({instance_id, 0LL, 0LL}),
-                          versioned_end(versioned::meta_rowset_compact_key(
-                                  {instance_id, INT64_MAX, INT64_MAX})),
-                          /*is_rowset=*/true) != 0)
-            return -1;
-        if (mark_done(MULTI_VERSION_META_ROWSET) != 0) return -1;
-    }
-
-    // Compact meta_tablet_key (TabletMetaCloudPB, not split).
-    if (!compactor->stopped() && need_compact(MULTI_VERSION_META_TABLET)) {
-        LOG_INFO("compact: pass2 (tablets)").tag("instance_id", instance_id);
-        if (compact_range(versioned::meta_tablet_key({instance_id, 0LL}),
-                          versioned_end(versioned::meta_tablet_key({instance_id, INT64_MAX})),
-                          false) != 0)
-            return -1;
-        if (mark_done(MULTI_VERSION_META_TABLET) != 0) return -1;
-    }
-
-    // Compact tablet_load_stats + tablet_compact_stats (TabletStatsPB, not split).
-    if (!compactor->stopped() && need_compact(MULTI_VERSION_TABLET_STATS)) {
-        LOG_INFO("compact: pass3 (stats)").tag("instance_id", instance_id);
-        if (compact_range(
-                    versioned::tablet_load_stats_key({instance_id, 0LL}),
-                    versioned_end(versioned::tablet_load_stats_key({instance_id, INT64_MAX})),
-                    false) != 0)
-            return -1;
-        if (compact_range(
-                    versioned::tablet_compact_stats_key({instance_id, 0LL}),
-                    versioned_end(versioned::tablet_compact_stats_key({instance_id, INT64_MAX})),
-                    false) != 0)
-            return -1;
-        if (mark_done(MULTI_VERSION_TABLET_STATS) != 0) return -1;
-    }
-
-    // Compact meta_partition_key (empty value, versioned_put).
-    if (!compactor->stopped() && need_compact(MULTI_VERSION_META_PARTITION)) {
-        LOG_INFO("compact: pass4 (meta_partition)").tag("instance_id", instance_id);
-        if (compact_range(versioned::meta_partition_key({instance_id, 0LL}),
-                          versioned_end(versioned::meta_partition_key({instance_id, INT64_MAX})),
-                          false) != 0)
-            return -1;
-        if (mark_done(MULTI_VERSION_META_PARTITION) != 0) return -1;
-    }
-
-    // Compact meta_index_key (empty value, versioned_put).
-    if (!compactor->stopped() && need_compact(MULTI_VERSION_META_INDEX)) {
-        LOG_INFO("compact: pass5 (meta_index)").tag("instance_id", instance_id);
-        if (compact_range(versioned::meta_index_key({instance_id, 0LL}),
-                          versioned_end(versioned::meta_index_key({instance_id, INT64_MAX})),
-                          false) != 0)
-            return -1;
-        if (mark_done(MULTI_VERSION_META_INDEX) != 0) return -1;
-    }
-
-    // Compact partition_version_key (VersionPB, versioned document_put).
-    if (!compactor->stopped() && need_compact(MULTI_VERSION_PARTITION_VERSION)) {
-        LOG_INFO("compact: pass6 (partition_version)").tag("instance_id", instance_id);
-        if (compact_range(
-                    versioned::partition_version_key({instance_id, 0LL}),
-                    versioned_end(versioned::partition_version_key({instance_id, INT64_MAX})),
-                    false) != 0)
-            return -1;
-        if (mark_done(MULTI_VERSION_PARTITION_VERSION) != 0) return -1;
-    }
-
-    // Compact table_version_key (empty value, versioned_put).
-    if (!compactor->stopped() && need_compact(MULTI_VERSION_TABLE_VERSION)) {
-        LOG_INFO("compact: pass7 (table_version)").tag("instance_id", instance_id);
-        if (compact_range(versioned::table_version_key({instance_id, 0LL}),
-                          versioned_end(versioned::table_version_key({instance_id, INT64_MAX})),
-                          false) != 0)
-            return -1;
-        if (mark_done(MULTI_VERSION_TABLE_VERSION) != 0) return -1;
-    }
-
-    // Plain-put keys (INDEX_TABLET/PARTITION/INDEX) have no versionstamp chain — skip.
-    // META_SCHEMA is not versionstamped — skip.
-
-    // Detect passes skipped due to stopped() — must return -1 to prevent premature completion.
-    for (auto kt : COMPACTION_KEY_TYPES) {
-        if (need_compact(kt)) {
-            LOG_WARNING("compact_snapshot_chains: stopped before all key types were compacted")
-                    .tag("instance_id", instance_id);
-            return -1;
-        }
-    }
-
-    LOG_INFO("compact_snapshot_chains: all key types compacted successfully")
-            .tag("instance_id", instance_id);
-    return 0;
 }
 
 static std::pair<MetaServiceCode, std::string> get_instance(Transaction* txn,
@@ -3021,6 +2229,20 @@ int SnapshotManager::seed_rowset_ref_counts(
                 }
                 // check_err == TXN_OK: key already exists from a prior partial run — skip atomic_add.
                 wb.txn->put(join_key, ref_key); // value = ref_count key (idempotent)
+                // Store rowset metadata at seed time so export_table_meta can retrieve it
+                // regardless of compaction or recycler state (agnostic to meta_rowset_key).
+                std::string meta_key = versioned::snapshot_rowset_meta_key(
+                        {instance_id, snapshot_vs, tablet_id, rs.rowset_id_v2()});
+                std::string meta_val;
+                if (rs.SerializeToString(&meta_val)) {
+                    wb.txn->put(meta_key, meta_val);
+                } else {
+                    LOG_WARNING("seed_rowset_ref_counts: failed to serialize rowset meta"
+                                " — rowset excluded from same-cluster restore")
+                            .tag("instance_id", instance_id)
+                            .tag("tablet_id", tablet_id)
+                            .tag("rowset_id", rs.rowset_id_v2());
+                }
                 ++num_rowsets;
                 if (wb.bump(config::snapshot_seed_batch_size) != 0) return -1;
             }
@@ -3139,6 +2361,16 @@ int SnapshotManager::unseed_rowset_ref_counts(std::string_view instance_id_sv,
 
         wb.txn->atomic_add(ref_key, -1);
         wb.txn->remove(std::string(k.data(), k.size())); // clean up join table entry
+
+        // Also remove the snapshot rowset meta entry stored at seed time.
+        int64_t unseed_tablet_id = 0;
+        std::string unseed_rowset_id;
+        std::string_view ref_key_view(ref_key);
+        if (versioned::decode_data_rowset_ref_count_key(
+                    &ref_key_view, &unseed_tablet_id, &unseed_rowset_id)) {
+            wb.txn->remove(versioned::snapshot_rowset_meta_key(
+                    {instance_id, snapshot_vs, unseed_tablet_id, unseed_rowset_id}));
+        }
 
         ++num_unseeded;
         if (wb.bump(config::snapshot_seed_batch_size) != 0) { ++errors; break; }
