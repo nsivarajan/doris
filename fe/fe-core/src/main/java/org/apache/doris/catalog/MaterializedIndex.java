@@ -126,6 +126,18 @@ public class MaterializedIndex extends MetaObject implements GsonPostProcessable
         idToTablets = new HashMap<>();
     }
 
+    /**
+     * Moves a tablet's map entry from oldId to newId after setTabletId() was called.
+     * setTabletId() only updates the tablet object's own id field; this keeps the
+     * idToTablets map in sync so getTablet(newId) continues to work correctly.
+     */
+    public synchronized void relabelTablet(long oldId, long newId) {
+        Tablet t = idToTablets.remove(oldId);
+        if (t != null) {
+            idToTablets.put(newId, t);
+        }
+    }
+
     public synchronized void addTablet(Tablet tablet, TabletMeta tabletMeta) {
         addTablet(tablet, tabletMeta, false);
     }

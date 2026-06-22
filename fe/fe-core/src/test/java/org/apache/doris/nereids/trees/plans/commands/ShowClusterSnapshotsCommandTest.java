@@ -141,10 +141,18 @@ public class ShowClusterSnapshotsCommandTest {
 
     @Test
     public void testStateReadyFullCluster() throws Exception {
-        // Full-cluster snapshot (no protected_table_ids): needsExport=false → READY once seeded.
+        // Full-cluster snapshot also requires table_meta_exported=true to be READY.
+        // seeded=true, exported=false → EXPORTING (not READY)
         Mockito.when(snapshotHandler.listSnapshot(false))
                 .thenReturn(responseWith(normalSnap(true, false, false)));
         ShowResultSet rs = new ShowClusterSnapshotsCommand(false)
+                .doRun(connectContext, Mockito.mock(StmtExecutor.class));
+        Assertions.assertEquals("EXPORTING", rs.getResultRows().get(0).get(2));
+
+        // seeded=true, exported=true → READY
+        Mockito.when(snapshotHandler.listSnapshot(false))
+                .thenReturn(responseWith(normalSnap(true, true, false)));
+        rs = new ShowClusterSnapshotsCommand(false)
                 .doRun(connectContext, Mockito.mock(StmtExecutor.class));
         Assertions.assertEquals("READY", rs.getResultRows().get(0).get(2));
     }

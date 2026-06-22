@@ -26,8 +26,12 @@
 #include <unordered_map>
 #include <unordered_set>
 
+#include <rapidjson/document.h>
+
 #include "common/logging.h"
 #include "meta-service/meta_service_helper.h"
+#include "meta-service/meta_service_schema.h"
+#include "meta-store/blob_message.h"
 #include "meta-store/codec.h"
 #include "meta-store/document_message.h"
 #include "meta-store/keys.h"
@@ -45,6 +49,90 @@ namespace doris::cloud {
 // Shared by migrate_to_versioned_keys, compact_snapshot_chains, seed_rowset_ref_counts,
 // unseed_rowset_ref_counts, export_table_meta, and import_table_meta.
 namespace {
+
+// Builds TabletSchemaCloudPB from the fe_table_schema_json blob embedded in TableFdbMetaPB.
+// The JSON is the Java OlapTable serialisation; field names (itm/sc/sv/sh/skcc/kt/mcui)
+// and type strings (e.g. "BIGINT", "VARCHAR") are stable across Doris versions.
+bool build_schema_from_fe_json(const std::string& json, int64_t index_id,
+                                       doris::TabletSchemaCloudPB* out) {
+    // Java OlapTable.write() uses Text.writeString() which prepends a 4-byte big-endian
+    // length before the UTF-8 JSON; skip those 4 bytes before parsing.
+    if (json.size() <= 4 || !out) return false;
+    rapidjson::Document doc;
+    doc.Parse(json.data() + 4, json.size() - 4);
+    if (doc.HasParseError() || !doc.IsObject() || !doc.HasMember("itm")) return false;
+    const auto& itm = doc["itm"];
+    if (!itm.IsObject()) return false;
+    std::string idx_key = std::to_string(index_id);
+    if (!itm.HasMember(idx_key.c_str())) return false;
+    const auto& idx = itm[idx_key.c_str()];
+    if (!idx.IsObject()) return false;
+
+    if (idx.HasMember("sv")) out->set_schema_version(idx["sv"].GetInt());
+    if (idx.HasMember("skcc")) out->set_num_short_key_columns(idx["skcc"].GetInt());
+    if (idx.HasMember("mcui")) out->set_next_column_unique_id(idx["mcui"].GetInt() + 1);
+    if (idx.HasMember("kt")) {
+        std::string kt = idx["kt"].GetString();
+        if (kt == "UNIQUE_KEYS") out->set_keys_type(doris::KeysType::UNIQUE_KEYS);
+        else if (kt == "AGG_KEYS") out->set_keys_type(doris::KeysType::AGG_KEYS);
+        else out->set_keys_type(doris::KeysType::DUP_KEYS);
+    }
+    if (!idx.HasMember("sc") || !idx["sc"].IsArray()) return false;
+    for (const auto& c : idx["sc"].GetArray()) {
+        if (!c.IsObject()) continue;
+        auto* col = out->add_column();
+
+        if (c.HasMember("uniqueId")) col->set_unique_id(c["uniqueId"].GetInt());
+        if (c.HasMember("name")) col->set_name(c["name"].GetString());
+        if (c.HasMember("isKey")) col->set_is_key(c["isKey"].GetBool());
+        if (c.HasMember("isAllowNull")) col->set_is_nullable(c["isAllowNull"].GetBool());
+        if (c.HasMember("aggregationType")) {
+            col->set_aggregation(c["aggregationType"].GetString());
+        } else {
+            col->set_aggregation("NONE");
+        }
+        col->set_visible(true);
+
+        int32_t str_len = 0;
+        std::string type_str;
+        int32_t precision = 0, scale = 0;
+        if (c.HasMember("type") && c["type"].IsObject()) {
+            const auto& t = c["type"];
+            if (t.HasMember("type")) {
+                type_str = t["type"].GetString();
+                col->set_type(type_str);
+            }
+            if (t.HasMember("len") && t["len"].IsInt() && t["len"].GetInt() > 0)
+                str_len = t["len"].GetInt();
+            if (t.HasMember("precision") && t["precision"].IsInt())
+                precision = t["precision"].GetInt();
+            if (t.HasMember("scale") && t["scale"].IsInt())
+                scale = t["scale"].GetInt();
+        }
+        col->set_precision(precision);
+        col->set_frac(scale);
+
+        // Compute storage length matching Java ColumnToProtobuf.getFieldLengthByType().
+        int32_t length = 0;
+        if (type_str == "TINYINT" || type_str == "BOOLEAN") length = 1;
+        else if (type_str == "SMALLINT") length = 2;
+        else if (type_str == "INT" || type_str == "FLOAT"
+                || type_str == "DATEV2" || type_str == "DECIMAL32") length = 4;
+        else if (type_str == "BIGINT" || type_str == "DATETIME"
+                || type_str == "DATETIMEV2" || type_str == "TIMESTAMPTZ"
+                || type_str == "DOUBLE" || type_str == "DECIMAL64") length = 8;
+        else if (type_str == "DATE") length = 3;
+        else if (type_str == "LARGEINT" || type_str == "DECIMAL128I") length = 16;
+        else if (type_str == "DECIMALV2") length = 12;
+        else if (type_str == "CHAR") length = str_len;
+        else if (type_str == "VARCHAR" || type_str == "HLL") length = str_len + 2;
+        else if (type_str == "STRING") length = str_len + 4;
+        else length = 8;
+        col->set_length(length);
+        col->set_index_length(length);
+    }
+    return out->column_size() > 0;
+}
 
 struct WriteBatch {
     TxnKv* txn_kv;
@@ -1706,6 +1794,42 @@ void SnapshotManager::import_table_meta(std::string_view instance_id_sv,
         return (it != part_remap_map.end()) ? it->second : id;
     };
 
+    // On V1 clusters meta_schema_key may be absent. Build the schema once from
+    // fe_table_schema_json and embed it into every tablet meta and rowset meta
+    // we write, so neither get_tablet_meta nor sync_tablet_rowsets_unlocked
+    // ever needs an external meta_schema_key lookup for restored tablets.
+    doris::TabletSchemaCloudPB table_schema_for_embed;
+    bool has_embed_schema = false;
+    if (!fdb_meta.tablets().empty() && !is_versioned_write) {
+        const auto& first_tab = fdb_meta.tablets(0);
+        if ((!first_tab.has_schema() || first_tab.schema().column_size() == 0)
+                && first_tab.has_schema_version() && first_tab.index_id() > 0) {
+            std::string skey = meta_schema_key(
+                    {instance_id, first_tab.index_id(), first_tab.schema_version()});
+            std::unique_ptr<Transaction> stxn;
+            if (txn_kv_->create_txn(&stxn) == TxnErrorCode::TXN_OK) {
+                ValueBuf sval;
+                if (blob_get(stxn.get(), skey, &sval) == TxnErrorCode::TXN_OK) {
+                    has_embed_schema = parse_schema_value(sval, &table_schema_for_embed);
+                }
+            }
+            if (!has_embed_schema) {
+                has_embed_schema = build_schema_from_fe_json(
+                        fdb_meta.fe_table_schema_json(), first_tab.index_id(),
+                        &table_schema_for_embed);
+                if (has_embed_schema) {
+                    table_schema_for_embed.set_schema_version(first_tab.schema_version());
+                } else {
+                    LOG_WARNING("import_table_meta: schema unavailable for V1 tablet; "
+                                "SELECT on restored table will fail until schema is fixed")
+                            .tag("instance_id", instance_id)
+                            .tag("index_id", first_tab.index_id())
+                            .tag("schema_version", first_tab.schema_version());
+                }
+            }
+        }
+    }
+
     int64_t tablets_written = 0, rowsets_written = 0, partitions_written = 0;
     int errors = 0;
 
@@ -1801,6 +1925,11 @@ void SnapshotManager::import_table_meta(std::string_view instance_id_sv,
             int64_t part_id = remap_part_id(tab.partition_id());
             tab.set_table_id(tbl_id);
             tab.set_partition_id(part_id);
+            // Embed schema so get_tablet_meta never needs a separate meta_schema_key
+            // lookup — which may be absent or get recycled on some V1 clusters.
+            if (has_embed_schema && (!tab.has_schema() || tab.schema().column_size() == 0)) {
+                *tab.mutable_schema() = table_schema_for_embed;
+            }
             MetaTabletKeyInfo ki {instance_id, tbl_id, tab.index_id(), part_id,
                                    remap_id(tablet.tablet_id())};
             std::string val;
@@ -1822,6 +1951,11 @@ void SnapshotManager::import_table_meta(std::string_view instance_id_sv,
         if (path_a) {
             r.set_source_tablet_id(rs.tablet_id());
             r.set_source_rowset_id(rs.rowset_id_v2());
+        }
+        // Embed schema so sync_tablet_rowsets_unlocked never needs meta_schema_key.
+        if (!is_versioned_write && has_embed_schema
+                && (!r.has_tablet_schema() || r.tablet_schema().column_size() == 0)) {
+            *r.mutable_tablet_schema() = table_schema_for_embed;
         }
         if (is_versioned_write) {
             std::string key = versioned::meta_rowset_load_key(
@@ -1847,6 +1981,10 @@ void SnapshotManager::import_table_meta(std::string_view instance_id_sv,
         if (path_a) {
             r.set_source_tablet_id(rs.tablet_id());
             r.set_source_rowset_id(rs.rowset_id_v2());
+        }
+        if (!is_versioned_write && has_embed_schema
+                && (!r.has_tablet_schema() || r.tablet_schema().column_size() == 0)) {
+            *r.mutable_tablet_schema() = table_schema_for_embed;
         }
         if (is_versioned_write) {
             std::string key = versioned::meta_rowset_compact_key(
@@ -1894,12 +2032,39 @@ void SnapshotManager::import_table_meta(std::string_view instance_id_sv,
         }
     }
 
+    // Pre-compute max rowset end_version per source partition so the written
+    // partition_version_key covers all restored rowsets even when the blob version
+    // is stale (V1 partition_id discrepancy in export_table_meta).
+    std::unordered_map<int64_t, int64_t> tablet_to_src_part;
+    for (auto& idx : fdb_meta.tablet_indexes()) {
+        tablet_to_src_part[idx.tablet_id()] = idx.partition_id();
+    }
+    std::unordered_map<int64_t, int64_t> part_max_rowset_ver;
+    auto accum_rowset_vers = [&](const auto& rowsets) {
+        for (auto& rs : rowsets) {
+            auto pit = tablet_to_src_part.find(rs.tablet_id());
+            if (pit == tablet_to_src_part.end()) continue;
+            auto& cur = part_max_rowset_ver[pit->second];
+            if (rs.end_version() > cur) cur = rs.end_version();
+        }
+    };
+    accum_rowset_vers(fdb_meta.load_rowsets());
+    accum_rowset_vers(fdb_meta.compact_rowsets());
+
     for (auto& pv : fdb_meta.partition_versions()) {
         if (batch_broken) break;
         if (!all_partitions && !partition_filter.count(pv.partition_id())) continue;
 
         int64_t remapped_part_id = remap_part_id(pv.partition_id());
         VersionPB ver = pv.version();
+        // Raise version to max rowset end_version for this partition if the blob version
+        // was stale (V1 partition_id discrepancy: export read the wrong partition_version_key).
+        {
+            auto rv_it = part_max_rowset_ver.find(pv.partition_id());
+            if (rv_it != part_max_rowset_ver.end() && rv_it->second > ver.version()) {
+                ver.set_version(rv_it->second);
+            }
+        }
 
         bool v3_ok = true;
         if (is_versioned_write) {
@@ -1943,10 +2108,37 @@ void SnapshotManager::import_table_meta(std::string_view instance_id_sv,
         if (!do_bump()) break;
     }
 
-    // Write table_version_key so CloudSyncVersionDaemon gets a positive version (>0).
-    // Use the max snapshot partition version (not just +1): the daemon reads this value
-    // as the partition visible version; if it's lower than the rowset end_version the
-    // BE returns 0 rows even though data exists.
+    // V1 fallback: partition_versions blob is empty (partition_id in meta_tablet_idx_key
+    // has no matching partition_version_key). Derive from max rowset end_version so
+    // MS does not return VERSION_NOT_FOUND → FE spec_version=1 → BE finds no data rowsets.
+    if (!batch_broken && partitions_written == 0 && tablets_written > 0) {
+        for (auto& [src_pid, max_ver] : part_max_rowset_ver) {
+            if (batch_broken) break;
+            auto dbt_it = part_to_db_tbl.find(src_pid);
+            if (dbt_it == part_to_db_tbl.end()) continue;
+            int64_t remapped_pid = remap_part_id(src_pid);
+            int64_t tbl_id = (target_table_id > 0) ? target_table_id : dbt_it->second.second;
+            VersionPB ver;
+            ver.set_version(std::max(int64_t(1), max_ver));
+            std::string v1_key = partition_version_key(
+                    {instance_id, dbt_it->second.first, tbl_id, remapped_pid});
+            std::string val;
+            if (ver.SerializeToString(&val)) {
+                wb.txn->put(v1_key, val);
+                ++partitions_written;
+                LOG_INFO("import_table_meta: derived partition_version_key from rowsets (V1 fallback)")
+                        .tag("db_id", dbt_it->second.first)
+                        .tag("table_id", tbl_id)
+                        .tag("partition_id", remapped_pid)
+                        .tag("version", ver.version());
+            } else { ++errors; }
+            if (!do_bump()) break;
+        }
+    }
+
+    // Write table_version_key so CloudSyncVersionDaemon gets the correct visible version.
+    // effective_version = max(blob_partition_version, max_rowset_end_version) guards against
+    // stale blob versions on V1 clusters where export may read the wrong partition_version_key.
     if (!batch_broken && partitions_written > 0) {
         int64_t tv_db_id = -1, tv_tbl_id = -1;
         int64_t max_part_version = 0;
@@ -1960,8 +2152,18 @@ void SnapshotManager::import_table_meta(std::string_view instance_id_sv,
                 max_part_version = pv.version().version();
             }
         }
-        // atomic_add from 0 (new table key) by max_part_version gives exactly max_part_version.
-        int64_t tv_increment = std::max(int64_t(1), max_part_version);
+        // Also consider the max end_version of all restored rowsets: on V1, the
+        // partition_version_key may be stale (uses a different partition_id than
+        // commit_txn) and give a lower version than the actual rowset end_versions.
+        int64_t max_rowset_end_ver = 0;
+        for (auto& rs : fdb_meta.load_rowsets()) {
+            if (rs.end_version() > max_rowset_end_ver) max_rowset_end_ver = rs.end_version();
+        }
+        for (auto& rs : fdb_meta.compact_rowsets()) {
+            if (rs.end_version() > max_rowset_end_ver) max_rowset_end_ver = rs.end_version();
+        }
+        int64_t effective_version = std::max(max_part_version, max_rowset_end_ver);
+        int64_t tv_increment = std::max(int64_t(1), effective_version);
         if (tv_db_id > 0) {
             std::string ver_key = table_version_key({instance_id, tv_db_id, tv_tbl_id});
             wb.txn->atomic_add(ver_key, tv_increment);

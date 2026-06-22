@@ -956,10 +956,19 @@ public class CloudSnapshotHandler extends MasterDaemon {
             dstByName.put(p.getName(), p.getId());
         }
         Map<Long, Long> remap = new LinkedHashMap<>();
-        for (Partition p : srcTable.getPartitions()) {
-            Long dstId = dstByName.get(p.getName());
+        List<Partition> srcParts = new ArrayList<>(srcTable.getPartitions());
+        List<Partition> dstParts = new ArrayList<>(dstTable.getPartitions());
+        for (int i = 0; i < srcParts.size(); i++) {
+            Partition srcPart = srcParts.get(i);
+            // Name-based lookup first; positional fallback for UNPARTITIONED tables
+            // where setName() renames the partition to match the new table name,
+            // causing the name-based lookup to miss and the remap to return empty.
+            Long dstId = dstByName.get(srcPart.getName());
+            if (dstId == null && i < dstParts.size()) {
+                dstId = dstParts.get(i).getId();
+            }
             if (dstId != null) {
-                remap.put(p.getId(), dstId);
+                remap.put(srcPart.getId(), dstId);
             }
         }
         return remap;
@@ -1147,7 +1156,12 @@ public class CloudSnapshotHandler extends MasterDaemon {
             clone.renamePartitionId(oldPartitionId, partition.getId());
             for (MaterializedIndex index : partition.getMaterializedIndices(IndexExtState.VISIBLE)) {
                 for (Tablet tablet : index.getTablets()) {
+                    long oldTabletId = tablet.getId();
                     tablet.setTabletId(Env.getCurrentEnv().getNextId());
+                    // Keep the MaterializedIndex idToTablets map in sync: setTabletId only
+                    // updates the tablet's own id field, leaving the map with the old key.
+                    // Without this, index.getTablet(newId) returns null and DELETE hangs.
+                    index.relabelTablet(oldTabletId, tablet.getId());
                     // tableId/partitionId must match the restored table so BE::get_version uses
                     // the correct FDB key — wrong IDs return the live version, causing
                     // spec_version mismatch and empty scan results.

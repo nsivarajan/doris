@@ -170,7 +170,7 @@ public class ShowClusterSnapshotsCommand extends ShowCommand {
                 if (!snap.hasRowsetRefsSeeded() || !snap.getRowsetRefsSeeded()) {
                     return "SEEDING";
                 }
-                if (needsExport(snap) && (!snap.hasTableMetaExported() || !snap.getTableMetaExported())) {
+                if (!snap.hasTableMetaExported() || !snap.getTableMetaExported()) {
                     return "EXPORTING";
                 }
                 return "READY";
