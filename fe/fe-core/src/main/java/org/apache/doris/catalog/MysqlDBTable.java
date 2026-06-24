@@ -49,6 +49,7 @@ public class MysqlDBTable extends SchemaTable {
                                     .column("Show_view_priv", ScalarType.createCharType(1))
                                     .column("Cluster_usage_priv", ScalarType.createCharType(1))
                                     .column("Stage_usage_priv", ScalarType.createCharType(1))
+                                    .column("References_priv", ScalarType.createCharType(1))
                                     .column("ssl_type", ScalarType.createCharType(9))
                                     .column("ssl_cipher", ScalarType.createVarcharType(ScalarType.MAX_VARCHAR_LENGTH))
                                     .column("x509_issuer", ScalarType.createVarcharType(ScalarType.MAX_VARCHAR_LENGTH))
