@@ -2062,11 +2062,11 @@ public class Auth implements Writable {
             for (List<User> users : nameToUsers.values()) {
                 for (User user : users) {
                     if (!user.isSetByDomainResolver()) {
-                        List<String> userInfo = Lists.newArrayList(Collections.nCopies(32, ""));
+                        List<String> userInfo = Lists.newArrayList(Collections.nCopies(33, ""));
                         UserIdentity userIdent = user.getUserIdentity();
                         userInfo.set(0, userIdent.getHost());
                         userInfo.set(1, userIdent.getQualifiedUser());
-                        for (int i = 2; i <= 13; i++) {
+                        for (int i = 2; i <= 14; i++) {
                             userInfo.set(i, "N");
                         }
 
@@ -2114,6 +2114,9 @@ public class Auth implements Writable {
                                         case STAGE_USAGE_PRIV:
                                             userInfo.set(13, "Y");
                                             break;
+                                        case REFERENCES_PRIV:
+                                            userInfo.set(14, "Y");
+                                            break;
                                         default:
                                             break;
                                     }
@@ -2121,7 +2124,7 @@ public class Auth implements Writable {
 
                                 // If the user is admin, set all permissions to 'Y' except Node_priv
                                 if (isAdmin) {
-                                    for (int i = 4; i <= 13; i++) {
+                                    for (int i = 4; i <= 14; i++) {
                                         userInfo.set(i, "Y");
                                     }
                                 }
@@ -2129,11 +2132,13 @@ public class Auth implements Writable {
                         }
 
                         // Set password policy info
-                        userInfo.set(21, String.valueOf(getMaxConn(userIdent.getQualifiedUser())));
+                        String maxConnStr = String.valueOf(getMaxConn(userIdent.getQualifiedUser()));
+                        userInfo.set(21, maxConnStr); // max_connections
+                        userInfo.set(22, maxConnStr); // max_user_connections
                         List<List<String>> passWordPolicyInfo = getPasswdPolicyInfo(userIdent);
                         if (passWordPolicyInfo.size() == 8) {
                             for (int i = 0; i < passWordPolicyInfo.size(); i++) {
-                                userInfo.set(24 + i, passWordPolicyInfo.get(i).get(1));
+                                userInfo.set(25 + i, passWordPolicyInfo.get(i).get(1));
                             }
                         }
                         userInfos.add(userInfo);
