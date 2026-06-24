@@ -44,6 +44,7 @@ std::vector<SchemaScanner::ColumnDesc> SchemaUserScanner::_s_user_columns = {
         {"Show_view_priv", TYPE_CHAR, sizeof(StringRef), false},
         {"Cluster_usage_priv", TYPE_CHAR, sizeof(StringRef), false},
         {"Stage_usage_priv", TYPE_CHAR, sizeof(StringRef), false},
+        {"References_priv", TYPE_CHAR, sizeof(StringRef), false},
         {"ssl_type", TYPE_CHAR, sizeof(StringRef), false},
         {"ssl_cipher", TYPE_VARCHAR, sizeof(StringRef), false},
         {"x509_issuer", TYPE_VARCHAR, sizeof(StringRef), false},
