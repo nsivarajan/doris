@@ -72,6 +72,8 @@ public class PolicyMgr implements Writable {
     private ConcurrentMap<PolicyTypeEnum, List<Policy>> typeToPolicyMap = Maps.newConcurrentMap();
 
     // ctlName -> dbName -> tableName -> List<RowPolicy>
+    // Any key can be "*" for wildcard scopes (db.*, catalog.*.*, *.*.*)
+    // — looked up via O(1) map.get("*") in getUserPolicies.
     private Map<String, Map<String, Map<String, List<RowPolicy>>>> tablePolicies = Maps.newConcurrentMap();
 
     private void writeLock() {
@@ -356,34 +358,54 @@ public class PolicyMgr implements Writable {
     }
 
     public List<RowPolicy> getUserPolicies(String ctlName, String dbName, String tableName, UserIdentity user) {
-        List<RowPolicy> res = Lists.newArrayList();
-        // Make a judgment in advance to reduce the number of times to obtain getRoles
-        if (!tablePolicies.containsKey(ctlName) || !tablePolicies.get(ctlName).containsKey(dbName)
-                || !tablePolicies.get(ctlName).get(dbName).containsKey(tableName)) {
-            return res;
+        // Fast path: skip role fetch and lock acquisition when no row policies exist at all.
+        // tablePolicies.isEmpty() is a single ConcurrentHashMap.isEmpty() call (~2ns),
+        // preserving the original near-zero cost for queries on clusters with no row policies.
+        if (tablePolicies.isEmpty()) {
+            return Collections.emptyList();
         }
+        List<RowPolicy> res = Lists.newArrayList();
         Set<String> roles = Env.getCurrentEnv().getAccessManager().getAuth().getRolesByUserWithLdap(user).stream()
                 .map(role -> ClusterNamespace.getNameFromFullName(role.getRoleName())).collect(Collectors.toSet());
+        // Four O(1) lookups: exact → db-wildcard → catalog-wildcard → global-wildcard.
+        // "*" is stored as a regular map key, so each lookup is a HashMap.get(), not a scan.
+        String[][] lookups = {
+            {ctlName, dbName, tableName},   // exact:   ctl.db.tbl
+            {ctlName, dbName, "*"},          // db:      ctl.db.*
+            {ctlName, "*", "*"},             // catalog: ctl.*.*
+            {"*", "*", "*"},                 // global:  *.*.*
+        };
         readLock();
         try {
-            // double check in lock,avoid NPE
-            if (!tablePolicies.containsKey(ctlName) || !tablePolicies.get(ctlName).containsKey(dbName)
-                    || !tablePolicies.get(ctlName).get(dbName).containsKey(tableName)) {
-                return res;
-            }
-            List<RowPolicy> policys = tablePolicies.get(ctlName).get(dbName).get(tableName);
-            for (RowPolicy rowPolicy : policys) {
-                // on rowPolicy to user
-                if ((rowPolicy.getUser() != null && rowPolicy.getUser().getQualifiedUser()
-                        .equals(user.getQualifiedUser()))
-                        || !StringUtils.isEmpty(rowPolicy.getRoleName()) && roles.contains(rowPolicy.getRoleName())) {
-                    res.add(rowPolicy);
+            for (String[] key : lookups) {
+                Map<String, Map<String, List<RowPolicy>>> ctlMap = tablePolicies.get(key[0]);
+                if (ctlMap == null) {
+                    continue;
+                }
+                Map<String, List<RowPolicy>> dbMap = ctlMap.get(key[1]);
+                if (dbMap == null) {
+                    continue;
+                }
+                List<RowPolicy> policys = dbMap.get(key[2]);
+                if (policys == null) {
+                    continue;
+                }
+                for (RowPolicy rowPolicy : policys) {
+                    if (policyMatchesUser(rowPolicy, user, roles)) {
+                        res.add(rowPolicy);
+                    }
                 }
             }
             return res;
         } finally {
             readUnlock();
         }
+    }
+
+    private boolean policyMatchesUser(RowPolicy rowPolicy, UserIdentity user, Set<String> roles) {
+        return (rowPolicy.getUser() != null
+                && rowPolicy.getUser().getQualifiedUser().equals(user.getQualifiedUser()))
+                || (!StringUtils.isEmpty(rowPolicy.getRoleName()) && roles.contains(rowPolicy.getRoleName()));
     }
 
     private ShowResultSet getShowPolicy(Policy finalCheckedPolicy, PolicyTypeEnum type) throws AnalysisException {
@@ -551,9 +573,20 @@ public class PolicyMgr implements Writable {
     }
 
     private void dropTablePolicies(RowPolicy policy) {
-        List<RowPolicy> policys = getOrCreateTblPolicies(policy.getCtlName(), policy.getDbName(),
-                policy.getTableName());
-        policys.removeIf(p -> p.matchPolicy(policy));
+        // Use get-only (not getOrCreate) to avoid leaving orphaned empty map entries
+        // when dropping a policy that was never created.
+        Map<String, Map<String, List<RowPolicy>>> ctlMap = tablePolicies.get(policy.getCtlName());
+        if (ctlMap == null) {
+            return;
+        }
+        Map<String, List<RowPolicy>> dbMap = ctlMap.get(policy.getDbName());
+        if (dbMap == null) {
+            return;
+        }
+        List<RowPolicy> policys = dbMap.get(policy.getTableName());
+        if (policys != null) {
+            policys.removeIf(p -> p.matchPolicy(policy));
+        }
     }
 
     private List<RowPolicy> getOrCreateTblPolicies(String ctlName, String dbName, String tableName) {

@@ -152,19 +152,25 @@ public class CreatePolicyCommand extends Command implements ForwardWithSync {
                 if (!wherePredicate.isPresent()) {
                     throw new AnalysisException("wherePredicate can not be null");
                 }
-                TableIf tableIf = Env.getCurrentEnv().getCatalogMgr()
-                        .getCatalogOrAnalysisException(tableNameInfo.getCtl())
-                        .getDbOrAnalysisException(tableNameInfo.getDb())
-                        .getTableOrAnalysisException(tableNameInfo.getTbl());
-                wherePredicate.get().foreach(expr -> {
-                    if (expr instanceof UnboundSlot) {
-                        UnboundSlot slot = (UnboundSlot) expr;
-                        if (tableIf.getColumn(slot.getName()) == null) {
-                            throw new org.apache.doris.nereids.exceptions.AnalysisException(
-                                    "column not exist: " + slot.getName());
+                // For wildcard scopes (db.*, catalog.*.*, *.*.*) there is no single table
+                // to validate column references against; skip resolution and store as-is.
+                if (!"*".equals(tableNameInfo.getTbl())
+                        && !"*".equals(tableNameInfo.getDb())
+                        && !"*".equals(tableNameInfo.getCtl())) {
+                    TableIf tableIf = Env.getCurrentEnv().getCatalogMgr()
+                            .getCatalogOrAnalysisException(tableNameInfo.getCtl())
+                            .getDbOrAnalysisException(tableNameInfo.getDb())
+                            .getTableOrAnalysisException(tableNameInfo.getTbl());
+                    wherePredicate.get().foreach(expr -> {
+                        if (expr instanceof UnboundSlot) {
+                            UnboundSlot slot = (UnboundSlot) expr;
+                            if (tableIf.getColumn(slot.getName()) == null) {
+                                throw new org.apache.doris.nereids.exceptions.AnalysisException(
+                                        "column not exist: " + slot.getName());
+                            }
                         }
-                    }
-                });
+                    });
+                }
 
         }
     }
