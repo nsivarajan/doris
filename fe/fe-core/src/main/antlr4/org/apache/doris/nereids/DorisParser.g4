@@ -226,7 +226,7 @@ supportedCreateStatement
         (WITH RESOURCE resourceName=identifier)?
         (COMMENT STRING_LITERAL)? properties=propertyClause?                    #createCatalog
     | CREATE ROW POLICY (IF NOT EXISTS)? name=identifier
-        ON table=multipartIdentifier
+        ON table=rowPolicyTablePattern
         AS type=(RESTRICTIVE | PERMISSIVE)
         TO (user=userIdentify | ROLE roleName=identifierOrText)
         USING LEFT_PAREN booleanExpression RIGHT_PAREN                    #createRowPolicy
@@ -365,7 +365,7 @@ supportedDropStatement
     | DROP INDEX (IF EXISTS)? name=identifier ON tableName=multipartIdentifier  #dropIndex
     | DROP RESOURCE (IF EXISTS)? name=identifierOrText                          #dropResource
     | DROP ROW POLICY (IF EXISTS)? policyName=identifier
-        ON tableName=multipartIdentifier
+        ON tableName=rowPolicyTablePattern
         (FOR (userIdentify | ROLE roleName=identifier))?                        #dropRowPolicy
     | DROP DICTIONARY (IF EXISTS)? name=multipartIdentifier                     #dropDictionary
     | DROP STAGE (IF EXISTS)? name=identifier                                   #dropStage
@@ -1522,6 +1522,17 @@ tableAlias
 
 multipartIdentifier
     : parts+=errorCapturingIdentifier (DOT parts+=errorCapturingIdentifier)*
+    ;
+
+// Row policy table pattern: same as multipartIdentifier but each part can also be ASTERISK
+// to support wildcard scopes: db.*, catalog.*.*, *.*.*
+rowPolicyTablePattern
+    : parts+=rowPolicyPatternPart (DOT parts+=rowPolicyPatternPart)*
+    ;
+
+rowPolicyPatternPart
+    : errorCapturingIdentifier
+    | ASTERISK
     ;
 
 // ----------------Create Table Fields----------

@@ -2508,10 +2508,20 @@ public class LogicalPlanBuilder extends DorisParserBaseVisitor<Object> {
 
     }
 
+    /** Converts a rowPolicyTablePattern to a list of strings.
+     *  Each part is an identifier or ASTERISK ("*"), enabling wildcard scopes like db.*, *.*.*
+     */
+    @Override
+    public List<String> visitRowPolicyTablePattern(DorisParser.RowPolicyTablePatternContext ctx) {
+        return ctx.parts.stream()
+                .map(p -> p.ASTERISK() != null ? "*" : p.errorCapturingIdentifier().getText())
+                .collect(Collectors.toList());
+    }
+
     @Override
     public Command visitCreateRowPolicy(CreateRowPolicyContext ctx) {
         FilterType filterType = FilterType.of(ctx.type.getText());
-        List<String> nameParts = visitMultipartIdentifier(ctx.table);
+        List<String> nameParts = visitRowPolicyTablePattern(ctx.table);
         return new CreatePolicyCommand(PolicyTypeEnum.ROW, ctx.name.getText(),
                 ctx.EXISTS() != null, new TableNameInfo(nameParts), Optional.of(filterType),
                 ctx.user == null ? null : visitUserIdentify(ctx.user),
@@ -8957,7 +8967,7 @@ public class LogicalPlanBuilder extends DorisParserBaseVisitor<Object> {
     public LogicalPlan visitDropRowPolicy(DorisParser.DropRowPolicyContext ctx) {
         boolean ifExist = ctx.EXISTS() != null;
         String policyName = ctx.policyName.getText();
-        TableNameInfo tableNameInfo = new TableNameInfo(visitMultipartIdentifier(ctx.tableName));
+        TableNameInfo tableNameInfo = new TableNameInfo(visitRowPolicyTablePattern(ctx.tableName));
         UserIdentity userIdentity = ctx.userIdentify() != null ? visitUserIdentify(ctx.userIdentify()) : null;
         String roleName = ctx.roleName != null ? ctx.roleName.getText() : null;
         return new DropRowPolicyCommand(ifExist, policyName, tableNameInfo, userIdentity, roleName);
