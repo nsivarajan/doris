@@ -228,7 +228,7 @@ public class Checkpoint extends MasterDaemon {
                     // skip master itself
                     continue;
                 }
-                int port = HttpURLUtil.getHttpPort();
+                int port = HttpURLUtil.getInternalFeHttpPort();
 
                 String queryParams = "version=" + replayedJournalId + "&port=" + port;
                 String url = HttpURLUtil.buildInternalFeUrl(host, "/put", queryParams);
@@ -295,7 +295,7 @@ public class Checkpoint extends MasterDaemon {
                              * this lagging node can never get the deleted journal.
                              */
                             idURL = HttpURLUtil.buildInternalFeUrl(host, "/journal_id", null);
-                            conn = HttpURLUtil.getConnectionWithNodeIdent(idURL);
+                            conn = HttpURLUtil.getInternalConnectionWithNodeIdent(idURL);
                             conn.setConnectTimeout(CONNECT_TIMEOUT_SECOND * 1000);
                             conn.setReadTimeout(READ_TIMEOUT_SECOND * 1000);
                             String idString = conn.getHeaderField("id");
@@ -304,7 +304,7 @@ public class Checkpoint extends MasterDaemon {
                                 minOtherNodesJournalId = id;
                             }
                         } catch (Throwable e) {
-                            int port = HttpURLUtil.getHttpPort();
+                            int port = HttpURLUtil.getInternalFeHttpPort();
                             throw new CheckpointException(String.format("Exception when getting current replayed"
                                     + " journal id. host=%s, port=%d", host, port), e);
                         } finally {

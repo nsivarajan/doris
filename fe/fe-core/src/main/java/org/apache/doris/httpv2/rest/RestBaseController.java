@@ -23,7 +23,6 @@ import org.apache.doris.common.Config;
 import org.apache.doris.common.FeConstants;
 import org.apache.doris.common.UserException;
 import org.apache.doris.common.util.HttpURLUtil;
-import org.apache.doris.common.util.InternalHttpsUtils;
 import org.apache.doris.common.util.NetUtils;
 import org.apache.doris.httpv2.controller.BaseController;
 import org.apache.doris.httpv2.entity.ResponseEntityBuilder;
@@ -38,7 +37,6 @@ import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import jline.internal.Nullable;
 import org.apache.commons.codec.digest.DigestUtils;
-import org.apache.http.conn.ssl.NoopHostnameVerifier;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 import org.springframework.http.HttpEntity;
@@ -61,7 +59,6 @@ import java.net.URI;
 import java.net.URISyntaxException;
 import java.util.Collections;
 import java.util.stream.Collectors;
-import javax.net.ssl.HttpsURLConnection;
 
 public class RestBaseController extends BaseController {
 
@@ -298,25 +295,15 @@ public class RestBaseController extends BaseController {
 
             HttpEntity<Object> entity = new HttpEntity<>(body, headers);
 
-            RestTemplate restTemplate;
-            if (Config.enable_https) {
-                SimpleClientHttpRequestFactory factory = new SimpleClientHttpRequestFactory() {
-                    @Override
-                    protected void prepareConnection(HttpURLConnection conn, String httpMethod)
-                            throws IOException {
-                        if (conn instanceof HttpsURLConnection) {
-                            HttpsURLConnection https = (HttpsURLConnection) conn;
-                            https.setSSLSocketFactory(
-                                    InternalHttpsUtils.getSslContext().getSocketFactory());
-                            https.setHostnameVerifier(NoopHostnameVerifier.INSTANCE);
-                        }
-                        super.prepareConnection(conn, httpMethod);
-                    }
-                };
-                restTemplate = new RestTemplate(factory);
-            } else {
-                restTemplate = new RestTemplate();
-            }
+            SimpleClientHttpRequestFactory factory = new SimpleClientHttpRequestFactory() {
+                @Override
+                protected void prepareConnection(HttpURLConnection conn, String httpMethod)
+                        throws IOException {
+                    HttpURLUtil.prepareInternalFeConnection(conn);
+                    super.prepareConnection(conn, httpMethod);
+                }
+            };
+            RestTemplate restTemplate = new RestTemplate(factory);
 
             ResponseEntity<Object> responseEntity;
             switch (method) {

@@ -34,15 +34,22 @@ import javax.net.ssl.HttpsURLConnection;
 public class HttpURLUtil {
 
     public static HttpURLConnection getConnectionWithNodeIdent(String request) throws IOException {
+        return getConnectionWithNodeIdent(request, false);
+    }
+
+    public static HttpURLConnection getInternalConnectionWithNodeIdent(String request) throws IOException {
+        return getConnectionWithNodeIdent(request, true);
+    }
+
+    private static HttpURLConnection getConnectionWithNodeIdent(String request, boolean internalFe)
+            throws IOException {
         try {
             SecurityChecker.getInstance().startSSRFChecking(request);
             URL url = new URL(request);
             HttpURLConnection conn = (HttpURLConnection) url.openConnection();
 
-            if (conn instanceof HttpsURLConnection && Config.enable_https) {
-                HttpsURLConnection httpsConn = (HttpsURLConnection) conn;
-                httpsConn.setSSLSocketFactory(InternalHttpsUtils.getSslContext().getSocketFactory());
-                httpsConn.setHostnameVerifier(NoopHostnameVerifier.INSTANCE);
+            if (internalFe) {
+                prepareInternalFeConnection(conn);
             }
 
             // Must use Env.getServingEnv() instead of getCurrentEnv(),
@@ -58,6 +65,14 @@ public class HttpURLUtil {
         }
     }
 
+    public static void prepareInternalFeConnection(HttpURLConnection conn) {
+        if (conn instanceof HttpsURLConnection && Config.enable_https) {
+            HttpsURLConnection httpsConn = (HttpsURLConnection) conn;
+            httpsConn.setSSLSocketFactory(InternalHttpsUtils.getSslContext().getSocketFactory());
+            httpsConn.setHostnameVerifier(NoopHostnameVerifier.INSTANCE);
+        }
+    }
+
     public static Map<String, String> getNodeIdentHeaders() throws IOException {
         Map<String, String> headers = Maps.newHashMap();
         // Must use Env.getServingEnv() instead of getCurrentEnv(),
@@ -69,12 +84,23 @@ public class HttpURLUtil {
     }
 
     public static int getHttpPort() {
+        return getInternalFeHttpPort();
+    }
+
+    public static int getInternalFeHttpPort() {
         return Config.enable_https ? Config.https_port : Config.http_port;
     }
 
+    public static boolean isInternalFeHttpsEnabled() {
+        return Config.enable_https;
+    }
+
     public static String buildInternalFeUrl(String host, String path, String queryParams) {
+        return buildInternalFeUrl(host, getInternalFeHttpPort(), path, queryParams);
+    }
+
+    public static String buildInternalFeUrl(String host, int port, String path, String queryParams) {
         String protocol = Config.enable_https ? "https" : "http";
-        int port = getHttpPort();
 
         String url = protocol + "://" + NetUtils.getHostPortInAccessibleFormat(host, port) + path;
         if (queryParams != null && !queryParams.isEmpty()) {

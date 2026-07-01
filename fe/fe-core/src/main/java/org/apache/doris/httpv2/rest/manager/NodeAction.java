@@ -241,7 +241,7 @@ public class NodeAction extends RestBaseController {
     }
 
     private static List<String> getFeList() {
-        int port = HttpURLUtil.getHttpPort();
+        int port = HttpURLUtil.getInternalFeHttpPort();
         return Env.getCurrentEnv().getFrontends(null).stream()
                 .map(fe -> NetUtils.getHostPortInAccessibleFormat(fe.getHost(), port))
                 .collect(Collectors.toList());
@@ -375,13 +375,13 @@ public class NodeAction extends RestBaseController {
             Pair<String, Integer> hostPort = hostPorts.get(i);
             String address = NetUtils.getHostPortInAccessibleFormat(hostPort.first, hostPort.second);
             configRequestDoneSignal.addMark(address, -1);
-            // FE nodes use HTTPS when enabled; BE nodes always use plain HTTP
-            // (BEs do not participate in the FE internal HTTPS scheme)
-            String scheme = (Config.enable_https && "FE".equals(nodeType)) ? "https://" : "http://";
-            String url = scheme + address + questPath;
+            boolean internalFe = "FE".equals(nodeType);
+            String url = internalFe
+                    ? HttpURLUtil.buildInternalFeUrl(hostPort.first, hostPort.second, questPath, null)
+                    : "http://" + address + questPath;
             httpExecutor.submit(
                     new HttpConfigInfoTask(url, hostPort, authorization, nodeType, confNames, configRequestDoneSignal,
-                            configInfoTotal.get(i)));
+                            configInfoTotal.get(i), internalFe));
         }
         List<List<String>> resultConfigs = Lists.newArrayList();
         try {
@@ -427,10 +427,11 @@ public class NodeAction extends RestBaseController {
         private List<String> confNames;
         private MarkedCountDownLatch<String, Integer> configRequestDoneSignal;
         private List<List<String>> config;
+        private boolean internalFe;
 
         public HttpConfigInfoTask(String url, Pair<String, Integer> hostPort, String authorization, String nodeType,
                 List<String> confNames, MarkedCountDownLatch<String, Integer> configRequestDoneSignal,
-                List<List<String>> config) {
+                List<List<String>> config, boolean internalFe) {
             this.url = url;
             this.hostPort = hostPort;
             this.authorization = authorization;
@@ -438,14 +439,16 @@ public class NodeAction extends RestBaseController {
             this.confNames = confNames;
             this.configRequestDoneSignal = configRequestDoneSignal;
             this.config = config;
+            this.internalFe = internalFe;
         }
 
         @Override
         public void run() {
             String configInfo;
             try {
-                configInfo = HttpUtils.doGet(url,
-                        ImmutableMap.<String, String>builder().put(AUTHORIZATION, authorization).build());
+                Map<String, String> headers = ImmutableMap.<String, String>builder()
+                        .put(AUTHORIZATION, authorization).build();
+                configInfo = internalFe ? HttpUtils.doInternalGet(url, headers) : HttpUtils.doGet(url, headers);
                 List<List<String>> configs = GsonUtils.GSON.fromJson(configInfo, new TypeToken<List<List<String>>>() {
                 }.getType());
                 for (List<String> conf : configs) {
@@ -503,7 +506,7 @@ public class NodeAction extends RestBaseController {
         List<NodeConfigs> nodeConfigList = parseSetConfigNodes(requestBody, failedTotal);
         List<Pair<String, Integer>> aliveFe = Env.getCurrentEnv().getFrontends(null).stream().filter(Frontend::isAlive)
                 .map(fe -> Pair.of(fe.getHost(),
-                        HttpURLUtil.getHttpPort())).collect(Collectors.toList());
+                        HttpURLUtil.getInternalFeHttpPort())).collect(Collectors.toList());
         checkNodeIsAlive(nodeConfigList, aliveFe, failedTotal);
 
         Map<String, String> header = Maps.newHashMap();
@@ -513,7 +516,7 @@ public class NodeAction extends RestBaseController {
             if (!nodeConfigs.getConfigs(true).isEmpty()) {
                 String url = concatFeSetConfigUrl(nodeConfigs, true);
                 try {
-                    String responsePersist = HttpUtils.doGet(url, header);
+                    String responsePersist = HttpUtils.doInternalGet(url, header);
                     parseFeSetConfigResponse(responsePersist, nodeConfigs.getHostPort(), failedTotal);
                 } catch (Exception e) {
                     addSetConfigErrNode(nodeConfigs.getConfigs(true), nodeConfigs.getHostPort(), e.getMessage(),
@@ -523,7 +526,7 @@ public class NodeAction extends RestBaseController {
             if (!nodeConfigs.getConfigs(false).isEmpty()) {
                 String url = concatFeSetConfigUrl(nodeConfigs, false);
                 try {
-                    String responseTemp = HttpUtils.doGet(url, header);
+                    String responseTemp = HttpUtils.doInternalGet(url, header);
                     parseFeSetConfigResponse(responseTemp, nodeConfigs.getHostPort(), failedTotal);
                 } catch (Exception e) {
                     addSetConfigErrNode(nodeConfigs.getConfigs(false), nodeConfigs.getHostPort(), e.getMessage(),
@@ -573,25 +576,22 @@ public class NodeAction extends RestBaseController {
     }
 
     private String concatFeSetConfigUrl(NodeConfigs nodeConfigs, boolean isPersist) {
-        StringBuilder sb = new StringBuilder();
         Pair<String, Integer> hostPort = nodeConfigs.getHostPort();
-        sb.append(Config.enable_https ? "https://" : "http://")
-                .append(hostPort.first).append(":").append(hostPort.second).append("/api/_set_config");
+        StringBuilder query = new StringBuilder();
         Map<String, String> configs = nodeConfigs.getConfigs(isPersist);
         boolean addAnd = false;
         for (Map.Entry<String, String> entry : configs.entrySet()) {
             if (addAnd) {
-                sb.append("&");
+                query.append("&");
             } else {
-                sb.append("?");
                 addAnd = true;
             }
-            sb.append(entry.getKey()).append("=").append(entry.getValue());
+            query.append(entry.getKey()).append("=").append(entry.getValue());
         }
         if (isPersist) {
-            sb.append("&persist=true&reset_persist=false");
+            query.append("&persist=true&reset_persist=false");
         }
-        return sb.toString();
+        return HttpURLUtil.buildInternalFeUrl(hostPort.first, hostPort.second, "/api/_set_config", query.toString());
     }
 
     // Modify fe configuration.

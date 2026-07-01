@@ -18,7 +18,6 @@
 package org.apache.doris.httpv2.rest.manager;
 
 import org.apache.doris.catalog.Env;
-import org.apache.doris.common.Config;
 import org.apache.doris.common.Pair;
 import org.apache.doris.common.util.HttpURLUtil;
 import org.apache.doris.common.util.InternalHttpsUtils;
@@ -62,7 +61,7 @@ public class HttpUtils {
     static final int DEFAULT_TIME_OUT_MS = 2000;
 
     public static List<Pair<String, Integer>> getFeList() {
-        int port = HttpURLUtil.getHttpPort();
+        int port = HttpURLUtil.getInternalFeHttpPort();
         return Env.getCurrentEnv().getFrontends(null)
                 .stream().filter(Frontend::isAlive).map(fe -> Pair.of(fe.getHost(), port))
                 .collect(Collectors.toList());
@@ -71,32 +70,49 @@ public class HttpUtils {
     static boolean isCurrentFe(String ip, int port) {
         HostInfo hostInfo = Env.getCurrentEnv().getSelfNode();
         // Compare against the actual HTTP/HTTPS port, not the edit_log_port held by selfNode.
-        int selfPort = HttpURLUtil.getHttpPort();
+        int selfPort = HttpURLUtil.getInternalFeHttpPort();
         return hostInfo.getHost().equals(ip) && selfPort == port;
     }
 
     public static String concatUrl(Pair<String, Integer> ipPort, String path, Map<String, String> arguments) {
-        StringBuilder url = new StringBuilder(Config.enable_https ? "https://" : "http://")
-                .append(ipPort.first).append(":").append(ipPort.second).append(path);
+        return HttpURLUtil.buildInternalFeUrl(ipPort.first, ipPort.second, path, toQueryString(arguments));
+    }
+
+    private static String toQueryString(Map<String, String> arguments) {
+        if (arguments == null || arguments.isEmpty()) {
+            return "";
+        }
+        StringBuilder query = new StringBuilder();
         boolean isFirst = true;
         for (Map.Entry<String, String> entry : arguments.entrySet()) {
             if (!Strings.isNullOrEmpty(entry.getValue())) {
-                if (isFirst) {
-                    url.append("?");
-                } else {
-                    url.append("&");
+                if (!isFirst) {
+                    query.append("&");
                 }
                 isFirst = false;
-                url.append(entry.getKey()).append("=").append(entry.getValue());
+                query.append(entry.getKey()).append("=").append(entry.getValue());
             }
         }
-        return url.toString();
+        return query.toString();
     }
 
     public static String doGet(String url, Map<String, String> headers, int timeoutMs) throws IOException {
+        return doGet(url, headers, timeoutMs, false);
+    }
+
+    public static String doInternalGet(String url, Map<String, String> headers, int timeoutMs) throws IOException {
+        return doGet(url, headers, timeoutMs, true);
+    }
+
+    public static String doInternalGet(String url, Map<String, String> headers) throws IOException {
+        return doInternalGet(url, headers, DEFAULT_TIME_OUT_MS);
+    }
+
+    private static String doGet(String url, Map<String, String> headers, int timeoutMs, boolean internalFe)
+            throws IOException {
         HttpGet httpGet = new HttpGet(url);
         setRequestConfig(httpGet, headers, timeoutMs);
-        return executeRequest(httpGet);
+        return executeRequest(httpGet, internalFe);
     }
 
     public static String doGet(String url, Map<String, String> headers) throws IOException {
@@ -104,6 +120,15 @@ public class HttpUtils {
     }
 
     public static String doPost(String url, Map<String, String> headers, Object body) throws IOException {
+        return doPost(url, headers, body, false);
+    }
+
+    public static String doInternalPost(String url, Map<String, String> headers, Object body) throws IOException {
+        return doPost(url, headers, body, true);
+    }
+
+    private static String doPost(String url, Map<String, String> headers, Object body, boolean internalFe)
+            throws IOException {
         HttpPost httpPost = new HttpPost(url);
         if (Objects.nonNull(body)) {
             String jsonString = GsonUtils.GSON.toJson(body);
@@ -112,7 +137,7 @@ public class HttpUtils {
         }
 
         setRequestConfig(httpPost, headers, DEFAULT_TIME_OUT_MS);
-        return executeRequest(httpPost);
+        return executeRequest(httpPost, internalFe);
     }
 
     private static void setRequestConfig(HttpRequestBase request, Map<String, String> headers, int timeoutMs) {
@@ -135,11 +160,19 @@ public class HttpUtils {
     }
 
     private static String executeRequest(HttpRequestBase request) throws IOException {
-        try (CloseableHttpClient client = Config.enable_https
-                ? InternalHttpsUtils.createValidatedHttpClient()
-                : HttpClientBuilder.create().build()) {
+        return executeRequest(request, false);
+    }
+
+    private static String executeRequest(HttpRequestBase request, boolean internalFe) throws IOException {
+        try (CloseableHttpClient client = internalFe ? getInternalHttpClient() : getHttpClient()) {
             return client.execute(request, httpResponse -> EntityUtils.toString(httpResponse.getEntity()));
         }
+    }
+
+    public static CloseableHttpClient getInternalHttpClient() {
+        return HttpURLUtil.isInternalFeHttpsEnabled()
+                ? InternalHttpsUtils.createValidatedHttpClient()
+                : HttpClientBuilder.create().build();
     }
 
     static String parseResponse(String response) {

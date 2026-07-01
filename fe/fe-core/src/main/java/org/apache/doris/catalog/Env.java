@@ -1462,7 +1462,7 @@ public class Env {
                 token = storage.getToken();
                 try {
                     String url = HttpURLUtil.buildInternalFeUrl(rightHelperNode.getHost(), "/check", null);
-                    HttpURLConnection conn = HttpURLUtil.getConnectionWithNodeIdent(url);
+                    HttpURLConnection conn = HttpURLUtil.getInternalConnectionWithNodeIdent(url);
                     conn.setConnectTimeout(2 * 1000);
                     conn.setReadTimeout(2 * 1000);
                     String clusterIdString = conn.getHeaderField(MetaBaseAction.CLUSTER_ID);
@@ -1559,7 +1559,7 @@ public class Env {
                 // and the new hostname parameter is added
                 String queryParams = "host=" + selfNode.getHost() + "&port=" + selfNode.getPort();
                 String url = HttpURLUtil.buildInternalFeUrl(helperNode.getHost(), "/role", queryParams);
-                HttpURLConnection conn = HttpURLUtil.getConnectionWithNodeIdent(url);
+                HttpURLConnection conn = HttpURLUtil.getInternalConnectionWithNodeIdent(url);
                 if (conn.getResponseCode() != 200) {
                     LOG.warn("failed to get fe node type from helper node: {}. response code: {}", helperNode,
                             conn.getResponseCode());
