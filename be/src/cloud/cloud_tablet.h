@@ -66,6 +66,9 @@ struct SyncOptions {
     bool full_sync = false;
     bool merge_schema = false;
     int64_t query_version = -1;
+    // Time travel: if > 0, cap the delete bitmap fetch to this version so MoW
+    // tables see the correct historical delete state instead of current state.
+    int64_t delete_bitmap_max_version = -1;
 };
 
 struct RecycledRowsets {

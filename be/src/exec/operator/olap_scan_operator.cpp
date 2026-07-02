@@ -878,6 +878,11 @@ Status OlapScanLocalState::_sync_cloud_tablets(RuntimeState* state) {
                     SyncOptions options;
                     options.query_version = version;
                     options.merge_schema = true;
+                    if (tt_timestamp_ms > 0) {
+                        // MoW: cap delete bitmap fetch to the historical version so the
+                        // tablet sees the correct delete state at that point in time.
+                        options.delete_bitmap_max_version = version;
+                    }
                     RETURN_IF_ERROR(std::dynamic_pointer_cast<CloudTablet>(_tablets[i].tablet)
                                             ->sync_rowsets(options, sync_stats));
                     // FIXME(plat1ko): Avoid pointer cast
