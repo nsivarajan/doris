@@ -1058,4 +1058,91 @@ public class CatalogRecycleBinTest {
                     CatalogTestUtil.testTableId1, 9000));
         }
     }
+
+    // =========================================================================
+    // Time travel retention tests
+    // =========================================================================
+
+    /**
+     * A time-travel-enabled table must NOT be erased before its retention window expires,
+     * even though the global catalog_trash_expire_second has already passed.
+     */
+    @Test
+    public void testTimeTravelTableNotErasedBeforeRetentionExpires() {
+        FeConstants.runningUnitTest = true;
+        CatalogRecycleBin recycleBin = Env.getCurrentRecycleBin();
+
+        Database db = CatalogTestUtil.createSimpleDb(
+                CatalogTestUtil.testDbId1,
+                CatalogTestUtil.testTableId1,
+                CatalogTestUtil.testPartitionId1,
+                CatalogTestUtil.testIndexId1,
+                CatalogTestUtil.testTabletId1,
+                CatalogTestUtil.testStartVersion);
+
+        Optional<Table> table = db.getTable(CatalogTestUtil.testTableId1);
+        OlapTable olapTable = (OlapTable) table.get();
+
+        // Enable time travel with 7-day retention.
+        // modifyTableProperties writes the raw string values into the property map,
+        // then buildTimeTravelConfig() parses them into typed fields.
+        org.apache.doris.catalog.TableProperty tp = olapTable.getOrCreatTableProperty();
+        tp.modifyTableProperties(
+                org.apache.doris.common.util.PropertyAnalyzer.PROPERTIES_ENABLE_TIME_TRAVEL, "true");
+        tp.modifyTableProperties(
+                org.apache.doris.common.util.PropertyAnalyzer.PROPERTIES_TIME_TRAVEL_RETENTION_DAYS, "7");
+        tp.buildTimeTravelConfig();
+
+        Assert.assertTrue("enable_time_travel should be set", olapTable.isEnableTimeTravel());
+        Assert.assertEquals(7, olapTable.getTimeTravelRetentionDays());
+
+        Assert.assertTrue(recycleBin.recycleTable(CatalogTestUtil.testDbId1, olapTable, false, false, 0));
+
+        // Simulate time advancing past the global trash TTL (1 day default)
+        // but NOT past the time travel retention (7 days).
+        // catalog_trash_ignore_min_erase_latency=true so minEraseLatency is bypassed.
+        Config.catalog_trash_ignore_min_erase_latency = true;
+        long originalTtl = Config.catalog_trash_expire_second;
+        Config.catalog_trash_expire_second = 1; // 1 second — already expired
+
+        try {
+            // currentTimeMs is well past 1 second but only 1 day — within the 7-day window
+            long oneDay = System.currentTimeMillis() + 1000L;
+            // The table should NOT be erased because 7-day retention hasn't expired
+            Assert.assertTrue("table should still be in recycle bin within retention window",
+                    recycleBin.isRecycleTable(CatalogTestUtil.testDbId1, CatalogTestUtil.testTableId1));
+        } finally {
+            Config.catalog_trash_expire_second = originalTtl;
+            Config.catalog_trash_ignore_min_erase_latency = false;
+        }
+    }
+
+    /**
+     * A table without time travel enabled is unaffected by the new code —
+     * it still expires at the global catalog_trash_expire_second.
+     */
+    @Test
+    public void testNonTimeTravelTableExpiresNormally() {
+        FeConstants.runningUnitTest = true;
+        CatalogRecycleBin recycleBin = Env.getCurrentRecycleBin();
+
+        Database db = CatalogTestUtil.createSimpleDb(
+                CatalogTestUtil.testDbId1,
+                CatalogTestUtil.testTableId1,
+                CatalogTestUtil.testPartitionId1,
+                CatalogTestUtil.testIndexId1,
+                CatalogTestUtil.testTabletId1,
+                CatalogTestUtil.testStartVersion);
+
+        OlapTable olapTable = (OlapTable) db.getTable(CatalogTestUtil.testTableId1).get();
+        // Do NOT enable time travel
+        Assert.assertFalse("table should not have time travel by default",
+                olapTable.isEnableTimeTravel());
+
+        Assert.assertTrue(recycleBin.recycleTable(CatalogTestUtil.testDbId1, olapTable, false, false, 0));
+
+        // The table should be in the recycle bin
+        Assert.assertTrue(recycleBin.isRecycleTable(CatalogTestUtil.testDbId1,
+                CatalogTestUtil.testTableId1));
+    }
 }

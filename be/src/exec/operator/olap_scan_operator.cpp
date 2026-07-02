@@ -828,7 +828,7 @@ Status OlapScanLocalState::_sync_cloud_tablets(RuntimeState* state) {
             const int32_t tt_retention_days =
                     p._olap_scan_node.__isset.time_travel_retention_days
                             ? p._olap_scan_node.time_travel_retention_days
-                            : 7;
+                            : 90; // safe default: FE always sets this; 90 is the hard cap
 
             for (size_t i = 0; i < _scan_ranges.size(); i++) {
                 auto* sync_stats = &_sync_statistics[i];

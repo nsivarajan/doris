@@ -13350,4 +13350,118 @@ TEST(MetaServiceTest, CleanTxnLabelVersionedWriteMixedTxns) {
     }
 }
 
+// =============================================================================
+// Time travel: get_version_at_time tests
+// =============================================================================
+
+// Helper: write a versioned partition version entry with a specific update_time_ms.
+static void write_versioned_partition_version(TxnKv* txn_kv, const std::string& instance_id,
+                                              int64_t partition_id, int64_t version,
+                                              int64_t update_time_ms) {
+    std::unique_ptr<Transaction> txn;
+    ASSERT_EQ(txn_kv->create_txn(&txn), TxnErrorCode::TXN_OK);
+
+    VersionPB version_pb;
+    version_pb.set_version(version);
+    version_pb.set_update_time_ms(update_time_ms);
+    std::string val;
+    ASSERT_TRUE(version_pb.SerializeToString(&val));
+
+    std::string key = versioned::partition_version_key({instance_id, partition_id});
+    versioned_put(txn.get(), key, val);
+    ASSERT_EQ(txn->commit(), TxnErrorCode::TXN_OK);
+}
+
+TEST(MetaServiceTest, GetVersionAtTimeBasic) {
+    auto meta_service = get_meta_service();
+    const std::string instance_id = "test_instance_tt";
+    const int64_t partition_id = 12345;
+    const int64_t version = 42;
+
+    // Write a version committed 100 seconds ago
+    int64_t now_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+                             std::chrono::system_clock::now().time_since_epoch())
+                             .count();
+    int64_t commit_time_ms = now_ms - 100'000; // 100s ago
+
+    // Need to write directly to the underlying txn_kv since we're testing the RPC
+    // Get txn_kv from a fresh meta service setup
+    auto txn_kv = std::dynamic_pointer_cast<TxnKv>(std::make_shared<MemTxnKv>());
+    ASSERT_EQ(txn_kv->init(), 0);
+    write_versioned_partition_version(txn_kv.get(), instance_id, partition_id,
+                                      version, commit_time_ms);
+
+    auto rs = std::make_shared<MockResourceManager>(txn_kv);
+    auto rl = std::make_shared<RateLimiter>();
+    auto snapshot = std::make_shared<SnapshotManager>(txn_kv);
+    auto ms = std::make_unique<MetaServiceImpl>(txn_kv, rs, rl, snapshot);
+    auto proxy = std::make_unique<MetaServiceProxy>(std::move(ms));
+
+    // Query at now → should find version 42
+    brpc::Controller cntl;
+    GetVersionAtTimeRequest req;
+    req.set_cloud_unique_id("test");
+    req.set_partition_id(partition_id);
+    req.set_timestamp_ms(now_ms);
+    req.set_retention_days(30);
+    GetVersionAtTimeResponse resp;
+    proxy->get_version_at_time(&cntl, &req, &resp, nullptr);
+    ASSERT_EQ(resp.status().code(), MetaServiceCode::OK)
+            << resp.status().msg();
+    ASSERT_EQ(resp.version(), version);
+}
+
+TEST(MetaServiceTest, GetVersionAtTimeFuture) {
+    brpc::Controller cntl;
+    auto meta_service = get_meta_service();
+    int64_t future_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+                                std::chrono::system_clock::now().time_since_epoch())
+                                .count()
+                        + 3600'000LL; // 1 hour in future
+    GetVersionAtTimeRequest req;
+    req.set_cloud_unique_id("test");
+    req.set_partition_id(99999);
+    req.set_timestamp_ms(future_ms);
+    req.set_retention_days(30);
+    GetVersionAtTimeResponse resp;
+    meta_service->get_version_at_time(&cntl, &req, &resp, nullptr);
+    ASSERT_EQ(resp.status().code(), MetaServiceCode::INVALID_ARGUMENT)
+            << "future timestamp must be rejected";
+}
+
+TEST(MetaServiceTest, GetVersionAtTimeBeyondRetention) {
+    brpc::Controller cntl;
+    auto meta_service = get_meta_service();
+    // Timestamp 91 days ago — beyond the 30-day retention window
+    int64_t old_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+                             std::chrono::system_clock::now().time_since_epoch())
+                             .count()
+                     - 91LL * 86400LL * 1000LL;
+    GetVersionAtTimeRequest req;
+    req.set_cloud_unique_id("test");
+    req.set_partition_id(99999);
+    req.set_timestamp_ms(old_ms);
+    req.set_retention_days(30);
+    GetVersionAtTimeResponse resp;
+    meta_service->get_version_at_time(&cntl, &req, &resp, nullptr);
+    ASSERT_EQ(resp.status().code(), MetaServiceCode::INVALID_ARGUMENT)
+            << "timestamp beyond retention window must be rejected";
+}
+
+TEST(MetaServiceTest, GetVersionAtTimeMissingFields) {
+    brpc::Controller cntl;
+    auto meta_service = get_meta_service();
+
+    // Missing partition_id
+    GetVersionAtTimeRequest req;
+    req.set_cloud_unique_id("test");
+    req.set_timestamp_ms(std::chrono::duration_cast<std::chrono::milliseconds>(
+                                 std::chrono::system_clock::now().time_since_epoch())
+                                 .count());
+    GetVersionAtTimeResponse resp;
+    meta_service->get_version_at_time(&cntl, &req, &resp, nullptr);
+    ASSERT_EQ(resp.status().code(), MetaServiceCode::INVALID_ARGUMENT)
+            << "missing partition_id must be rejected";
+}
+
 } // namespace doris::cloud

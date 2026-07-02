@@ -46,8 +46,8 @@ import java.util.Optional;
 public class LogicalOlapScanToPhysicalOlapScan extends OneImplementationRuleFactory {
     @Override
     public Rule build() {
-        return logicalOlapScan().then(olapScan ->
-                new PhysicalOlapScan(
+        return logicalOlapScan().then(olapScan -> {
+                PhysicalOlapScan physicalScan = new PhysicalOlapScan(
                         olapScan.getRelationId(),
                         olapScan.getTable(),
                         olapScan.getQualifier(),
@@ -73,8 +73,14 @@ public class LogicalOlapScanToPhysicalOlapScan extends OneImplementationRuleFact
                         olapScan.getTableAlias(),
                         olapScan.getPartitionPrunablePredicates(),
                         olapScan.isIncrementalScan(),
-                        olapScan.getScanParams())
-        ).toRule(RuleType.LOGICAL_OLAP_SCAN_TO_PHYSICAL_OLAP_SCAN_RULE);
+                        olapScan.getScanParams());
+                // Carry time travel timestamp from logical to physical so
+                // PhysicalPlanTranslator can pass it to OlapScanNode → BE.
+                if (olapScan.hasTimeTravelTimestampMs()) {
+                    physicalScan.setTimeTravelTimestampMs(olapScan.getTimeTravelTimestampMs());
+                }
+                return physicalScan;
+        }).toRule(RuleType.LOGICAL_OLAP_SCAN_TO_PHYSICAL_OLAP_SCAN_RULE);
     }
 
     /** convertDistribution */
