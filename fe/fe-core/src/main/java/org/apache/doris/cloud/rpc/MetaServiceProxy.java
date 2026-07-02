@@ -353,6 +353,11 @@ public class MetaServiceProxy {
         return executeWithMetrics(methodName, (client) -> client.getVersion(request));
     }
 
+    /**
+     * Time travel: resolve timestamp_ms to the committed partition version visible at that time.
+     * Supports both single-partition (field partition_id) and batch (batch_mode=true) modes.
+     * In batch mode, returns versions in the same order as partition_ids; -1 means no data.
+     */
     public Cloud.GetVersionAtTimeResponse getVersionAtTime(Cloud.GetVersionAtTimeRequest request)
             throws RpcException {
         return executeWithMetrics("getVersionAtTime", (client) -> client.getVersionAtTime(request));

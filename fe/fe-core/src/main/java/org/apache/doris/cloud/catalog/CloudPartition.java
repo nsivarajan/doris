@@ -231,7 +231,6 @@ public class CloudPartition extends Partition {
         if (partitions.isEmpty()) {
             return new ArrayList<>();
         }
-
         List<Long> dbIds = new ArrayList<>();
         List<Long> tableIds = new ArrayList<>();
         List<Long> partitionIds = new ArrayList<>();
@@ -280,6 +279,64 @@ public class CloudPartition extends Partition {
         List<OlapTable> tables = tableMap.values().stream().collect(Collectors.toCollection(ArrayList::new));
         Collections.sort(tables, Comparator.comparingLong(o -> o.getId()));
         return tables;
+    }
+
+    /**
+     * Time travel batch version resolution.
+     *
+     * <p>For a table with N selected partitions, sends ONE RPC to the meta service
+     * instead of N parallel per-partition calls at the BE. This is the optimal path:
+     * resolution happens at the FE after partition pruning, before sending the plan to the BE.
+     *
+     * <p>Returns versions in the same order as {@code partitions}. A version of -1 means
+     * no data was committed in that partition at or before {@code timestampMs}.
+     *
+     * <p>Non-time-travel queries are completely unaffected — this method is only called
+     * when {@code OlapScanNode.timeTravelTimestampMs >= 0}.
+     */
+    public static List<Long> getVersionsAtTime(List<CloudPartition> partitions,
+            long timestampMs, int retentionDays) throws RpcException {
+        if (partitions.isEmpty()) {
+            return new ArrayList<>();
+        }
+
+        Cloud.GetVersionAtTimeRequest.Builder req = Cloud.GetVersionAtTimeRequest.newBuilder()
+                .setCloudUniqueId(Config.cloud_unique_id)
+                .setRequestIp(FrontendOptions.getLocalHostAddressCached())
+                .setTimestampMs(timestampMs)
+                .setRetentionDays(retentionDays)
+                .setBatchMode(true);
+
+        for (CloudPartition p : partitions) {
+            req.addDbIds(p.getDbId());
+            req.addTableIds(p.getTableId());
+            req.addPartitionIds(p.getId());
+        }
+
+        Cloud.GetVersionAtTimeResponse resp;
+        try {
+            resp = org.apache.doris.cloud.rpc.MetaServiceProxy.getInstance()
+                    .getVersionAtTime(req.build());
+        } catch (RpcException e) {
+            throw new RpcException("getVersionsAtTime", "RPC failed: " + e.getMessage(), e);
+        }
+
+        if (resp.getStatus().getCode() != MetaServiceCode.OK) {
+            throw new RpcException("getVersionsAtTime",
+                    "meta service error: " + resp.getStatus().getMsg());
+        }
+
+        int n = partitions.size();
+        if (resp.getVersionsCount() != n) {
+            throw new RpcException("getVersionsAtTime",
+                    "wrong number of versions: expected " + n + ", got " + resp.getVersionsCount());
+        }
+
+        List<Long> result = new ArrayList<>(n);
+        for (int i = 0; i < n; i++) {
+            result.add(resp.getVersions(i)); // -1 means no data at that timestamp
+        }
+        return result;
     }
 
     // Get visible version from the specified partitions;

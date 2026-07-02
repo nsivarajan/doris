@@ -580,35 +580,6 @@ Status CloudMetaMgr::get_tablet_meta(int64_t tablet_id, TabletMetaSharedPtr* tab
     return Status::OK();
 }
 
-Status CloudMetaMgr::get_version_at_time(int64_t partition_id, int64_t timestamp_ms,
-                                         int32_t retention_days, int64_t* version) {
-    cloud::GetVersionAtTimeRequest req;
-    req.set_cloud_unique_id(config::cloud_unique_id);
-    req.set_partition_id(partition_id);
-    req.set_timestamp_ms(timestamp_ms);
-    req.set_retention_days(retention_days);
-
-    cloud::GetVersionAtTimeResponse resp;
-    auto st = retry_rpc(MetaServiceRPC::GET_VERSION_AT_TIME, req, &resp,
-                        &MetaService_Stub::get_version_at_time);
-    if (!st.ok()) {
-        return st;
-    }
-    if (resp.status().code() == cloud::MetaServiceCode::VERSION_NOT_FOUND) {
-        return Status::Error<false>(
-                TStatusCode::NOT_FOUND,
-                "No committed version found for partition {} at timestamp {} ms",
-                partition_id, timestamp_ms);
-    }
-    if (resp.status().code() != cloud::MetaServiceCode::OK) {
-        return Status::InternalError(
-                "get_version_at_time failed for partition {}: {}", partition_id,
-                resp.status().msg());
-    }
-    *version = resp.version();
-    return Status::OK();
-}
-
 Status CloudMetaMgr::sync_tablet_rowsets(CloudTablet* tablet, const SyncOptions& options,
                                          SyncRowsetStats* sync_stats) {
     std::unique_lock lock {tablet->get_sync_meta_lock()};

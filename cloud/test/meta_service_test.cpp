@@ -13464,4 +13464,67 @@ TEST(MetaServiceTest, GetVersionAtTimeMissingFields) {
             << "missing partition_id must be rejected";
 }
 
+TEST(MetaServiceTest, GetVersionAtTimeBatchMode) {
+    // Set up a fresh meta service with versioned partition version entries.
+    auto txn_kv = std::make_shared<MemTxnKv>();
+    ASSERT_EQ(txn_kv->init(), 0);
+
+    const std::string instance_id = "test_instance_tt_batch";
+    const int64_t p1 = 1001, p2 = 1002, p3 = 1003;
+
+    int64_t now_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+                             std::chrono::system_clock::now().time_since_epoch())
+                             .count();
+    // p1: committed 2 hours ago at version 5
+    write_versioned_partition_version(txn_kv.get(), instance_id, p1, 5, now_ms - 7200000);
+    // p2: committed 1 hour ago at version 10
+    write_versioned_partition_version(txn_kv.get(), instance_id, p2, 10, now_ms - 3600000);
+    // p3: no data (nothing written)
+
+    auto rs = std::make_shared<MockResourceManager>(txn_kv);
+    auto rl = std::make_shared<RateLimiter>();
+    auto snapshot = std::make_shared<SnapshotManager>(txn_kv);
+    auto ms_impl = std::make_unique<MetaServiceImpl>(txn_kv, rs, rl, snapshot);
+    auto proxy = std::make_unique<MetaServiceProxy>(std::move(ms_impl));
+
+    // Query at 30 minutes ago — should find p1(v5) and p2(v10), p3 returns -1
+    int64_t query_ts = now_ms - 1800000; // 30 minutes ago
+
+    brpc::Controller cntl;
+    GetVersionAtTimeRequest req;
+    req.set_cloud_unique_id("test");
+    req.set_timestamp_ms(query_ts);
+    req.set_retention_days(30);
+    req.set_batch_mode(true);
+    req.add_db_ids(1); req.add_table_ids(10); req.add_partition_ids(p1);
+    req.add_db_ids(1); req.add_table_ids(10); req.add_partition_ids(p2);
+    req.add_db_ids(1); req.add_table_ids(10); req.add_partition_ids(p3);
+
+    GetVersionAtTimeResponse resp;
+    proxy->get_version_at_time(&cntl, &req, &resp, nullptr);
+    ASSERT_EQ(resp.status().code(), MetaServiceCode::OK) << resp.status().msg();
+    ASSERT_EQ(resp.versions_size(), 3) << "must return one version per partition";
+    ASSERT_EQ(resp.versions(0), 5)  << "p1 should be at version 5";
+    ASSERT_EQ(resp.versions(1), 10) << "p2 should be at version 10";
+    ASSERT_EQ(resp.versions(2), -1) << "p3 has no data — should return -1";
+}
+
+TEST(MetaServiceTest, GetVersionAtTimeBatchMode_MismatchedArrays) {
+    brpc::Controller cntl;
+    auto meta_service = get_meta_service();
+    GetVersionAtTimeRequest req;
+    req.set_cloud_unique_id("test");
+    req.set_timestamp_ms(std::chrono::duration_cast<std::chrono::milliseconds>(
+                                 std::chrono::system_clock::now().time_since_epoch())
+                                 .count());
+    req.set_retention_days(30);
+    req.set_batch_mode(true);
+    req.add_db_ids(1);  // 1 db_id
+    // but no table_ids or partition_ids → length mismatch
+    GetVersionAtTimeResponse resp;
+    meta_service->get_version_at_time(&cntl, &req, &resp, nullptr);
+    ASSERT_EQ(resp.status().code(), MetaServiceCode::INVALID_ARGUMENT)
+            << "mismatched array lengths must be rejected";
+}
+
 } // namespace doris::cloud

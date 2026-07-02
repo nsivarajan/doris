@@ -73,11 +73,6 @@ public:
 
     Status get_tablet_meta(int64_t tablet_id, std::shared_ptr<TabletMeta>* tablet_meta);
 
-    // Time travel: resolve a wall-clock timestamp (ms since epoch) to the committed
-    // partition version that was visible at that time. Used by cloud OLAP scan path.
-    Status get_version_at_time(int64_t partition_id, int64_t timestamp_ms,
-                               int32_t retention_days, int64_t* version);
-
     Status sync_tablet_rowsets(CloudTablet* tablet, const SyncOptions& options = {},
                                SyncRowsetStats* sync_stats = nullptr);
     Status sync_tablet_rowsets_unlocked(

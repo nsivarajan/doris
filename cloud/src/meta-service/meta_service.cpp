@@ -397,7 +397,48 @@ void MetaServiceImpl::get_version(::google::protobuf::RpcController* controller,
 //   4. Return the first (latest) version where update_time_ms <= timestamp_ms
 //
 // The versioned key format appends a Versionstamp suffix to the base key, so a
-// reverse scan naturally gives us entries from newest to oldest without extra sorting.
+// Core helper: scan versioned partition version history for a single partition,
+// returning the highest committed version where update_time_ms <= timestamp_ms.
+// Returns -1 if no version found within the window.
+static int64_t resolve_version_at_time(Transaction* txn, const std::string& instance_id,
+                                       int64_t partition_id, int64_t timestamp_ms,
+                                       int64_t* out_update_time_ms = nullptr) {
+    if (partition_id == std::numeric_limits<int64_t>::max()) {
+        return -1;
+    }
+    std::string part_key_base = versioned::partition_version_key({instance_id, partition_id});
+    VersionedRangeGetOptions opts;
+    opts.snapshot_version = Versionstamp::max();
+    auto iter = versioned_get_range(txn, part_key_base,
+                                    versioned::partition_version_key({instance_id, partition_id + 1}),
+                                    opts);
+    if (!iter) {
+        return -1;
+    }
+    while (iter->has_next()) {
+        auto [key, vs, value] = *iter->next();
+        VersionPB version_pb;
+        if (!version_pb.ParseFromString(std::string(value))) {
+            continue;
+        }
+        if (version_pb.update_time_ms() <= timestamp_ms) {
+            if (out_update_time_ms) {
+                *out_update_time_ms = version_pb.update_time_ms();
+            }
+            return version_pb.version();
+        }
+    }
+    // Distinguish scan error (-2) from "no version found at T" (-1).
+    // Callers treat -1 as PARTITION_INIT_VERSION (no data); -2 triggers error propagation.
+    if (iter->error_code() != TxnErrorCode::TXN_OK) {
+        return -2; // FDB scan error — not "no data"
+    }
+    return -1; // no version at or before timestamp_ms
+}
+
+// Time travel: resolve a wall-clock timestamp_ms to the highest committed partition
+// version whose update_time_ms <= timestamp_ms.
+// Supports both single-partition and batch modes.
 void MetaServiceImpl::get_version_at_time(::google::protobuf::RpcController* controller,
                                           const GetVersionAtTimeRequest* request,
                                           GetVersionAtTimeResponse* response,
@@ -411,17 +452,16 @@ void MetaServiceImpl::get_version_at_time(::google::protobuf::RpcController* con
         return;
     }
 
-    if (!request->has_partition_id() || !request->has_timestamp_ms()) {
+    if (!request->has_timestamp_ms()) {
         code = MetaServiceCode::INVALID_ARGUMENT;
-        msg = "partition_id and timestamp_ms are required";
+        msg = "timestamp_ms is required";
         return;
     }
 
-    int64_t partition_id  = request->partition_id();
-    int64_t timestamp_ms  = request->timestamp_ms();
-    int32_t retention_days = request->has_retention_days() ? request->retention_days() : 7;
+    int64_t timestamp_ms   = request->timestamp_ms();
+    int32_t retention_days = request->has_retention_days() ? request->retention_days() : 90;
 
-    // Validate that the requested timestamp is within the retention window.
+    // Validate timestamp window — same logic for both single and batch.
     using namespace std::chrono;
     int64_t now_ms = duration_cast<milliseconds>(system_clock::now().time_since_epoch()).count();
     int64_t earliest_ms = now_ms - static_cast<int64_t>(retention_days) * 86400LL * 1000LL;
@@ -448,62 +488,74 @@ void MetaServiceImpl::get_version_at_time(::google::protobuf::RpcController* con
         return;
     }
 
-    // Guard against INT64_MAX overflow when constructing the end range key.
-    if (partition_id == std::numeric_limits<int64_t>::max()) {
+    // -----------------------------------------------------------------------
+    // Batch mode: resolve timestamp for multiple partitions in one RPC.
+    // The FE calls this after partition pruning — all partitions of a single
+    // time-travel query share the same timestamp_ms.
+    // -----------------------------------------------------------------------
+    if (request->batch_mode() && request->partition_ids_size() > 0) {
+        int n = request->partition_ids_size();
+        if (request->db_ids_size() != n || request->table_ids_size() != n) {
+            code = MetaServiceCode::INVALID_ARGUMENT;
+            msg = "batch mode: db_ids, table_ids, partition_ids must have the same length";
+            return;
+        }
+        // Resolve all partitions first, then populate response atomically.
+        // This prevents partial response data when an error occurs mid-batch.
+        std::vector<int64_t> resolved_versions(n);
+        std::vector<int64_t> resolved_times(n);
+        for (int i = 0; i < n; ++i) {
+            int64_t update_time_ms = -1;
+            int64_t version = resolve_version_at_time(txn.get(), instance_id,
+                                                      request->partition_ids(i),
+                                                      timestamp_ms, &update_time_ms);
+            if (version == -2) {
+                code = MetaServiceCode::KV_TXN_GET_ERR;
+                msg = fmt::format("FDB scan error during time travel for partition {}",
+                                  request->partition_ids(i));
+                return; // response has no versions data — FE will see error status only
+            }
+            resolved_versions[i] = version;   // -1 = no data at T; >= 1 = found
+            resolved_times[i] = update_time_ms;
+        }
+        for (int i = 0; i < n; ++i) {
+            response->add_versions(resolved_versions[i]);
+            response->add_version_update_times_ms(resolved_times[i]);
+        }
+        return;
+    }
+
+    // -----------------------------------------------------------------------
+    // Single-partition mode (legacy / BE direct call).
+    // -----------------------------------------------------------------------
+    if (!request->has_partition_id()) {
         code = MetaServiceCode::INVALID_ARGUMENT;
-        msg = "partition_id is at maximum int64 value, cannot construct range key";
+        msg = "partition_id is required in single-partition mode";
         return;
     }
 
-    // Versioned partition version key (base, without versionstamp suffix).
-    // versioned_get_range will append the versionstamp range internally.
-    std::string part_key_base = versioned::partition_version_key({instance_id, partition_id});
-
-    // Scan from the latest versionstamp down to the oldest.
-    // VersionedRangeGetIterator returns entries newest-first (reverse order).
-    // next() always returns a value when has_next() is true — they share state.
-    VersionedRangeGetOptions opts;
-    opts.snapshot_version = Versionstamp::max(); // read the full history
-    auto iter = versioned_get_range(txn.get(), part_key_base,
-                                    versioned::partition_version_key({instance_id, partition_id + 1}),
-                                    opts);
-    if (!iter) {
+    int64_t update_time_ms = -1;
+    int64_t version = resolve_version_at_time(txn.get(), instance_id,
+                                              request->partition_id(),
+                                              timestamp_ms, &update_time_ms);
+    if (version == -2) {
         code = MetaServiceCode::KV_TXN_GET_ERR;
-        msg = "failed to create versioned range iterator for partition version";
+        msg = fmt::format("FDB scan error during time travel for partition {}",
+                          request->partition_id());
         return;
     }
-
-    while (iter->has_next()) {
-        auto [key, vs, value] = *iter->next(); // next() is always non-empty after has_next()
-        VersionPB version_pb;
-        if (!version_pb.ParseFromString(std::string(value))) {
-            LOG_WARNING("failed to parse VersionPB during time travel scan")
-                    .tag("partition_id", partition_id)
-                    .tag("instance_id", instance_id);
-            continue;
-        }
-        if (version_pb.update_time_ms() <= timestamp_ms) {
-            response->set_version(version_pb.version());
-            response->set_version_update_time_ms(version_pb.update_time_ms());
-            return; // found — latest entry where update_time_ms <= T
-        }
-    }
-
-    if (iter->error_code() != TxnErrorCode::TXN_OK) {
-        code = MetaServiceCode::KV_TXN_GET_ERR;
-        msg = fmt::format("versioned range scan error during time travel, err={}",
-                          iter->error_code());
+    if (version < 0) {
+        code = MetaServiceCode::VERSION_NOT_FOUND;
+        msg = fmt::format(
+                "No committed version found for partition {} at or before timestamp {} ms. "
+                "The table may not have had any data at that time.",
+                request->partition_id(), timestamp_ms);
         return;
     }
-
-    // No version found within the retention window at or before timestamp_ms.
-    // This means the table had no committed data at that point in time.
-    code = MetaServiceCode::VERSION_NOT_FOUND;
-    msg = fmt::format(
-            "No committed version found for partition {} at or before timestamp {} ms. "
-            "The table may not have had any data at that time.",
-            partition_id, timestamp_ms);
+    response->set_version(version);
+    response->set_version_update_time_ms(update_time_ms);
 }
+
 
 void MetaServiceImpl::batch_get_version(::google::protobuf::RpcController* controller,
                                         const GetVersionRequest* request,
