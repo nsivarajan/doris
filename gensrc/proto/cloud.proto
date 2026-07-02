@@ -1230,6 +1230,31 @@ message GetVersionResponse {
     repeated int64 version_update_time_ms = 7;
 };
 
+// Time travel: resolve a wall-clock timestamp to the committed partition version
+// that was visible at that time.
+//
+// Used by the FE query planner to resolve `FOR TIME AS OF '<timestamp>'` on
+// cloud/decoupled OLAP tables. Only valid for tables with enable_time_travel=true.
+message GetVersionAtTimeRequest {
+    optional string cloud_unique_id = 1; // For auth; instance_id is derived server-side
+    optional int64  partition_id    = 3;
+    // Wall-clock timestamp in milliseconds (epoch). The RPC returns the highest
+    // committed version whose update_time_ms <= this value.
+    optional int64  timestamp_ms    = 4;
+    // Maximum history window the table was created with (time_travel_retention_days).
+    // Used server-side to reject queries beyond the retention window without a
+    // full FDB scan.
+    optional int32  retention_days  = 5;
+};
+
+message GetVersionAtTimeResponse {
+    optional MetaServiceResponseStatus status  = 1;
+    // The resolved partition version visible at timestamp_ms.
+    optional int64  version                    = 2;
+    // Actual update_time_ms of the resolved version, for client-side logging.
+    optional int64  version_update_time_ms     = 3;
+};
+
 message GetObjStoreInfoRequest {
     optional string cloud_unique_id = 1; // For auth
     optional string request_ip = 2;
@@ -2303,6 +2328,7 @@ service MetaService {
     rpc get_prepare_txn_by_coordinator(GetPrepareTxnByCoordinatorRequest) returns (GetPrepareTxnByCoordinatorResponse);
 
     rpc get_version(GetVersionRequest) returns (GetVersionResponse);
+    rpc get_version_at_time(GetVersionAtTimeRequest) returns (GetVersionAtTimeResponse);
     rpc create_tablets(CreateTabletsRequest) returns (CreateTabletsResponse);
     rpc update_tablet(UpdateTabletRequest) returns (UpdateTabletResponse);
 

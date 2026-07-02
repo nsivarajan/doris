@@ -387,12 +387,129 @@ void MetaServiceImpl::get_version(::google::protobuf::RpcController* controller,
     code = cast_as<ErrCategory::READ>(err);
 }
 
+// Time travel: resolve a wall-clock timestamp_ms to the highest committed partition
+// version whose update_time_ms <= timestamp_ms.
+//
+// Algorithm:
+//   1. Validate retention window — reject if timestamp_ms < now - retention_days * 86400000
+//   2. Scan versioned partition version keys in reverse (latest first)
+//   3. For each entry, deserialize VersionPB and check update_time_ms
+//   4. Return the first (latest) version where update_time_ms <= timestamp_ms
+//
+// The versioned key format appends a Versionstamp suffix to the base key, so a
+// reverse scan naturally gives us entries from newest to oldest without extra sorting.
+void MetaServiceImpl::get_version_at_time(::google::protobuf::RpcController* controller,
+                                          const GetVersionAtTimeRequest* request,
+                                          GetVersionAtTimeResponse* response,
+                                          ::google::protobuf::Closure* done) {
+    RPC_PREPROCESS(get_version_at_time, get);
+
+    std::string instance_id = get_instance_id(resource_mgr_, request->cloud_unique_id());
+    if (instance_id.empty()) {
+        code = MetaServiceCode::INVALID_ARGUMENT;
+        msg = "empty instance_id";
+        return;
+    }
+
+    if (!request->has_partition_id() || !request->has_timestamp_ms()) {
+        code = MetaServiceCode::INVALID_ARGUMENT;
+        msg = "partition_id and timestamp_ms are required";
+        return;
+    }
+
+    int64_t partition_id  = request->partition_id();
+    int64_t timestamp_ms  = request->timestamp_ms();
+    int32_t retention_days = request->has_retention_days() ? request->retention_days() : 7;
+
+    // Validate that the requested timestamp is within the retention window.
+    using namespace std::chrono;
+    int64_t now_ms = duration_cast<milliseconds>(system_clock::now().time_since_epoch()).count();
+    int64_t earliest_ms = now_ms - static_cast<int64_t>(retention_days) * 86400LL * 1000LL;
+    if (timestamp_ms < earliest_ms) {
+        code = MetaServiceCode::INVALID_ARGUMENT;
+        msg = fmt::format(
+                "Requested timestamp {} ms is beyond the time travel retention window of {} days. "
+                "Earliest available timestamp is approximately {} ms.",
+                timestamp_ms, retention_days, earliest_ms);
+        return;
+    }
+    if (timestamp_ms > now_ms) {
+        code = MetaServiceCode::INVALID_ARGUMENT;
+        msg = fmt::format("Requested timestamp {} ms is in the future (now={} ms).",
+                          timestamp_ms, now_ms);
+        return;
+    }
+
+    std::unique_ptr<Transaction> txn;
+    TxnErrorCode err = txn_kv_->create_txn(&txn);
+    if (err != TxnErrorCode::TXN_OK) {
+        code = MetaServiceCode::KV_TXN_CREATE_ERR;
+        msg = fmt::format("failed to create txn, err={}", err);
+        return;
+    }
+
+    // Guard against INT64_MAX overflow when constructing the end range key.
+    if (partition_id == std::numeric_limits<int64_t>::max()) {
+        code = MetaServiceCode::INVALID_ARGUMENT;
+        msg = "partition_id is at maximum int64 value, cannot construct range key";
+        return;
+    }
+
+    // Versioned partition version key (base, without versionstamp suffix).
+    // versioned_get_range will append the versionstamp range internally.
+    std::string part_key_base = versioned::partition_version_key({instance_id, partition_id});
+
+    // Scan from the latest versionstamp down to the oldest.
+    // VersionedRangeGetIterator returns entries newest-first (reverse order).
+    // next() always returns a value when has_next() is true — they share state.
+    VersionedRangeGetOptions opts;
+    opts.snapshot_version = Versionstamp::max(); // read the full history
+    auto iter = versioned_get_range(txn.get(), part_key_base,
+                                    versioned::partition_version_key({instance_id, partition_id + 1}),
+                                    opts);
+    if (!iter) {
+        code = MetaServiceCode::KV_TXN_GET_ERR;
+        msg = "failed to create versioned range iterator for partition version";
+        return;
+    }
+
+    while (iter->has_next()) {
+        auto [key, vs, value] = *iter->next(); // next() is always non-empty after has_next()
+        VersionPB version_pb;
+        if (!version_pb.ParseFromString(std::string(value))) {
+            LOG_WARNING("failed to parse VersionPB during time travel scan")
+                    .tag("partition_id", partition_id)
+                    .tag("instance_id", instance_id);
+            continue;
+        }
+        if (version_pb.update_time_ms() <= timestamp_ms) {
+            response->set_version(version_pb.version());
+            response->set_version_update_time_ms(version_pb.update_time_ms());
+            return; // found — latest entry where update_time_ms <= T
+        }
+    }
+
+    if (iter->error_code() != TxnErrorCode::TXN_OK) {
+        code = MetaServiceCode::KV_TXN_GET_ERR;
+        msg = fmt::format("versioned range scan error during time travel, err={}",
+                          iter->error_code());
+        return;
+    }
+
+    // No version found within the retention window at or before timestamp_ms.
+    // This means the table had no committed data at that point in time.
+    code = MetaServiceCode::VERSION_NOT_FOUND;
+    msg = fmt::format(
+            "No committed version found for partition {} at or before timestamp {} ms. "
+            "The table may not have had any data at that time.",
+            partition_id, timestamp_ms);
+}
+
 void MetaServiceImpl::batch_get_version(::google::protobuf::RpcController* controller,
                                         const GetVersionRequest* request,
                                         GetVersionResponse* response,
                                         ::google::protobuf::Closure* done) {
     RPC_PREPROCESS(get_version, get);
-
     std::string cloud_unique_id;
     if (request->has_cloud_unique_id()) {
         cloud_unique_id = request->cloud_unique_id();
