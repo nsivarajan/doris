@@ -1637,6 +1637,17 @@ int64_t calculate_rowset_expired_time(const std::string& instance_id_, const Rec
     return final_expiration;
 }
 
+// Time travel gate: given a table's time_travel_retention_days (0 = not enabled),
+// return the extended retention seconds that should override compacted_rowset_retention.
+// Hard-capped at 90 days matching the FE-enforced maximum.
+static int64_t time_travel_retention_seconds(int32_t retention_days) {
+    if (retention_days <= 0) {
+        return 0;
+    }
+    int64_t seconds = static_cast<int64_t>(retention_days) * 86400LL;
+    return std::min(seconds, 90LL * 86400LL);
+}
+
 int64_t calculate_partition_expired_time(
         const std::string& instance_id_, const RecyclePartitionPB& partition_meta_pb,
         int64_t* earlest_ts /* partition earliest expiration ts */) {
@@ -5070,6 +5081,42 @@ int InstanceRecycler::recycle_rowsets() {
 
     int64_t earlest_ts = std::numeric_limits<int64_t>::max();
 
+    // Per-scan cache: table_id → time_travel_retention_days (0 = not enabled).
+    // Populated lazily on first COMPACT rowset seen for each table_id.
+    // Avoids repeated FDB reads for the same table across thousands of rowsets.
+    std::unordered_map<int64_t, int32_t> table_tt_retention_cache;
+
+    auto get_time_travel_retention_days = [&](int64_t table_id) -> int32_t {
+        auto it = table_tt_retention_cache.find(table_id);
+        if (it != table_tt_retention_cache.end()) {
+            return it->second;
+        }
+        // Read one tablet meta for this table to get time_travel_retention_days.
+        // All tablets of the same table share the same table property.
+        int32_t days = 0;
+        if (table_id == std::numeric_limits<int64_t>::max()) {
+            table_tt_retention_cache[table_id] = 0;
+            return 0;
+        }
+        std::string tablet_key_begin, tablet_key_end;
+        meta_tablet_key({instance_id_, table_id, 0, 0, 0}, &tablet_key_begin);
+        meta_tablet_key({instance_id_, table_id + 1, 0, 0, 0}, &tablet_key_end);
+        std::unique_ptr<Transaction> txn;
+        if (txn_kv_->create_txn(&txn) == TxnErrorCode::TXN_OK) {
+            std::unique_ptr<RangeGetIterator> iter;
+            if (txn->get(tablet_key_begin, tablet_key_end, &iter, false, 1) == TxnErrorCode::TXN_OK
+                    && iter && iter->has_next()) {
+                auto [k, v] = iter->next();
+                doris::TabletMetaCloudPB tablet_meta;
+                if (tablet_meta.ParseFromArray(v.data(), v.size())) {
+                    days = tablet_meta.time_travel_retention_days();
+                }
+            }
+        }
+        table_tt_retention_cache[table_id] = days;
+        return days;
+    };
+
     auto handle_rowset_kv = [&](std::string_view k, std::string_view v) -> int {
         ++num_scanned;
         total_rowset_key_size += k.size();
@@ -5082,6 +5129,24 @@ int InstanceRecycler::recycle_rowsets() {
 
         int64_t current_time = ::time(nullptr);
         int64_t expiration = calculate_rowset_expired_time(instance_id_, rowset, &earlest_ts);
+
+        // Time travel gate: for COMPACT rowsets on time-travel-enabled tables, extend
+        // the expiration by the table's retention window so historical data stays readable.
+        if ((rowset.type() == RecycleRowsetPB::COMPACT || rowset.type() == RecycleRowsetPB::DROP)
+                && rowset.has_rowset_meta()) {
+            int64_t table_id = rowset.rowset_meta().table_id();
+            if (table_id > 0) {
+                int32_t tt_days = get_time_travel_retention_days(table_id);
+                int64_t tt_seconds = time_travel_retention_seconds(tt_days);
+                if (tt_seconds > 0) {
+                    // Use creation_time (when the rowset was compacted) as the base,
+                    // NOT expiration() — expiration is the TTL deadline from ttl_seconds
+                    // table property and is unrelated to when the data was compacted.
+                    int64_t tt_expiration = rowset.creation_time() + tt_seconds;
+                    expiration = std::max(expiration, tt_expiration);
+                }
+            }
+        }
 
         VLOG_DEBUG << "recycle rowset scan, key=" << hex(k) << " num_scanned=" << num_scanned
                    << " num_expired=" << num_expired << " expiration=" << expiration
