@@ -1018,6 +1018,9 @@ struct TOlapScanNode {
   27: optional list<TPartitionBoundary> partition_boundaries
   // Slot ids of extra storage key columns used only to align the scan tuple with storage schema.
   28: optional set<i32> extra_key_column_slot_ids
+  // Time travel: resolved partition version to read. Only set for cloud/decoupled tables
+  // with enable_time_travel=true and a FOR TIME AS OF clause. -1 means read current version.
+  29: optional i64 time_travel_timestamp_ms
 }
 
 struct TEqJoinCondition {

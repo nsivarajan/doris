@@ -353,6 +353,11 @@ public class MetaServiceProxy {
         return executeWithMetrics(methodName, (client) -> client.getVersion(request));
     }
 
+    public Cloud.GetVersionAtTimeResponse getVersionAtTime(Cloud.GetVersionAtTimeRequest request)
+            throws RpcException {
+        return executeWithMetrics("getVersionAtTime", (client) -> client.getVersionAtTime(request));
+    }
+
     public Cloud.CreateTabletsResponse createTablets(Cloud.CreateTabletsRequest request) throws RpcException {
         return executeWithMetrics("createTablets", (client) -> client.createTablets(request));
     }

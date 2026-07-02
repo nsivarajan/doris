@@ -175,6 +175,14 @@ public class LogicalOlapScan extends LogicalCatalogRelation implements OlapScan,
 
     protected final Optional<TableScanParams> scanParams;
 
+    /**
+     * Time travel: the resolved partition version from FOR TIME AS OF.
+     * -1 means no time travel — read the current (latest) version.
+     * Set during analysis by BindRelation.resolveTimeTravelSnapshot().
+     * Not final so withTimeTravelTimestampMs() can stamp the resolved version on a copy.
+     */
+    protected long timeTravelTimestampMs;
+
     public LogicalOlapScan(RelationId id, OlapTable table) {
         this(id, table, ImmutableList.of());
     }
@@ -336,6 +344,7 @@ public class LogicalOlapScan extends LogicalCatalogRelation implements OlapScan,
                 ? Optional.empty()
                 : partitionPrunablePredicates;
         this.scanParams = scanParams;
+        this.timeTravelTimestampMs = -1L; // no time travel by default
     }
 
     /**
@@ -1160,6 +1169,32 @@ public class LogicalOlapScan extends LogicalCatalogRelation implements OlapScan,
                         manuallySpecifiedTabletIds, operativeSlots, virtualColumns, scoreOrderKeys, scoreLimit,
                         scoreRangeInfo, annOrderKeys, annLimit, tableAlias, partitionPrunablePredicates,
                         Optional.of(scanParams)));
+    }
+
+    public long getTimeTravelTimestampMs() {
+        return timeTravelTimestampMs;
+    }
+
+    public boolean hasTimeTravelTimestampMs() {
+        return timeTravelTimestampMs >= 0;
+    }
+
+    /**
+     * Returns a copy of this scan with the resolved time travel version set.
+     * Called by BindRelation after the meta service resolves FOR TIME AS OF to a version number.
+     */
+    public LogicalOlapScan withTimeTravelTimestampMs(long version) {
+        LogicalOlapScan copy = AbstractPlan.copyWithSameId(this, () ->
+                new LogicalOlapScan(relationId, (Table) table, qualifier,
+                        groupExpression, Optional.empty(),
+                        selectedPartitionIds, partitionPruned, hasPartitionPredicate, selectedTabletIds,
+                        selectedIndexId, indexSelected, preAggStatus, manuallySpecifiedPartitions,
+                        hints, cacheSlotWithSlotName, cachedOutput, tableSample, directMvScan, colToSubPathsMap,
+                        manuallySpecifiedTabletIds, operativeSlots, virtualColumns, scoreOrderKeys, scoreLimit,
+                        scoreRangeInfo, annOrderKeys, annLimit, tableAlias, partitionPrunablePredicates,
+                        scanParams));
+        copy.timeTravelTimestampMs = version;
+        return copy;
     }
 
     @Override
