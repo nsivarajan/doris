@@ -291,6 +291,39 @@ public class CatalogRecycleBin extends MasterDaemon implements Writable {
                 && latency > Config.catalog_trash_expire_second * 1000L;
     }
 
+    /**
+     * Returns the effective TTL in milliseconds for a time-travel-enabled table in the recycle bin.
+     * The table's time_travel_retention_days is used as the TTL so that historical data remains
+     * available for the full retention window even after DROP TABLE.
+     * Returns -1 if the table does not have time travel enabled.
+     */
+    private long getTimeTravelExpireMs(long tableId) {
+        RecycleTableInfo info = idToTable.get(tableId);
+        if (info == null || !(info.getTable() instanceof OlapTable)) {
+            return -1;
+        }
+        OlapTable olapTable = (OlapTable) info.getTable();
+        if (!olapTable.isEnableTimeTravel()) {
+            return -1;
+        }
+        return (long) olapTable.getTimeTravelRetentionDays() * 86400L * 1000L;
+    }
+
+    private boolean isTableExpire(long tableId, long currentTimeMs) {
+        long ttExpireMs = getTimeTravelExpireMs(tableId);
+        if (ttExpireMs > 0) {
+            Long recycleTime = idToRecycleTime.get(tableId);
+            if (recycleTime == null) {
+                // Table was concurrently removed — treat as expired so the caller skips it cleanly.
+                return true;
+            }
+            long latency = currentTimeMs - recycleTime;
+            return (Config.catalog_trash_ignore_min_erase_latency || latency > minEraseLatency)
+                    && latency > ttExpireMs;
+        }
+        return isExpire(tableId, currentTimeMs);
+    }
+
     private void eraseDatabase(long currentTimeMs, int keepNum) {
         int eraseNum = 0;
         StopWatch watch = StopWatch.createStarted();
@@ -451,7 +484,7 @@ public class CatalogRecycleBin extends MasterDaemon implements Writable {
             readLock();
             try {
                 for (Map.Entry<Long, RecycleTableInfo> entry : idToTable.entrySet()) {
-                    if (isExpire(entry.getKey(), currentTimeMs)) {
+                    if (isTableExpire(entry.getKey(), currentTimeMs)) {
                         expiredIds.add(entry.getKey());
                     }
                 }
@@ -523,6 +556,13 @@ public class CatalogRecycleBin extends MasterDaemon implements Writable {
             try {
                 RecycleTableInfo tableInfo = idToTable.get(tableId);
                 if (tableInfo == null || !isExpireMinLatency(tableId, currentTimeMs)) {
+                    continue;
+                }
+                // Time-travel tables must not be evicted by keepNum before their retention
+                // window expires. Non-time-travel tables follow the original isExpireMinLatency
+                // check only (full TTL check happens in eraseTable, not here).
+                long ttExpireMs = getTimeTravelExpireMs(tableId);
+                if (ttExpireMs > 0 && !isTableExpire(tableId, currentTimeMs)) {
                     continue;
                 }
                 Table table = tableInfo.getTable();
