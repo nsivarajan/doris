@@ -58,7 +58,8 @@ namespace doris::cloud {
     X(FINISH_RESTORE_JOB, finish_restore_job, "finish restore job")       \
     X(LIST_SNAPSHOTS, list_snapshots, "list snapshots")                   \
     X(GET_CLUSTER_STATUS, get_cluster_status, "get cluster status")       \
-    X(UPDATE_PACKED_FILE_INFO, update_packed_file_info, "update packed file info")
+    X(UPDATE_PACKED_FILE_INFO, update_packed_file_info, "update packed file info") \
+    X(GET_VERSION_AT_TIME, get_version_at_time, "get version at time")
 
 // Enum class for Meta Service RPC types
 enum class MetaServiceRPC : size_t {

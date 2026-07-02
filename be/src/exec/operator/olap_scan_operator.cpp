@@ -817,15 +817,35 @@ Status OlapScanLocalState::_sync_cloud_tablets(RuntimeState* state) {
             _tablets.resize(_scan_ranges.size());
             std::vector<std::function<Status()>> tasks;
             _sync_statistics.resize(_scan_ranges.size());
+
+            // Time travel: if timestamp_ms is set, resolve version per-partition inside each
+            // bthread so the get_tablet + get_version_at_time RPCs run in parallel across tablets.
+            const auto& p = _parent->cast<OlapScanOperatorX>();
+            const int64_t tt_timestamp_ms =
+                    p._olap_scan_node.__isset.time_travel_timestamp_ms
+                            ? p._olap_scan_node.time_travel_timestamp_ms
+                            : -1;
+            const int32_t tt_retention_days =
+                    p._olap_scan_node.__isset.time_travel_retention_days
+                            ? p._olap_scan_node.time_travel_retention_days
+                            : 7;
+
             for (size_t i = 0; i < _scan_ranges.size(); i++) {
                 auto* sync_stats = &_sync_statistics[i];
                 int64_t version = 0;
-                std::from_chars(_scan_ranges[i]->version.data(),
-                                _scan_ranges[i]->version.data() + _scan_ranges[i]->version.size(),
-                                version);
+                if (tt_timestamp_ms <= 0) {
+                    // Normal path: version is already set in the scan range.
+                    std::from_chars(_scan_ranges[i]->version.data(),
+                                    _scan_ranges[i]->version.data() +
+                                            _scan_ranges[i]->version.size(),
+                                    version);
+                }
+                // Time travel path: version stays 0 here; it is resolved inside the bthread
+                // alongside get_tablet so that all tablets are processed in parallel.
                 auto task_ctx = state->get_task_execution_context();
                 auto task_create_time = std::chrono::steady_clock::now();
-                tasks.emplace_back([this, sync_stats, version, i, task_ctx, task_create_time]() {
+                tasks.emplace_back([this, sync_stats, version, i, task_ctx, task_create_time,
+                                    tt_timestamp_ms, tt_retention_days]() mutable {
                     // Record bthread scheduling delay
                     auto task_start_time = std::chrono::steady_clock::now();
                     if (sync_stats) {
@@ -844,8 +864,16 @@ Status OlapScanLocalState::_sync_cloud_tablets(RuntimeState* state) {
                             _sync_cloud_tablets_watcher.stop();
                         }
                     });
-                    auto tablet =
-                            DORIS_TRY(ExecEnv::get_tablet(_scan_ranges[i]->tablet_id, sync_stats));
+                    // Fetch tablet; for time travel, also resolve timestamp → version via RPC.
+                    auto tablet = DORIS_TRY(ExecEnv::get_tablet(
+                            _scan_ranges[i]->tablet_id, sync_stats));
+                    if (tt_timestamp_ms > 0) {
+                        int64_t partition_id = tablet->tablet_meta()->partition_id();
+                        RETURN_IF_ERROR(
+                                ExecEnv::GetInstance()->storage_engine().to_cloud().meta_mgr()
+                                        .get_version_at_time(partition_id, tt_timestamp_ms,
+                                                             tt_retention_days, &version));
+                    }
                     _tablets[i] = {std::move(tablet), version};
                     SyncOptions options;
                     options.query_version = version;

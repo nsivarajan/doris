@@ -203,8 +203,9 @@ public class OlapScanNode extends ScanNode {
     private Set<Long> sampleTabletIds = Sets.newHashSet();
     private Set<Long> nereidsPrunedTabletIds = Sets.newHashSet();
     private TableSample tableSample;
-    // Time travel: resolved version from FOR TIME AS OF. -1 = read current version.
+    // Time travel: timestamp_ms from FOR TIME AS OF. -1 = read current version.
     private long timeTravelTimestampMs = -1L;
+    private int timeTravelRetentionDays = -1;
 
     private Map<Long, Integer> tabletId2BucketSeq = Maps.newHashMap();
     // a bucket seq may map to many tablets, and each tablet has a
@@ -278,6 +279,10 @@ public class OlapScanNode extends ScanNode {
 
     public long getTimeTravelTimestampMs() {
         return timeTravelTimestampMs;
+    }
+
+    public void setTimeTravelRetentionDays(int days) {
+        this.timeTravelRetentionDays = days;
     }
 
     public Set<Integer> getExtraKeyColumnSlotIds() {
@@ -1376,6 +1381,9 @@ public class OlapScanNode extends ScanNode {
 
         if (timeTravelTimestampMs >= 0) {
             msg.olap_scan_node.setTimeTravelTimestampMs(timeTravelTimestampMs);
+            if (timeTravelRetentionDays > 0) {
+                msg.olap_scan_node.setTimeTravelRetentionDays(timeTravelRetentionDays);
+            }
         }
 
         super.toThrift(msg);

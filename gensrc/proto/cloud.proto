@@ -1245,6 +1245,7 @@ message GetVersionAtTimeRequest {
     // Used server-side to reject queries beyond the retention window without a
     // full FDB scan.
     optional int32  retention_days  = 5;
+    optional string request_ip      = 6; // set by retry_rpc
 };
 
 message GetVersionAtTimeResponse {

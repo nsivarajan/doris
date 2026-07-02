@@ -983,9 +983,11 @@ public class PhysicalPlanTranslator extends DefaultPlanVisitor<PlanFragment, Pla
             olapScanNode.setScanParams(olapScan.getScanParams().get());
         }
 
-        // time travel: pass the resolved version to OlapScanNode for BE
+        // time travel: pass timestamp_ms and retention_days to OlapScanNode for BE
         if (olapScan.hasTimeTravelTimestampMs()) {
             olapScanNode.setTimeTravelTimestampMs(olapScan.getTimeTravelTimestampMs());
+            OlapTable olapTable = olapScan.getTable();
+            olapScanNode.setTimeTravelRetentionDays(olapTable.getTimeTravelRetentionDays());
         }
 
         // create scan range
