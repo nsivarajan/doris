@@ -2857,6 +2857,19 @@ public class InternalCatalog implements CatalogIf<Database> {
         }
         BinlogConfig binlogConfigForTask = new BinlogConfig(olapTable.getBinlogConfig());
 
+        // set time travel config (cloud/decoupled mode only, CREATE TABLE only)
+        try {
+            Map<String, String> timeTravelMap = PropertyAnalyzer.analyzeTimeTravelConfig(properties);
+            if (timeTravelMap != null) {
+                // Store raw properties in TableProperty — buildTimeTravelConfig() reads them
+                // during gsonPostProcess and after this createTable call.
+                olapTable.getOrCreatTableProperty().modifyTableProperties(timeTravelMap);
+                olapTable.getOrCreatTableProperty().buildTimeTravelConfig();
+            }
+        } catch (AnalysisException e) {
+            throw new DdlException(e.getMessage());
+        }
+
         Map<String, List<String>> columnSequenceMapping;
         try {
             columnSequenceMapping = PropertyAnalyzer.analyzeSeqMapping(properties, baseSchema, keysType);

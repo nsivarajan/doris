@@ -6351,7 +6351,8 @@ public class Env {
                 .buildVerticalCompactionNumColumnsPerGroup()
                 .buildTTLSeconds()
                 .buildAutoAnalyzeProperty()
-                .buildPartitionRetentionCount();
+                .buildPartitionRetentionCount()
+                .buildTimeTravelConfig(); // disable-only via ALTER; enable only at CREATE TABLE
 
         // need to update partition info meta
         for (Partition partition : table.getPartitions()) {
