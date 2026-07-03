@@ -87,6 +87,8 @@ import org.apache.doris.catalog.stream.BaseTableStream;
 import org.apache.doris.catalog.stream.TableStreamBuildFactory;
 import org.apache.doris.clone.DynamicPartitionScheduler;
 import org.apache.doris.cloud.catalog.CloudEnv;
+import org.apache.doris.cloud.proto.Cloud;
+import org.apache.doris.cloud.rpc.MetaServiceProxy;
 import org.apache.doris.cloud.transaction.CloudGlobalTransactionMgr;
 import org.apache.doris.cluster.Cluster;
 import org.apache.doris.common.AnalysisException;
@@ -140,6 +142,7 @@ import org.apache.doris.persist.ReplicaPersistInfo;
 import org.apache.doris.persist.TruncateTableInfo;
 import org.apache.doris.qe.ConnectContext;
 import org.apache.doris.qe.GlobalVariable;
+import org.apache.doris.rpc.RpcException;
 import org.apache.doris.resource.Tag;
 import org.apache.doris.statistics.TableStatsMeta;
 import org.apache.doris.system.Backend;
@@ -1019,6 +1022,41 @@ public class InternalCatalog implements CatalogIf<Database> {
         if (Config.isCloudMode()) {
             ((CloudGlobalTransactionMgr) Env.getCurrentGlobalTransactionMgr()).afterDropTable(db.getId(),
                     table.getId());
+            // For force-drop, remove the time-travel FDB marker key immediately.
+            // For non-force drop the table enters the recycle bin and is retained until
+            // time_travel_retention_days expires; the marker is removed when the bin purges it.
+            if (forceDrop) {
+                disableTimeTravelMarkerIfNeeded(table);
+            }
+        }
+    }
+
+    // Best-effort: tells the meta-service to remove the time-travel FDB marker key so it
+    // stops writing versioned partition keys for this table. Never throws — DROP/purge paths
+    // must not be blocked by a metric RPC failure.
+    public static void disableTimeTravelMarkerIfNeeded(Table table) {
+        if (!Config.isCloudMode()) {
+            return;
+        }
+        if (!(table instanceof OlapTable) || !((OlapTable) table).isEnableTimeTravel()) {
+            return;
+        }
+        disableTimeTravelMarker(table.getId());
+    }
+
+    private static void disableTimeTravelMarker(long tableId) {
+        try {
+            Cloud.DisableTimeTravelTableRequest req =
+                    Cloud.DisableTimeTravelTableRequest.newBuilder().setTableId(tableId).build();
+            Cloud.DisableTimeTravelTableResponse resp =
+                    MetaServiceProxy.getInstance().disableTimeTravelTable(req);
+            if (resp.getStatus().getCode() != Cloud.MetaServiceCode.OK) {
+                LOG.warn("failed to remove time travel marker, table_id={}: {}",
+                        tableId, resp.getStatus().getMsg());
+            }
+        } catch (RpcException e) {
+            LOG.warn("RPC error removing time travel marker, table_id={}: {}", tableId,
+                    e.getMessage());
         }
     }
 
@@ -2861,10 +2899,9 @@ public class InternalCatalog implements CatalogIf<Database> {
         try {
             Map<String, String> timeTravelMap = PropertyAnalyzer.analyzeTimeTravelConfig(properties);
             if (timeTravelMap != null) {
-                // Store raw properties in TableProperty — buildTimeTravelConfig() reads them
-                // during gsonPostProcess and after this createTable call.
-                olapTable.getOrCreatTableProperty().modifyTableProperties(timeTravelMap);
-                olapTable.getOrCreatTableProperty().buildTimeTravelConfig();
+                // isEnableTimeTravel() / getTimeTravelRetentionDays() are public on OlapTable;
+                // they read from TableProperty which is populated by buildTimeTravelConfig().
+                olapTable.setTimeTravelConfigFromProperties(timeTravelMap);
             }
         } catch (AnalysisException e) {
             throw new DdlException(e.getMessage());

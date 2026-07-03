@@ -95,7 +95,7 @@ public class PhysicalOlapScan extends PhysicalCatalogRelation implements OlapSca
     // Time travel: timestamp_ms from FOR TIME AS OF. -1 = read current version.
     // Carried from LogicalOlapScan through the logical→physical conversion rule
     // so PhysicalPlanTranslator can pass it to OlapScanNode.
-    private long timeTravelTimestampMs = -1L;
+    private final long timeTravelTimestampMs;
 
     /**
      * Constructor for PhysicalOlapScan.
@@ -167,7 +167,7 @@ public class PhysicalOlapScan extends PhysicalCatalogRelation implements OlapSca
                 hasPartitionPredicate, distributionSpec, preAggStatus, baseOutputs, groupExpression,
                 logicalProperties, physicalProperties, statistics, tableSample, operativeSlots, virtualColumns,
                 scoreOrderKeys, scoreLimit, scoreRangeInfo, annOrderKeys, annLimit, tableAlias,
-                Optional.empty(), false, Optional.empty());
+                Optional.empty(), false, Optional.empty(), -1L);
     }
 
     /**
@@ -183,7 +183,7 @@ public class PhysicalOlapScan extends PhysicalCatalogRelation implements OlapSca
             List<OrderKey> scoreOrderKeys, Optional<Long> scoreLimit, Optional<ScoreRangeInfo> scoreRangeInfo,
             List<OrderKey> annOrderKeys, Optional<Long> annLimit, String tableAlias,
             Optional<PartitionPrunablePredicate> partitionPrunablePredicates, boolean incrementalScan,
-            Optional<TableScanParams> scanParams) {
+            Optional<TableScanParams> scanParams, long timeTravelTimestampMs) {
         super(id, PlanType.PHYSICAL_OLAP_SCAN, olapTable, qualifier,
                 groupExpression, logicalProperties, physicalProperties, statistics, operativeSlots, tableAlias);
         this.selectedIndexId = selectedIndexId;
@@ -206,6 +206,7 @@ public class PhysicalOlapScan extends PhysicalCatalogRelation implements OlapSca
                 : partitionPrunablePredicates;
         this.incrementalScan = incrementalScan;
         this.scanParams = scanParams == null ? Optional.empty() : scanParams;
+        this.timeTravelTimestampMs = timeTravelTimestampMs;
     }
 
     @Override
@@ -238,14 +239,13 @@ public class PhysicalOlapScan extends PhysicalCatalogRelation implements OlapSca
      */
     public PhysicalOlapScan withPartitionPrunablePredicates(
             Optional<PartitionPrunablePredicate> partitionPrunablePredicates) {
-        PhysicalOlapScan _pCopy = AbstractPlan.copyWithSameId(this, () -> new PhysicalOlapScan(relationId, getTable(), qualifier,
+        return AbstractPlan.copyWithSameId(this,
+                () -> new PhysicalOlapScan(relationId, getTable(), qualifier,
                 selectedIndexId, selectedTabletIds, selectedPartitionIds, hasPartitionPredicate,
                 distributionSpec, preAggStatus, baseOutputs, groupExpression, getLogicalProperties(),
                 getPhysicalProperties(), statistics, tableSample, operativeSlots, virtualColumns, scoreOrderKeys,
                 scoreLimit, scoreRangeInfo, annOrderKeys, annLimit, tableAlias, partitionPrunablePredicates,
-                incrementalScan, scanParams));
-        _pCopy.timeTravelTimestampMs = this.timeTravelTimestampMs;
-        return _pCopy;
+                incrementalScan, scanParams, timeTravelTimestampMs));
     }
 
     @Override
@@ -391,38 +391,37 @@ public class PhysicalOlapScan extends PhysicalCatalogRelation implements OlapSca
 
     @Override
     public PhysicalOlapScan withGroupExpression(Optional<GroupExpression> groupExpression) {
-        PhysicalOlapScan _pCopy = AbstractPlan.copyWithSameId(this, () -> new PhysicalOlapScan(relationId, getTable(), qualifier,
+        return AbstractPlan.copyWithSameId(this,
+                () -> new PhysicalOlapScan(relationId, getTable(), qualifier,
                 selectedIndexId, selectedTabletIds, selectedPartitionIds, hasPartitionPredicate,
                 distributionSpec, preAggStatus, baseOutputs, groupExpression, getLogicalProperties(), null, null,
                 tableSample, operativeSlots, virtualColumns, scoreOrderKeys, scoreLimit, scoreRangeInfo,
-                annOrderKeys, annLimit, tableAlias, partitionPrunablePredicates, incrementalScan, scanParams));
-        _pCopy.timeTravelTimestampMs = this.timeTravelTimestampMs;
-        return _pCopy;
+                annOrderKeys, annLimit, tableAlias, partitionPrunablePredicates, incrementalScan, scanParams,
+                timeTravelTimestampMs));
     }
 
     @Override
     public Plan withGroupExprLogicalPropChildren(Optional<GroupExpression> groupExpression,
             Optional<LogicalProperties> logicalProperties, List<Plan> children) {
-        PhysicalOlapScan _pCopy = AbstractPlan.copyWithSameId(this, () -> new PhysicalOlapScan(relationId, getTable(), qualifier,
+        return AbstractPlan.copyWithSameId(this,
+                () -> new PhysicalOlapScan(relationId, getTable(), qualifier,
                 selectedIndexId, selectedTabletIds, selectedPartitionIds, hasPartitionPredicate,
                 distributionSpec, preAggStatus, baseOutputs, groupExpression, logicalProperties.get(), null, null,
                 tableSample, operativeSlots, virtualColumns, scoreOrderKeys, scoreLimit, scoreRangeInfo,
-                annOrderKeys, annLimit, tableAlias, partitionPrunablePredicates, incrementalScan, scanParams));
-        _pCopy.timeTravelTimestampMs = this.timeTravelTimestampMs;
-        return _pCopy;
+                annOrderKeys, annLimit, tableAlias, partitionPrunablePredicates, incrementalScan, scanParams,
+                timeTravelTimestampMs));
     }
 
     @Override
     public PhysicalOlapScan withPhysicalPropertiesAndStats(
             PhysicalProperties physicalProperties, Statistics statistics) {
-        PhysicalOlapScan _pCopy = AbstractPlan.copyWithSameId(this, () -> new PhysicalOlapScan(relationId, getTable(), qualifier,
+        return AbstractPlan.copyWithSameId(this,
+                () -> new PhysicalOlapScan(relationId, getTable(), qualifier,
                 selectedIndexId, selectedTabletIds, selectedPartitionIds, hasPartitionPredicate,
                 distributionSpec, preAggStatus, baseOutputs, groupExpression, getLogicalProperties(),
                 physicalProperties, statistics, tableSample, operativeSlots, virtualColumns, scoreOrderKeys,
                 scoreLimit, scoreRangeInfo, annOrderKeys, annLimit, tableAlias, partitionPrunablePredicates,
-                incrementalScan, scanParams));
-        _pCopy.timeTravelTimestampMs = this.timeTravelTimestampMs;
-        return _pCopy;
+                incrementalScan, scanParams, timeTravelTimestampMs));
     }
 
     @Override
@@ -445,14 +444,13 @@ public class PhysicalOlapScan extends PhysicalCatalogRelation implements OlapSca
 
     @Override
     public CatalogRelation withOperativeSlots(Collection<Slot> operativeSlots) {
-        PhysicalOlapScan _pCopy = AbstractPlan.copyWithSameId(this, () -> new PhysicalOlapScan(relationId, (OlapTable) table, qualifier,
+        return AbstractPlan.copyWithSameId(this,
+                () -> new PhysicalOlapScan(relationId, (OlapTable) table, qualifier,
                 selectedIndexId, selectedTabletIds, selectedPartitionIds, hasPartitionPredicate,
                 distributionSpec, preAggStatus, baseOutputs, groupExpression, getLogicalProperties(),
                 getPhysicalProperties(), statistics, tableSample, operativeSlots, virtualColumns, scoreOrderKeys,
                 scoreLimit, scoreRangeInfo, annOrderKeys, annLimit, tableAlias, partitionPrunablePredicates,
-                incrementalScan, scanParams));
-        _pCopy.timeTravelTimestampMs = this.timeTravelTimestampMs;
-        return _pCopy;
+                incrementalScan, scanParams, timeTravelTimestampMs));
     }
 
     @Override
@@ -474,9 +472,5 @@ public class PhysicalOlapScan extends PhysicalCatalogRelation implements OlapSca
 
     public boolean hasTimeTravelTimestampMs() {
         return timeTravelTimestampMs >= 0;
-    }
-
-    public void setTimeTravelTimestampMs(long timestampMs) {
-        this.timeTravelTimestampMs = timestampMs;
     }
 }

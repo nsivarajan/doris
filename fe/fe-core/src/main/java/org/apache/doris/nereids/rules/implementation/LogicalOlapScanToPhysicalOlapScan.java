@@ -46,41 +46,35 @@ import java.util.Optional;
 public class LogicalOlapScanToPhysicalOlapScan extends OneImplementationRuleFactory {
     @Override
     public Rule build() {
-        return logicalOlapScan().then(olapScan -> {
-                PhysicalOlapScan physicalScan = new PhysicalOlapScan(
-                        olapScan.getRelationId(),
-                        olapScan.getTable(),
-                        olapScan.getQualifier(),
-                        olapScan.getSelectedIndexId(),
-                        olapScan.getSelectedTabletIds(),
-                        olapScan.getSelectedPartitionIds(),
-                        olapScan.hasPartitionPredicate(),
-                        convertDistribution(olapScan),
-                        olapScan.getPreAggStatus(),
-                        olapScan.getOutputByIndex(olapScan.getTable().getBaseIndexId()),
-                        Optional.empty(),
-                        olapScan.getLogicalProperties(),
-                        null,
-                        null,
-                        olapScan.getTableSample(),
-                        olapScan.getOperativeSlots(),
-                        olapScan.getVirtualColumns(),
-                        olapScan.getScoreOrderKeys(),
-                        olapScan.getScoreLimit(),
-                        olapScan.getScoreRangeInfo(),
-                        olapScan.getAnnOrderKeys(),
-                        olapScan.getAnnLimit(),
-                        olapScan.getTableAlias(),
-                        olapScan.getPartitionPrunablePredicates(),
-                        olapScan.isIncrementalScan(),
-                        olapScan.getScanParams());
-                // Carry time travel timestamp from logical to physical so
-                // PhysicalPlanTranslator can pass it to OlapScanNode → BE.
-                if (olapScan.hasTimeTravelTimestampMs()) {
-                    physicalScan.setTimeTravelTimestampMs(olapScan.getTimeTravelTimestampMs());
-                }
-                return physicalScan;
-        }).toRule(RuleType.LOGICAL_OLAP_SCAN_TO_PHYSICAL_OLAP_SCAN_RULE);
+        return logicalOlapScan().then(olapScan -> new PhysicalOlapScan(
+                    olapScan.getRelationId(),
+                    olapScan.getTable(),
+                    olapScan.getQualifier(),
+                    olapScan.getSelectedIndexId(),
+                    olapScan.getSelectedTabletIds(),
+                    olapScan.getSelectedPartitionIds(),
+                    olapScan.hasPartitionPredicate(),
+                    convertDistribution(olapScan),
+                    olapScan.getPreAggStatus(),
+                    olapScan.getOutputByIndex(olapScan.getTable().getBaseIndexId()),
+                    Optional.empty(),
+                    olapScan.getLogicalProperties(),
+                    null,
+                    null,
+                    olapScan.getTableSample(),
+                    olapScan.getOperativeSlots(),
+                    olapScan.getVirtualColumns(),
+                    olapScan.getScoreOrderKeys(),
+                    olapScan.getScoreLimit(),
+                    olapScan.getScoreRangeInfo(),
+                    olapScan.getAnnOrderKeys(),
+                    olapScan.getAnnLimit(),
+                    olapScan.getTableAlias(),
+                    olapScan.getPartitionPrunablePredicates(),
+                    olapScan.isIncrementalScan(),
+                    olapScan.getScanParams(),
+                    olapScan.getTimeTravelTimestampMs())
+        ).toRule(RuleType.LOGICAL_OLAP_SCAN_TO_PHYSICAL_OLAP_SCAN_RULE);
     }
 
     /** convertDistribution */

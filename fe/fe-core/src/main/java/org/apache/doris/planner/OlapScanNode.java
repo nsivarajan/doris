@@ -281,8 +281,16 @@ public class OlapScanNode extends ScanNode {
         return timeTravelTimestampMs;
     }
 
+    public boolean hasTimeTravelTimestampMs() {
+        return timeTravelTimestampMs >= 0;
+    }
+
     public void setTimeTravelRetentionDays(int days) {
         this.timeTravelRetentionDays = days;
+    }
+
+    public int getTimeTravelRetentionDays() {
+        return timeTravelRetentionDays;
     }
 
     public Set<Integer> getExtraKeyColumnSlotIds() {

@@ -499,9 +499,17 @@ public class PropertyAnalyzerTest {
     }
 
     @Test
+    public void testAnalyzeTimeTravelConfig_unrelatedProperties_returnNull() throws AnalysisException {
+        // Map with unrelated keys → returns null, does not consume the keys
+        Map<String, String> props = new HashMap<>();
+        props.put("replication_num", "3");
+        Assert.assertNull(PropertyAnalyzer.analyzeTimeTravelConfig(props));
+        Assert.assertTrue("unrelated keys must not be consumed", props.containsKey("replication_num"));
+    }
+
+    @Test
     public void testAnalyzeTimeTravelConfig_enableTrue_coupled_rejects() {
-        // Coupled mode (not cloud) must be rejected.
-        // Config.isCloudMode() returns false in unit test context by default.
+        // Coupled mode (Config.isCloudMode() = false in unit tests) must be rejected.
         Map<String, String> props = new HashMap<>();
         props.put(PropertyAnalyzer.PROPERTIES_ENABLE_TIME_TRAVEL, "true");
         try {
@@ -549,6 +557,18 @@ public class PropertyAnalyzerTest {
     }
 
     @Test
+    public void testAnalyzeTimeTravelConfig_retentionDaysNegative() {
+        Map<String, String> props = new HashMap<>();
+        props.put(PropertyAnalyzer.PROPERTIES_TIME_TRAVEL_RETENTION_DAYS, "-5");
+        try {
+            PropertyAnalyzer.analyzeTimeTravelConfig(props);
+            Assert.fail("Expected AnalysisException for negative retention_days");
+        } catch (AnalysisException e) {
+            Assert.assertNotNull(e.getMessage());
+        }
+    }
+
+    @Test
     public void testAnalyzeTimeTravelConfig_retentionDaysNotANumber() {
         Map<String, String> props = new HashMap<>();
         props.put(PropertyAnalyzer.PROPERTIES_TIME_TRAVEL_RETENTION_DAYS, "thirty");
@@ -562,7 +582,7 @@ public class PropertyAnalyzerTest {
 
     @Test
     public void testTimeTravelConstants() {
-        // Guard against accidental constant changes
+        // Guard against accidental constant changes that would silently break behaviour.
         Assert.assertEquals(90, PropertyAnalyzer.TIME_TRAVEL_MAX_RETENTION_DAYS);
         Assert.assertEquals(7, PropertyAnalyzer.TIME_TRAVEL_DEFAULT_RETENTION_DAYS);
         Assert.assertEquals("enable_time_travel", PropertyAnalyzer.PROPERTIES_ENABLE_TIME_TRAVEL);

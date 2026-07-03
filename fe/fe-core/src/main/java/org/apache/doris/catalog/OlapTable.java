@@ -308,6 +308,13 @@ public class OlapTable extends Table implements MTMVRelatedTableIf, GsonPostProc
         return getOrCreatTableProperty().getTimeTravelRetentionDays();
     }
 
+    /** Called by InternalCatalog at CREATE TABLE time to store time travel properties. */
+    public void setTimeTravelConfigFromProperties(java.util.Map<String, String> properties) {
+        TableProperty tp = getOrCreatTableProperty();
+        tp.modifyTableProperties(properties);
+        tp.buildTimeTravelConfig();
+    }
+
     public void setIsBeingSynced(boolean isBeingSynced) {
         getOrCreatTableProperty().modifyTableProperties(PropertyAnalyzer.PROPERTIES_IS_BEING_SYNCED,
                 String.valueOf(isBeingSynced));

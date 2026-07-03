@@ -445,7 +445,7 @@ void MetaServiceImpl::get_version_at_time(::google::protobuf::RpcController* con
                                           ::google::protobuf::Closure* done) {
     RPC_PREPROCESS(get_version_at_time, get);
 
-    std::string instance_id = get_instance_id(resource_mgr_, request->cloud_unique_id());
+    instance_id = get_instance_id(resource_mgr_, request->cloud_unique_id());
     if (instance_id.empty()) {
         code = MetaServiceCode::INVALID_ARGUMENT;
         msg = "empty instance_id";
@@ -473,14 +473,15 @@ void MetaServiceImpl::get_version_at_time(::google::protobuf::RpcController* con
                 timestamp_ms, retention_days, earliest_ms);
         return;
     }
-    if (timestamp_ms > now_ms) {
+    // Allow 10-second clock skew between FE and meta-service to avoid spurious rejections.
+    static constexpr int64_t kClockSkewToleranceMs = 10000;
+    if (timestamp_ms > now_ms + kClockSkewToleranceMs) {
         code = MetaServiceCode::INVALID_ARGUMENT;
         msg = fmt::format("Requested timestamp {} ms is in the future (now={} ms).",
                           timestamp_ms, now_ms);
         return;
     }
 
-    std::unique_ptr<Transaction> txn;
     TxnErrorCode err = txn_kv_->create_txn(&txn);
     if (err != TxnErrorCode::TXN_OK) {
         code = MetaServiceCode::KV_TXN_CREATE_ERR;
@@ -556,6 +557,45 @@ void MetaServiceImpl::get_version_at_time(::google::protobuf::RpcController* con
     response->set_version_update_time_ms(update_time_ms);
 }
 
+void MetaServiceImpl::disable_time_travel_table(
+        ::google::protobuf::RpcController* controller,
+        const DisableTimeTravelTableRequest* request, DisableTimeTravelTableResponse* response,
+        ::google::protobuf::Closure* done) {
+    RPC_PREPROCESS(disable_time_travel_table, get, del);
+
+    if (!request->has_table_id() || request->table_id() <= 0) {
+        code = MetaServiceCode::INVALID_ARGUMENT;
+        msg = "missing or invalid table_id";
+        return;
+    }
+    int64_t table_id = request->table_id();
+
+    std::string key = time_travel_table_key({instance_id, table_id});
+    std::string val;
+    TxnErrorCode err = txn->get(key, &val);
+    if (err == TxnErrorCode::TXN_KEY_NOT_FOUND) {
+        // Already absent — idempotent success.
+        return;
+    }
+    if (err != TxnErrorCode::TXN_OK) {
+        code = cast_as<ErrCategory::READ>(err);
+        msg = fmt::format("failed to read time travel marker, table_id={} err={}", table_id, err);
+        return;
+    }
+
+    txn->remove(key);
+    err = txn->commit();
+    if (err != TxnErrorCode::TXN_OK) {
+        code = cast_as<ErrCategory::COMMIT>(err);
+        msg = fmt::format("failed to remove time travel marker, table_id={} err={}", table_id,
+                          err);
+        return;
+    }
+
+    resource_mgr_->unregister_time_travel_table(instance_id, table_id);
+    LOG(INFO) << "disabled time travel for table, instance=" << instance_id
+              << " table_id=" << table_id;
+}
 
 void MetaServiceImpl::batch_get_version(::google::protobuf::RpcController* controller,
                                         const GetVersionRequest* request,
@@ -1102,6 +1142,13 @@ void internal_create_tablet(const CreateTabletsRequest* request, MetaServiceCode
                   << " compact_stats_key=" << hex(compact_stats_key);
     }
 
+    // If this tablet belongs to a time-travel table, write the persistent marker key
+    // atomically with the tablet metadata. The ResourceManager uses this key for O(1)
+    // cache repopulation after a meta service restart (no tablet scan required).
+    if (tablet_meta.time_travel_retention_days() > 0) {
+        txn->put(time_travel_table_key({instance_id, tablet_meta.table_id()}), "");
+    }
+
     err = txn->commit();
     if (err != TxnErrorCode::TXN_OK) {
         code = cast_as<ErrCategory::COMMIT>(err);
@@ -1204,6 +1251,9 @@ void MetaServiceImpl::create_tablets(::google::protobuf::RpcController* controll
                                stats, is_versioned_write);
         if (code != MetaServiceCode::OK) {
             return;
+        }
+        if (tablet_meta.time_travel_retention_days() > 0) {
+            resource_mgr_->register_time_travel_table(instance_id, tablet_meta.table_id());
         }
     }
 }

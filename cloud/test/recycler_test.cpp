@@ -9663,7 +9663,7 @@ TEST(RecyclerTest, RecycleInstanceFilterReadsConfigDynamically) {
 // or test the static helper directly since recycler.cpp is included above.
 
 TEST(RecyclerTest, TimeTravelRetentionSeconds_normal) {
-    // 30 days → 30 * 86400
+    // 30 days -> 30 * 86400
     ASSERT_EQ(time_travel_retention_seconds(30), 30LL * 86400LL);
 }
 
@@ -9675,7 +9675,7 @@ TEST(RecyclerTest, TimeTravelRetentionSeconds_max_cap) {
 }
 
 TEST(RecyclerTest, TimeTravelRetentionSeconds_zero_or_negative) {
-    // 0 and negative → disabled
+    // 0 and negative -> disabled
     ASSERT_EQ(time_travel_retention_seconds(0), 0LL);
     ASSERT_EQ(time_travel_retention_seconds(-1), 0LL);
 }
@@ -9760,6 +9760,141 @@ TEST(RecyclerTest, CompactRowsetKeptForTimeTravelRetention) {
     auto err = txn->get(verify_key, &verify_val);
     ASSERT_EQ(err, TxnErrorCode::TXN_OK)
             << "COMPACT rowset should NOT be recycled within time travel retention window";
+}
+
+// Verify that a COMPACT rowset IS recycled once the time-travel retention window has expired.
+// Sets creation_time far enough in the past that even 30-day retention has elapsed.
+TEST(RecyclerTest, CompactRowsetRecycledAfterTimeTravelRetentionExpires) {
+    auto txn_kv = std::make_shared<MemTxnKv>();
+    ASSERT_EQ(txn_kv->init(), 0);
+
+    InstanceInfoPB instance;
+    instance.set_instance_id(instance_id);
+    auto obj_info = instance.add_obj_info();
+    obj_info->set_id("tt_expired_test");
+    obj_info->set_ak("ak"); obj_info->set_sk("sk");
+    obj_info->set_endpoint("endpoint"); obj_info->set_region("region");
+    obj_info->set_bucket("bucket"); obj_info->set_prefix("tt_expired_test");
+
+    InstanceRecycler recycler(txn_kv, instance);
+    ASSERT_EQ(recycler.init(), 0);
+
+    const int64_t table_id = 9002;
+    const int64_t tablet_id = 90020;
+
+    // Write tablet meta with 30-day retention
+    {
+        std::unique_ptr<Transaction> txn;
+        ASSERT_EQ(txn_kv->create_txn(&txn), TxnErrorCode::TXN_OK);
+        doris::TabletMetaCloudPB tablet_meta;
+        tablet_meta.set_table_id(table_id);
+        tablet_meta.set_tablet_id(tablet_id);
+        tablet_meta.set_time_travel_retention_days(30);
+        std::string val;
+        ASSERT_TRUE(tablet_meta.SerializeToString(&val));
+        std::string key;
+        meta_tablet_key({instance_id, table_id, 0, 0, tablet_id}, &key);
+        txn->put(key, val);
+        ASSERT_EQ(txn->commit(), TxnErrorCode::TXN_OK);
+    }
+
+    // Write a COMPACT rowset created 31 days ago — past the 30-day retention
+    const std::string rowset_id = "rowset_tt_expired";
+    {
+        std::unique_ptr<Transaction> txn;
+        ASSERT_EQ(txn_kv->create_txn(&txn), TxnErrorCode::TXN_OK);
+        std::string key;
+        recycle_rowset_key({instance_id, tablet_id, rowset_id}, &key);
+        RecycleRowsetPB rowset_pb;
+        int64_t now = std::chrono::duration_cast<std::chrono::seconds>(
+                              std::chrono::system_clock::now().time_since_epoch()).count();
+        rowset_pb.set_creation_time(now - 31LL * 86400LL); // 31 days ago
+        rowset_pb.set_type(RecycleRowsetPB::COMPACT);
+        rowset_pb.mutable_rowset_meta()->set_tablet_id(tablet_id);
+        rowset_pb.mutable_rowset_meta()->set_table_id(table_id);
+        rowset_pb.mutable_rowset_meta()->set_rowset_id_v2(rowset_id);
+        std::string val;
+        ASSERT_TRUE(rowset_pb.SerializeToString(&val));
+        txn->put(key, val);
+        ASSERT_EQ(txn->commit(), TxnErrorCode::TXN_OK);
+    }
+
+    ASSERT_EQ(recycler.recycle_rowsets(), 0);
+
+    // Key should be gone — retention expired
+    std::unique_ptr<Transaction> txn;
+    ASSERT_EQ(txn_kv->create_txn(&txn), TxnErrorCode::TXN_OK);
+    std::string key;
+    recycle_rowset_key({instance_id, tablet_id, rowset_id}, &key);
+    std::string val;
+    ASSERT_EQ(txn->get(key, &val), TxnErrorCode::TXN_KEY_NOT_FOUND)
+            << "COMPACT rowset should be recycled after time travel retention expires";
+}
+
+// Verify that a DROP-type rowset on a TT table is also held during retention.
+TEST(RecyclerTest, DropRowsetKeptForTimeTravelRetention) {
+    auto txn_kv = std::make_shared<MemTxnKv>();
+    ASSERT_EQ(txn_kv->init(), 0);
+
+    InstanceInfoPB instance;
+    instance.set_instance_id(instance_id);
+    auto obj_info = instance.add_obj_info();
+    obj_info->set_id("tt_drop_test");
+    obj_info->set_ak("ak"); obj_info->set_sk("sk");
+    obj_info->set_endpoint("endpoint"); obj_info->set_region("region");
+    obj_info->set_bucket("bucket"); obj_info->set_prefix("tt_drop_test");
+
+    InstanceRecycler recycler(txn_kv, instance);
+    ASSERT_EQ(recycler.init(), 0);
+
+    const int64_t table_id = 9003;
+    const int64_t tablet_id = 90030;
+
+    {
+        std::unique_ptr<Transaction> txn;
+        ASSERT_EQ(txn_kv->create_txn(&txn), TxnErrorCode::TXN_OK);
+        doris::TabletMetaCloudPB tablet_meta;
+        tablet_meta.set_table_id(table_id);
+        tablet_meta.set_tablet_id(tablet_id);
+        tablet_meta.set_time_travel_retention_days(30);
+        std::string val;
+        ASSERT_TRUE(tablet_meta.SerializeToString(&val));
+        std::string key;
+        meta_tablet_key({instance_id, table_id, 0, 0, tablet_id}, &key);
+        txn->put(key, val);
+        ASSERT_EQ(txn->commit(), TxnErrorCode::TXN_OK);
+    }
+
+    const std::string rowset_id = "rowset_drop_tt";
+    {
+        std::unique_ptr<Transaction> txn;
+        ASSERT_EQ(txn_kv->create_txn(&txn), TxnErrorCode::TXN_OK);
+        std::string key;
+        recycle_rowset_key({instance_id, tablet_id, rowset_id}, &key);
+        RecycleRowsetPB rowset_pb;
+        int64_t now = std::chrono::duration_cast<std::chrono::seconds>(
+                              std::chrono::system_clock::now().time_since_epoch()).count();
+        rowset_pb.set_creation_time(now); // just created
+        rowset_pb.set_type(RecycleRowsetPB::DROP); // DROP type, not COMPACT
+        rowset_pb.mutable_rowset_meta()->set_tablet_id(tablet_id);
+        rowset_pb.mutable_rowset_meta()->set_table_id(table_id);
+        rowset_pb.mutable_rowset_meta()->set_rowset_id_v2(rowset_id);
+        std::string val;
+        ASSERT_TRUE(rowset_pb.SerializeToString(&val));
+        txn->put(key, val);
+        ASSERT_EQ(txn->commit(), TxnErrorCode::TXN_OK);
+    }
+
+    ASSERT_EQ(recycler.recycle_rowsets(), 0);
+
+    // DROP rowset within retention must also be kept
+    std::unique_ptr<Transaction> txn;
+    ASSERT_EQ(txn_kv->create_txn(&txn), TxnErrorCode::TXN_OK);
+    std::string key;
+    recycle_rowset_key({instance_id, tablet_id, rowset_id}, &key);
+    std::string val;
+    ASSERT_EQ(txn->get(key, &val), TxnErrorCode::TXN_OK)
+            << "DROP rowset should NOT be recycled within time travel retention window";
 }
 
 } // namespace doris::cloud

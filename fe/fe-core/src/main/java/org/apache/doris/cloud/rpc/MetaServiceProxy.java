@@ -363,6 +363,12 @@ public class MetaServiceProxy {
         return executeWithMetrics("getVersionAtTime", (client) -> client.getVersionAtTime(request));
     }
 
+    public Cloud.DisableTimeTravelTableResponse disableTimeTravelTable(
+            Cloud.DisableTimeTravelTableRequest request) throws RpcException {
+        return executeWithMetrics("disableTimeTravelTable",
+                (client) -> client.disableTimeTravelTable(request));
+    }
+
     public Cloud.CreateTabletsResponse createTablets(Cloud.CreateTabletsRequest request) throws RpcException {
         return executeWithMetrics("createTablets", (client) -> client.createTablets(request));
     }

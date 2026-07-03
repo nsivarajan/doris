@@ -48,6 +48,15 @@ namespace doris::cloud {
 
 static constexpr std::string_view kMetaSyncPointDummyKey = "__meta_service_sync_point_dummy_key__";
 
+// Returns true if a versioned partition key should be written for this (instance, table) pair.
+// True when instance-level versioned writes are enabled OR the table has time travel enabled.
+static inline bool should_write_versioned(bool is_versioned_write,
+                                          ResourceManager* resource_mgr,
+                                          const std::string& instance_id, int64_t table_id) {
+    return is_versioned_write ||
+           resource_mgr->is_table_time_travel_enabled(instance_id, table_id);
+}
+
 struct TableStats {
     int64_t updated_row_count = 0;
 
@@ -1821,7 +1830,11 @@ void MetaServiceImpl::commit_txn_immediately(
 
             VLOG_DEBUG << " table_id=" << table_id << " partition_id=" << partition_id;
 
-            if (is_versioned_write) {
+            // Write versioned partition key if: (a) instance-level versioned writes enabled,
+            // OR (b) this specific table has time travel enabled (per-table Option 2).
+            bool write_versioned = should_write_versioned(is_versioned_write, resource_mgr_.get(),
+                                                           instance_id, table_id);
+            if (write_versioned) {
                 std::string partition_version_key =
                         versioned::partition_version_key({instance_id, partition_id});
                 versioned_put(txn.get(), partition_version_key, ver_val);
@@ -2500,7 +2513,8 @@ void MetaServiceImpl::commit_txn_eventually(
             VLOG_DEBUG << "txn_id=" << txn_id << " table_id=" << table_id
                        << " partition_id=" << partition_id << " version=" << version;
 
-            if (is_versioned_write) {
+            if (should_write_versioned(is_versioned_write, resource_mgr_.get(),
+                                       instance_id, table_id)) {
                 std::string partition_version_key =
                         versioned::partition_version_key({instance_id, partition_id});
                 versioned_put(txn.get(), partition_version_key, ver_val);
@@ -3025,7 +3039,8 @@ void MetaServiceImpl::commit_txn_with_sub_txn(const CommitTxnRequest* request,
             VLOG_DEBUG << "txn_id=" << txn_id << " table_id=" << table_id
                        << " partition_id=" << partition_id << " version=" << new_version;
 
-            if (is_versioned_write) {
+            if (should_write_versioned(is_versioned_write, resource_mgr_.get(),
+                                       instance_id, table_id)) {
                 std::string partition_version_key =
                         versioned::partition_version_key({instance_id, partition_id});
                 versioned_put(txn.get(), partition_version_key, ver_val);

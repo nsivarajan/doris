@@ -668,7 +668,6 @@ public abstract class ScanNode extends PlanNode implements SplitGenerator {
             if (scanNode.hasTimeTravelTimestampMs()) {
                 // Time travel scan: collect partitions for batch timestamp resolution.
                 timeTravelScanNodes.add(scanNode);
-                OlapTable table = scanNode.getOlapTable();
                 long timestampMs = scanNode.getTimeTravelTimestampMs();
                 int retentionDays = scanNode.getTimeTravelRetentionDays() > 0
                         ? scanNode.getTimeTravelRetentionDays() : 90;

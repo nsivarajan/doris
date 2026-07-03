@@ -1645,7 +1645,7 @@ static int64_t time_travel_retention_seconds(int32_t retention_days) {
         return 0;
     }
     int64_t seconds = static_cast<int64_t>(retention_days) * 86400LL;
-    return std::min(seconds, 90LL * 86400LL);
+    return std::min(seconds, static_cast<int64_t>(90LL * 86400LL));
 }
 
 int64_t calculate_partition_expired_time(

@@ -3018,6 +3018,16 @@ public class SchemaChangeHandler extends AlterHandler {
             olapTable.writeUnlock();
         }
 
+        // In cloud mode, if time travel is being disabled, remove the FDB marker key so the
+        // meta-service stops writing versioned partition keys for this table.
+        // Best-effort: FE metadata is already committed. RPC failure is logged but not fatal —
+        // the marker key being present causes no correctness issue once the FE flag is false.
+        if (Config.isCloudMode()
+                && "false".equalsIgnoreCase(
+                        properties.get(PropertyAnalyzer.PROPERTIES_ENABLE_TIME_TRAVEL))) {
+            InternalCatalog.disableTimeTravelMarkerIfNeeded(olapTable);
+        }
+
         // after modifyTableProperties, buildPartitionRetentionCount has been done.
         DynamicPartitionUtil.registerOrRemoveDynamicPartitionTable(db.getId(), olapTable, false);
     }

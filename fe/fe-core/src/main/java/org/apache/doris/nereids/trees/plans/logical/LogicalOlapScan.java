@@ -405,7 +405,7 @@ public class LogicalOlapScan extends LogicalCatalogRelation implements OlapScan,
      */
     public LogicalOlapScan withPartitionPrunablePredicates(
             Optional<PartitionPrunablePredicate> partitionPrunablePredicates) {
-        LogicalOlapScan _ttCopy = AbstractPlan.copyWithSameId(this, () ->
+        LogicalOlapScan ttCopy = AbstractPlan.copyWithSameId(this, () ->
                 new LogicalOlapScan(relationId, (Table) table, qualifier,
                 groupExpression, Optional.of(getLogicalProperties()),
                 selectedPartitionIds, partitionPruned, hasPartitionPredicate, selectedTabletIds,
@@ -414,8 +414,8 @@ public class LogicalOlapScan extends LogicalCatalogRelation implements OlapScan,
                 colToSubPathsMap, manuallySpecifiedTabletIds, operativeSlots, virtualColumns,
                 scoreOrderKeys, scoreLimit, scoreRangeInfo, annOrderKeys, annLimit, tableAlias,
                 partitionPrunablePredicates, scanParams));
-        _ttCopy.timeTravelTimestampMs = this.timeTravelTimestampMs;
-        return _ttCopy;
+        ttCopy.timeTravelTimestampMs = this.timeTravelTimestampMs;
+        return ttCopy;
     }
 
     @Override
@@ -497,7 +497,7 @@ public class LogicalOlapScan extends LogicalCatalogRelation implements OlapScan,
 
     @Override
     public LogicalOlapScan withGroupExpression(Optional<GroupExpression> groupExpression) {
-        LogicalOlapScan _ttCopy = AbstractPlan.copyWithSameId(this, () ->
+        LogicalOlapScan ttCopy = AbstractPlan.copyWithSameId(this, () ->
                 new LogicalOlapScan(relationId, (Table) table, qualifier,
                 groupExpression, Optional.of(getLogicalProperties()),
                 selectedPartitionIds, partitionPruned, hasPartitionPredicate, selectedTabletIds,
@@ -506,14 +506,14 @@ public class LogicalOlapScan extends LogicalCatalogRelation implements OlapScan,
                 colToSubPathsMap, manuallySpecifiedTabletIds, operativeSlots, virtualColumns,
                 scoreOrderKeys, scoreLimit, scoreRangeInfo, annOrderKeys, annLimit, tableAlias,
                 partitionPrunablePredicates, scanParams));
-        _ttCopy.timeTravelTimestampMs = this.timeTravelTimestampMs;
-        return _ttCopy;
+        ttCopy.timeTravelTimestampMs = this.timeTravelTimestampMs;
+        return ttCopy;
     }
 
     @Override
     public Plan withGroupExprLogicalPropChildren(Optional<GroupExpression> groupExpression,
             Optional<LogicalProperties> logicalProperties, List<Plan> children) {
-        return AbstractPlan.copyWithSameId(this, () ->
+        LogicalOlapScan result = (LogicalOlapScan) AbstractPlan.copyWithSameId(this, () ->
                 new LogicalOlapScan(relationId, (Table) table, qualifier, groupExpression, logicalProperties,
                 selectedPartitionIds, partitionPruned, hasPartitionPredicate, selectedTabletIds,
                 selectedIndexId, indexSelected, preAggStatus, manuallySpecifiedPartitions,
@@ -521,6 +521,8 @@ public class LogicalOlapScan extends LogicalCatalogRelation implements OlapScan,
                 colToSubPathsMap, manuallySpecifiedTabletIds, operativeSlots, virtualColumns,
                 scoreOrderKeys, scoreLimit, scoreRangeInfo, annOrderKeys, annLimit, tableAlias,
                 partitionPrunablePredicates, scanParams));
+        result.timeTravelTimestampMs = this.timeTravelTimestampMs;
+        return result;
     }
 
     /**
@@ -535,7 +537,7 @@ public class LogicalOlapScan extends LogicalCatalogRelation implements OlapScan,
      */
     public LogicalOlapScan withSelectedPartitionIds(List<Long> selectedPartitionIds,
             boolean hasPartitionPredicate) {
-        return AbstractPlan.copyWithSameId(this, () ->
+        LogicalOlapScan ttCopy = AbstractPlan.copyWithSameId(this, () ->
                 new LogicalOlapScan(relationId, (Table) table, qualifier,
                 Optional.empty(), Optional.of(getLogicalProperties()),
                 selectedPartitionIds, true, hasPartitionPredicate, selectedTabletIds,
@@ -544,6 +546,8 @@ public class LogicalOlapScan extends LogicalCatalogRelation implements OlapScan,
                 colToSubPathsMap, manuallySpecifiedTabletIds, operativeSlots, virtualColumns,
                 scoreOrderKeys, scoreLimit, scoreRangeInfo, annOrderKeys, annLimit, tableAlias,
                 partitionPrunablePredicates, scanParams));
+        ttCopy.timeTravelTimestampMs = this.timeTravelTimestampMs;
+        return ttCopy;
     }
 
     /**
@@ -552,7 +556,7 @@ public class LogicalOlapScan extends LogicalCatalogRelation implements OlapScan,
      * @return scan with materialized index id
      */
     public LogicalOlapScan withMaterializedIndexSelected(long indexId) {
-        LogicalOlapScan _ttCopy = AbstractPlan.copyWithSameId(this, () ->
+        LogicalOlapScan ttCopy = AbstractPlan.copyWithSameId(this, () ->
                 new LogicalOlapScan(relationId, (Table) table, qualifier,
                 Optional.empty(), Optional.of(getLogicalProperties()),
                 selectedPartitionIds, partitionPruned, hasPartitionPredicate, selectedTabletIds,
@@ -560,15 +564,15 @@ public class LogicalOlapScan extends LogicalCatalogRelation implements OlapScan,
                 cachedOutput, tableSample, directMvScan, colToSubPathsMap, manuallySpecifiedTabletIds,
                 operativeSlots, virtualColumns, scoreOrderKeys, scoreLimit, scoreRangeInfo,
                 annOrderKeys, annLimit, tableAlias, partitionPrunablePredicates, scanParams));
-        _ttCopy.timeTravelTimestampMs = this.timeTravelTimestampMs;
-        return _ttCopy;
+        ttCopy.timeTravelTimestampMs = this.timeTravelTimestampMs;
+        return ttCopy;
     }
 
     /**
      * withSelectedTabletIds
      */
     public LogicalOlapScan withSelectedTabletIds(List<Long> selectedTabletIds) {
-        LogicalOlapScan _ttCopy = AbstractPlan.copyWithSameId(this, () ->
+        LogicalOlapScan ttCopy = AbstractPlan.copyWithSameId(this, () ->
                 new LogicalOlapScan(relationId, (Table) table, qualifier,
                 Optional.empty(), Optional.of(getLogicalProperties()),
                 selectedPartitionIds, partitionPruned, hasPartitionPredicate, selectedTabletIds,
@@ -577,8 +581,8 @@ public class LogicalOlapScan extends LogicalCatalogRelation implements OlapScan,
                 colToSubPathsMap, manuallySpecifiedTabletIds, operativeSlots, virtualColumns, scoreOrderKeys,
                 scoreLimit, scoreRangeInfo, annOrderKeys, annLimit, tableAlias, partitionPrunablePredicates,
                 scanParams));
-        _ttCopy.timeTravelTimestampMs = this.timeTravelTimestampMs;
-        return _ttCopy;
+        ttCopy.timeTravelTimestampMs = this.timeTravelTimestampMs;
+        return ttCopy;
     }
 
     /**
@@ -602,7 +606,7 @@ public class LogicalOlapScan extends LogicalCatalogRelation implements OlapScan,
      * constructor
      */
     public LogicalOlapScan withColToSubPathsMap(Map<String, Set<List<String>>> colToSubPathsMap) {
-        LogicalOlapScan _ttCopy = AbstractPlan.copyWithSameId(this, () ->
+        LogicalOlapScan ttCopy = AbstractPlan.copyWithSameId(this, () ->
                 new LogicalOlapScan(relationId, (Table) table, qualifier,
                 Optional.empty(), Optional.empty(),
                 selectedPartitionIds, partitionPruned, hasPartitionPredicate, selectedTabletIds,
@@ -611,15 +615,15 @@ public class LogicalOlapScan extends LogicalCatalogRelation implements OlapScan,
                 colToSubPathsMap, manuallySpecifiedTabletIds, operativeSlots, virtualColumns,
                 scoreOrderKeys, scoreLimit, scoreRangeInfo, annOrderKeys, annLimit, tableAlias,
                 partitionPrunablePredicates, scanParams));
-        _ttCopy.timeTravelTimestampMs = this.timeTravelTimestampMs;
-        return _ttCopy;
+        ttCopy.timeTravelTimestampMs = this.timeTravelTimestampMs;
+        return ttCopy;
     }
 
     /**
      * constructor
      */
     public LogicalOlapScan withManuallySpecifiedTabletIds(List<Long> manuallySpecifiedTabletIds) {
-        LogicalOlapScan _ttCopy = AbstractPlan.copyWithSameId(this, () ->
+        LogicalOlapScan ttCopy = AbstractPlan.copyWithSameId(this, () ->
                 new LogicalOlapScan(relationId, (Table) table, qualifier,
                 Optional.empty(), Optional.of(getLogicalProperties()),
                 selectedPartitionIds, partitionPruned, hasPartitionPredicate, selectedTabletIds,
@@ -628,14 +632,14 @@ public class LogicalOlapScan extends LogicalCatalogRelation implements OlapScan,
                 colToSubPathsMap, manuallySpecifiedTabletIds, operativeSlots, virtualColumns,
                 scoreOrderKeys, scoreLimit, scoreRangeInfo, annOrderKeys, annLimit, tableAlias,
                 partitionPrunablePredicates, scanParams));
-        _ttCopy.timeTravelTimestampMs = this.timeTravelTimestampMs;
-        return _ttCopy;
+        ttCopy.timeTravelTimestampMs = this.timeTravelTimestampMs;
+        return ttCopy;
     }
 
     @Override
     public LogicalOlapScan withRelationId(RelationId relationId) {
         // we have to set partitionPruned to false, so that mtmv rewrite can prevent deadlock when rewriting union
-        LogicalOlapScan _ttCopy = AbstractPlan.copyWithSameId(this, () ->
+        LogicalOlapScan ttCopy = AbstractPlan.copyWithSameId(this, () ->
                 new LogicalOlapScan(relationId, (Table) table, qualifier,
                 Optional.empty(), Optional.empty(),
                 selectedPartitionIds, false, false, selectedTabletIds,
@@ -644,13 +648,13 @@ public class LogicalOlapScan extends LogicalCatalogRelation implements OlapScan,
                 colToSubPathsMap, selectedTabletIds, operativeSlots, virtualColumns, scoreOrderKeys,
                 scoreLimit, scoreRangeInfo, annOrderKeys, annLimit, tableAlias, partitionPrunablePredicates,
                 scanParams));
-        _ttCopy.timeTravelTimestampMs = this.timeTravelTimestampMs;
-        return _ttCopy;
+        ttCopy.timeTravelTimestampMs = this.timeTravelTimestampMs;
+        return ttCopy;
     }
 
     @Override
     public LogicalOlapScan withTableAlias(String tableAlias) {
-        LogicalOlapScan _ttCopy = AbstractPlan.copyWithSameId(this, () ->
+        LogicalOlapScan ttCopy = AbstractPlan.copyWithSameId(this, () ->
                 new LogicalOlapScan(relationId, (Table) table, qualifier,
                 Optional.empty(), Optional.of(getLogicalProperties()),
                 selectedPartitionIds, partitionPruned, hasPartitionPredicate, selectedTabletIds,
@@ -659,8 +663,8 @@ public class LogicalOlapScan extends LogicalCatalogRelation implements OlapScan,
                 colToSubPathsMap, manuallySpecifiedTabletIds, operativeSlots, virtualColumns,
                 scoreOrderKeys, scoreLimit, scoreRangeInfo, annOrderKeys, annLimit, tableAlias,
                 partitionPrunablePredicates, scanParams));
-        _ttCopy.timeTravelTimestampMs = this.timeTravelTimestampMs;
-        return _ttCopy;
+        ttCopy.timeTravelTimestampMs = this.timeTravelTimestampMs;
+        return ttCopy;
     }
 
     /**
@@ -674,7 +678,7 @@ public class LogicalOlapScan extends LogicalCatalogRelation implements OlapScan,
         List<Slot> output = Lists.newArrayList(logicalProperties.getOutput());
         output.addAll(virtualColumns.stream().map(NamedExpression::toSlot).collect(Collectors.toList()));
         LogicalProperties finalLogicalProperties = new LogicalProperties(() -> output, this::computeDataTrait);
-        return AbstractPlan.copyWithSameId(this, () ->
+        LogicalOlapScan ttCopy = AbstractPlan.copyWithSameId(this, () ->
                 new LogicalOlapScan(relationId, (Table) table, qualifier,
                 groupExpression, Optional.of(finalLogicalProperties),
                 selectedPartitionIds, partitionPruned, hasPartitionPredicate, selectedTabletIds,
@@ -682,6 +686,8 @@ public class LogicalOlapScan extends LogicalCatalogRelation implements OlapScan,
                 hints, cacheSlotWithSlotName, cachedOutput, tableSample, directMvScan, colToSubPathsMap,
                 manuallySpecifiedTabletIds, operativeSlots, virtualColumns, scoreOrderKeys, scoreLimit,
                 scoreRangeInfo, annOrderKeys, annLimit, tableAlias, partitionPrunablePredicates, scanParams));
+        ttCopy.timeTravelTimestampMs = this.timeTravelTimestampMs;
+        return ttCopy;
     }
 
     /**
@@ -698,13 +704,15 @@ public class LogicalOlapScan extends LogicalCatalogRelation implements OlapScan,
                 .addAll(this.virtualColumns)
                 .addAll(additionalVirtualColumns)
                 .build();
-        return new LogicalOlapScan(relationId, (Table) table, qualifier,
+        LogicalOlapScan ttCopy = new LogicalOlapScan(relationId, (Table) table, qualifier,
                 groupExpression, Optional.of(logicalProperties),
                 selectedPartitionIds, partitionPruned, hasPartitionPredicate, selectedTabletIds,
                 selectedIndexId, indexSelected, preAggStatus, manuallySpecifiedPartitions,
                 hints, cacheSlotWithSlotName, cachedOutput, tableSample, directMvScan, colToSubPathsMap,
                 manuallySpecifiedTabletIds, operativeSlots, mergedVirtualColumns, scoreOrderKeys, scoreLimit,
                 scoreRangeInfo, annOrderKeys, annLimit, tableAlias, partitionPrunablePredicates, scanParams);
+        ttCopy.timeTravelTimestampMs = this.timeTravelTimestampMs;
+        return ttCopy;
     }
 
     /**
@@ -727,13 +735,15 @@ public class LogicalOlapScan extends LogicalCatalogRelation implements OlapScan,
                 .addAll(this.virtualColumns)
                 .addAll(additionalVirtualColumns)
                 .build();
-        return new LogicalOlapScan(relationId, (Table) table, qualifier,
+        LogicalOlapScan ttCopy = new LogicalOlapScan(relationId, (Table) table, qualifier,
                 groupExpression, Optional.of(logicalProperties),
                 selectedPartitionIds, partitionPruned, hasPartitionPredicate, selectedTabletIds,
                 selectedIndexId, indexSelected, preAggStatus, manuallySpecifiedPartitions,
                 hints, cacheSlotWithSlotName, cachedOutput, tableSample, directMvScan, colToSubPathsMap,
                 manuallySpecifiedTabletIds, operativeSlots, mergedVirtualColumns, scoreOrderKeys, scoreLimit,
                 scoreRangeInfo, annOrderKeys, annLimit, tableAlias, partitionPrunablePredicates, scanParams);
+        ttCopy.timeTravelTimestampMs = this.timeTravelTimestampMs;
+        return ttCopy;
     }
 
     @Override
@@ -1084,7 +1094,7 @@ public class LogicalOlapScan extends LogicalCatalogRelation implements OlapScan,
 
     @Override
     public CatalogRelation withOperativeSlots(Collection<Slot> operativeSlots) {
-        return AbstractPlan.copyWithSameId(this, () ->
+        LogicalOlapScan ttCopy = AbstractPlan.copyWithSameId(this, () ->
                 new LogicalOlapScan(relationId, (Table) table, qualifier,
                 groupExpression, Optional.of(getLogicalProperties()),
                 selectedPartitionIds, partitionPruned, hasPartitionPredicate, selectedTabletIds,
@@ -1092,6 +1102,8 @@ public class LogicalOlapScan extends LogicalCatalogRelation implements OlapScan,
                 hints, cacheSlotWithSlotName, cachedOutput, tableSample, directMvScan, colToSubPathsMap,
                 manuallySpecifiedTabletIds, operativeSlots, virtualColumns, scoreOrderKeys, scoreLimit,
                 scoreRangeInfo, annOrderKeys, annLimit, tableAlias, partitionPrunablePredicates, scanParams));
+        ttCopy.timeTravelTimestampMs = this.timeTravelTimestampMs;
+        return ttCopy;
     }
 
     @VisibleForTesting
@@ -1166,7 +1178,7 @@ public class LogicalOlapScan extends LogicalCatalogRelation implements OlapScan,
 
     /** withCachedOutput */
     public LogicalOlapScan withCachedOutput(List<Slot> outputSlots) {
-        LogicalOlapScan _ttCopy = AbstractPlan.copyWithSameId(this, () ->
+        LogicalOlapScan ttCopy = AbstractPlan.copyWithSameId(this, () ->
                 new LogicalOlapScan(relationId, (Table) table, qualifier,
                 groupExpression, Optional.empty(),
                 selectedPartitionIds, partitionPruned, hasPartitionPredicate, selectedTabletIds,
@@ -1174,13 +1186,13 @@ public class LogicalOlapScan extends LogicalCatalogRelation implements OlapScan,
                 hints, cacheSlotWithSlotName, Optional.of(outputSlots), tableSample, directMvScan, colToSubPathsMap,
                 manuallySpecifiedTabletIds, operativeSlots, virtualColumns, scoreOrderKeys, scoreLimit,
                 scoreRangeInfo, annOrderKeys, annLimit, tableAlias, partitionPrunablePredicates, scanParams));
-        _ttCopy.timeTravelTimestampMs = this.timeTravelTimestampMs;
-        return _ttCopy;
+        ttCopy.timeTravelTimestampMs = this.timeTravelTimestampMs;
+        return ttCopy;
     }
 
     /** withTableScanParams */
     public LogicalOlapScan withTableScanParams(TableScanParams scanParams) {
-        LogicalOlapScan _ttCopy = AbstractPlan.copyWithSameId(this, () ->
+        LogicalOlapScan ttCopy = AbstractPlan.copyWithSameId(this, () ->
                 new LogicalOlapScan(relationId, (Table) table, qualifier,
                         groupExpression, Optional.empty(),
                         selectedPartitionIds, partitionPruned, hasPartitionPredicate, selectedTabletIds,
@@ -1189,8 +1201,8 @@ public class LogicalOlapScan extends LogicalCatalogRelation implements OlapScan,
                         manuallySpecifiedTabletIds, operativeSlots, virtualColumns, scoreOrderKeys, scoreLimit,
                         scoreRangeInfo, annOrderKeys, annLimit, tableAlias, partitionPrunablePredicates,
                         Optional.of(scanParams)));
-        _ttCopy.timeTravelTimestampMs = this.timeTravelTimestampMs;
-        return _ttCopy;
+        ttCopy.timeTravelTimestampMs = this.timeTravelTimestampMs;
+        return ttCopy;
     }
 
     public long getTimeTravelTimestampMs() {
