@@ -25,7 +25,6 @@ import org.apache.doris.catalog.OlapTable;
 import org.apache.doris.catalog.PartitionInfo;
 import org.apache.doris.catalog.Type;
 import org.apache.doris.common.IdGenerator;
-import org.apache.doris.nereids.trees.expressions.NamedExpression;
 import org.apache.doris.nereids.trees.plans.PreAggStatus;
 import org.apache.doris.nereids.trees.plans.RelationId;
 
@@ -52,6 +51,7 @@ public class LogicalOlapScanTimeTravelTest {
 
     private static OlapTable testTable;
     private static final IdGenerator<RelationId> ID_GEN = RelationId.createGenerator();
+    private static final long TS = 1_700_000_000_000L;
 
     @BeforeAll
     public static void setup() {
@@ -68,8 +68,6 @@ public class LogicalOlapScanTimeTravelTest {
     private static LogicalOlapScan newScan() {
         return new LogicalOlapScan(ID_GEN.getNextId(), testTable, ImmutableList.of("db"));
     }
-
-    private static final long TS = 1_700_000_000_000L;
 
     // -------------------------------------------------------------------------
     // Basic field behaviour
@@ -234,13 +232,13 @@ public class LogicalOlapScanTimeTravelTest {
 
     @Test
     public void testFullOptimizerChain_preservesTimeTravel() {
-        LogicalOlapScan after = newScan()
+        LogicalOlapScan step = newScan()
                 .withTimeTravelTimestampMs(TS)
                 .withPreAggStatus(PreAggStatus.off("test"))
                 .withSelectedPartitionIds(ImmutableList.of(1L, 2L))
                 .withSelectedTabletIds(ImmutableList.of(10L, 20L))
-                .withVirtualColumns(ImmutableList.of())
-                .withOperativeSlots(Collections.emptyList());
+                .withVirtualColumns(ImmutableList.of());
+        LogicalOlapScan after = (LogicalOlapScan) step.withOperativeSlots(Collections.emptyList());
         Assertions.assertEquals(TS, after.getTimeTravelTimestampMs(),
                 "full optimizer chain must preserve timeTravelTimestampMs end-to-end");
     }

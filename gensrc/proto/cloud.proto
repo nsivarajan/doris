@@ -1273,6 +1273,7 @@ message DisableTimeTravelTableRequest {
     optional string cloud_unique_id = 1;
     optional string instance_id     = 2;
     optional int64  table_id        = 3;
+    optional string request_ip      = 4;
 };
 
 message DisableTimeTravelTableResponse {

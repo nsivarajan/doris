@@ -259,7 +259,8 @@ private:
     // instance_id -> MultiVersionStatus
     std::unordered_map<std::string, MultiVersionStatus> instance_multi_version_status_;
     // Per-table time travel registry: instance_id → set of table_ids with time travel enabled.
-    std::unordered_map<std::string, std::unordered_set<int64_t>> time_travel_tables_;
+    // Mutable because is_table_time_travel_enabled() lazily populates it on cache miss.
+    mutable std::unordered_map<std::string, std::unordered_set<int64_t>> time_travel_tables_;
     // Negative cache: tables confirmed NOT to have time travel via FDB lookup.
     // Prevents repeated FDB reads after meta service restart for non-TT tables.
     mutable std::unordered_map<std::string, std::unordered_set<int64_t>> time_travel_neg_cache_;
