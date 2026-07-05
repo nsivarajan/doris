@@ -406,19 +406,47 @@ static int64_t resolve_version_at_time(Transaction* txn, const std::string& inst
     if (partition_id == std::numeric_limits<int64_t>::max()) {
         return -1;
     }
-    std::string part_key_base = versioned::partition_version_key({instance_id, partition_id});
-    VersionedRangeGetOptions opts;
-    opts.snapshot_version = Versionstamp::max();
-    auto iter = versioned_get_range(txn, part_key_base,
-                                    versioned::partition_version_key({instance_id, partition_id + 1}),
-                                    opts);
-    if (!iter) {
-        return -1;
-    }
-    while (iter->has_next()) {
-        auto [key, vs, value] = *iter->next();
+    // Scan all versioned partition-version keys for this partition in reverse
+    // (newest Versionstamp first) and return the first one whose wall-clock
+    // update_time_ms is at or before the requested timestamp_ms.
+    //
+    // Key layout (written by versioned_put):
+    //   0x03 "version" {instance_id} "partition" {partition_id} {10-byte-versionstamp}
+    //
+    // We need begin < end for a reverse scan (FDB iterates from end down to begin).
+    // Use the raw partition_version_key prefix (without any versionstamp suffix) as begin,
+    // and append Versionstamp::max() to form the end so the scan covers all versionstamps
+    // for this partition_id.
+    std::string begin_key = versioned::partition_version_key({instance_id, partition_id});
+    std::string end_key = begin_key;
+    encode_versionstamp(Versionstamp::max(), &end_key);
+
+    FullRangeGetOptions options;
+    options.reverse = true;
+    options.begin_key_selector = RangeKeySelector::FIRST_GREATER_OR_EQUAL;
+    options.end_key_selector   = RangeKeySelector::FIRST_GREATER_THAN;
+
+    std::unique_ptr<FullRangeGetIterator> iter =
+            txn->full_range_get(begin_key, end_key, std::move(options));
+
+    while (iter->is_valid()) {
+        auto item = iter->next();
+        if (!item.has_value()) break;
+
+        std::string_view raw_key   = item->first;
+        std::string_view raw_value = item->second;
+
+        // Strip the trailing versionstamp suffix from the key before parsing the value.
+        std::string_view key_no_vs = raw_key;
+        Versionstamp vs;
+        if (decode_tailing_versionstamp_end(&key_no_vs) ||
+            decode_tailing_versionstamp(&key_no_vs, &vs)) {
+            // Key doesn't have a versionstamp suffix — not a versioned key, skip.
+            continue;
+        }
+
         VersionPB version_pb;
-        if (!version_pb.ParseFromString(std::string(value))) {
+        if (!version_pb.ParseFromString(std::string(raw_value))) {
             continue;
         }
         if (version_pb.update_time_ms() <= timestamp_ms) {
@@ -428,10 +456,8 @@ static int64_t resolve_version_at_time(Transaction* txn, const std::string& inst
             return version_pb.version();
         }
     }
-    // Distinguish scan error (-2) from "no version found at T" (-1).
-    // Callers treat -1 as PARTITION_INIT_VERSION (no data); -2 triggers error propagation.
-    if (iter->error_code() != TxnErrorCode::TXN_OK) {
-        return -2; // FDB scan error — not "no data"
+    if (!iter->is_valid() && iter->error_code() != TxnErrorCode::TXN_OK) {
+        return -2; // FDB scan error
     }
     return -1; // no version at or before timestamp_ms
 }
@@ -473,9 +499,8 @@ void MetaServiceImpl::get_version_at_time(::google::protobuf::RpcController* con
                 timestamp_ms, retention_days, earliest_ms);
         return;
     }
-    // Allow 10-second clock skew between FE and meta-service to avoid spurious rejections.
-    static constexpr int64_t kClockSkewToleranceMs = 10000;
-    if (timestamp_ms > now_ms + kClockSkewToleranceMs) {
+    // Allow configurable clock skew between FE and meta-service to avoid spurious rejections.
+    if (timestamp_ms > now_ms + config::time_travel_clock_skew_tolerance_ms) {
         code = MetaServiceCode::INVALID_ARGUMENT;
         msg = fmt::format("Requested timestamp {} ms is in the future (now={} ms).",
                           timestamp_ms, now_ms);
@@ -514,14 +539,84 @@ void MetaServiceImpl::get_version_at_time(::google::protobuf::RpcController* con
                 code = MetaServiceCode::KV_TXN_GET_ERR;
                 msg = fmt::format("FDB scan error during time travel for partition {}",
                                   request->partition_ids(i));
-                return; // response has no versions data — FE will see error status only
+                return;
             }
-            resolved_versions[i] = version;   // -1 = no data at T; >= 1 = found
+            resolved_versions[i] = version;
             resolved_times[i] = update_time_ms;
         }
         for (int i = 0; i < n; ++i) {
             response->add_versions(resolved_versions[i]);
             response->add_version_update_times_ms(resolved_times[i]);
+        }
+
+        // Fetch TT manifests in the same FDB transaction — zero extra round trips.
+        // Scans compaction checkpoints (tt_compaction_key) per tablet to find the
+        // checkpoint whose version range covers the resolved query version.
+        if (request->tablet_infos_size() == n) {
+            for (int i = 0; i < n; ++i) {
+                int64_t version = resolved_versions[i];
+                if (version <= 0) continue;
+                const auto& info = request->tablet_infos(i);
+                for (int64_t tablet_id : info.tablet_ids()) {
+                    auto* row = response->add_tablet_rowsets();
+                    row->set_tablet_id(tablet_id);
+
+                    // Range scan for the compaction checkpoint covering the query version.
+                    // Selects the checkpoint with the lowest start_version so all rowsets
+                    // from the compaction start through the query version are returned.
+                    std::string ck_begin, ck_end;
+                    tt_compaction_key({instance_id, tablet_id, 0, 0}, &ck_begin);
+                    tt_compaction_key({instance_id, tablet_id,
+                                       std::numeric_limits<int64_t>::max(),
+                                       std::numeric_limits<int64_t>::max()}, &ck_end);
+                    ck_end.push_back('\xff');
+
+                    std::unique_ptr<RangeGetIterator> ck_iter;
+                    bool found_v2 = false;
+                    if (txn->get(ck_begin, ck_end, &ck_iter) == TxnErrorCode::TXN_OK
+                            && ck_iter) {
+                        // Each encoded int64 is 9 bytes (1 tag + 8 data). The trailing
+                        // 18 bytes of a tt_compaction_key are start_v(9) + end_v(9).
+                        // Select the checkpoint whose range contains the query version;
+                        // prefer the one with the lowest start_version (earliest original
+                        // compaction) so that rowsets from all preceding versions are included.
+                        int64_t best_start = INT64_MAX;
+                        std::string best_val;
+                        while (ck_iter->has_next()) {
+                            auto [k, v] = ck_iter->next();
+                            if (k.size() < 18) continue;
+                            std::string_view sv = k.substr(k.size() - 18, 9);
+                            std::string_view ev = k.substr(k.size() - 9,  9);
+                            int64_t start_v = 0, end_v = 0;
+                            if (decode_int64(&sv, &start_v) != 0) continue;
+                            if (decode_int64(&ev, &end_v)   != 0) continue;
+                            if (start_v <= version && version <= end_v) {
+                                if (start_v < best_start) {
+                                    best_start = start_v;
+                                    best_val   = std::string(v);
+                                }
+                                found_v2 = true;
+                            }
+                        }
+                        if (found_v2 && !best_val.empty()) {
+                            TtCompactionManifestPB checkpoint;
+                            if (checkpoint.ParseFromString(best_val)) {
+                                for (const auto& entry : checkpoint.entries()) {
+                                    if (entry.version() <= version && entry.has_rowset_meta()) {
+                                        row->add_rowset_metas()->CopyFrom(entry.rowset_meta());
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    // If no checkpoint found: version still in active chain, no injection needed.
+                    // Remove the empty tablet_rowsets entry to keep response clean.
+                    if (row->rowset_metas_size() == 0) {
+                        response->mutable_tablet_rowsets()->RemoveLast();
+                    }
+                }
+            }
         }
         return;
     }

@@ -158,6 +158,15 @@ public:
                      std::unique_lock<BthreadSharedMutex>& meta_lock,
                      bool warmup_delta_data = false);
 
+    // Read rowsets for a time travel query version, augmented with pre-compaction
+    // rowsets passed in via tt_extra_rowsets. The shared tablet state is never modified.
+    // Returns RowSetSplits (one per rowset) compatible with TabletReadSource.rs_splits.
+    Status capture_rs_readers_with_tt_rowsets(
+            const Version& spec_version,
+            const std::vector<RowsetSharedPtr>& tt_extra_rowsets,
+            std::vector<RowSetSplits>* rs_splits,
+            bool skip_missing_version = false);
+
     // MUST hold EXCLUSIVE `_meta_lock`.
     void delete_rowsets(const std::vector<RowsetSharedPtr>& to_delete,
                         std::unique_lock<BthreadSharedMutex>& meta_lock);

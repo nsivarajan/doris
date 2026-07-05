@@ -9897,4 +9897,104 @@ TEST(RecyclerTest, DropRowsetKeptForTimeTravelRetention) {
             << "DROP rowset should NOT be recycled within time travel retention window";
 }
 
+// Verify recycle_tt_version_rowsets deletes expired manifest entries and retains active ones.
+// This is a regression test for the critical bug where return 1 was treated as an error
+// by scan_and_recycle, causing all entries to be permanently retained.
+TEST(RecyclerTest, RecycleTtVersionRowsets_ExpiresOldKeepsNew) {
+    auto txn_kv = std::make_shared<MemTxnKv>();
+    ASSERT_EQ(txn_kv->init(), 0);
+
+    InstanceInfoPB instance;
+    instance.set_instance_id(instance_id);
+    auto obj_info = instance.add_obj_info();
+    obj_info->set_id("tt_manifest_recycle_test");
+    obj_info->set_ak("ak"); obj_info->set_sk("sk");
+    obj_info->set_endpoint("endpoint"); obj_info->set_region("region");
+    obj_info->set_bucket("bucket"); obj_info->set_prefix("tt_manifest_recycle_test");
+
+    InstanceRecycler recycler(txn_kv, instance);
+    ASSERT_EQ(recycler.init(), 0);
+
+    const int64_t table_id = 9010;
+    const int64_t tablet_id = 90100;
+
+    // Write tablet meta with 7-day retention so get_retention_for_tablet returns > 0.
+    {
+        std::unique_ptr<Transaction> txn;
+        ASSERT_EQ(txn_kv->create_txn(&txn), TxnErrorCode::TXN_OK);
+        doris::TabletMetaCloudPB meta;
+        meta.set_table_id(table_id);
+        meta.set_tablet_id(tablet_id);
+        meta.set_time_travel_retention_days(7);
+        std::string val;
+        ASSERT_TRUE(meta.SerializeToString(&val));
+        std::string key;
+        meta_tablet_key({instance_id, table_id, 0, 0, tablet_id}, &key);
+        txn->put(key, val);
+        // Write tablet index so get_table_id_for_tablet works.
+        TabletIndexPB idx;
+        idx.set_table_id(table_id);
+        std::string idx_val;
+        ASSERT_TRUE(idx.SerializeToString(&idx_val));
+        txn->put(meta_tablet_idx_key({instance_id, tablet_id}), idx_val);
+        ASSERT_EQ(txn->commit(), TxnErrorCode::TXN_OK);
+    }
+
+    int64_t retention_sec = 7LL * 86400LL;
+    int64_t now_sec = ::time(nullptr);
+
+    // Write an EXPIRED manifest entry: created 8 days ago.
+    const std::string expired_rowset_id = "rowset_manifest_expired";
+    {
+        std::unique_ptr<Transaction> txn;
+        ASSERT_EQ(txn_kv->create_txn(&txn), TxnErrorCode::TXN_OK);
+        TtVersionRowsetPB entry;
+        entry.set_rowset_id(expired_rowset_id);
+        entry.set_created_ms((now_sec - 8LL * 86400LL) * 1000LL); // 8 days ago
+        entry.mutable_rowset_meta()->set_tablet_id(tablet_id);
+        std::string val;
+        ASSERT_TRUE(entry.SerializeToString(&val));
+        txn->put(tt_version_rowset_key({instance_id, tablet_id, 2}), val);
+        ASSERT_EQ(txn->commit(), TxnErrorCode::TXN_OK);
+    }
+
+    // Write an ACTIVE manifest entry: created 3 days ago (within 7-day retention).
+    const std::string active_rowset_id = "rowset_manifest_active";
+    {
+        std::unique_ptr<Transaction> txn;
+        ASSERT_EQ(txn_kv->create_txn(&txn), TxnErrorCode::TXN_OK);
+        TtVersionRowsetPB entry;
+        entry.set_rowset_id(active_rowset_id);
+        entry.set_created_ms((now_sec - 3LL * 86400LL) * 1000LL); // 3 days ago
+        entry.mutable_rowset_meta()->set_tablet_id(tablet_id);
+        std::string val;
+        ASSERT_TRUE(entry.SerializeToString(&val));
+        txn->put(tt_version_rowset_key({instance_id, tablet_id, 3}), val);
+        ASSERT_EQ(txn->commit(), TxnErrorCode::TXN_OK);
+    }
+
+    // Run the recycler.
+    ASSERT_EQ(recycler.recycle_tt_version_rowsets(), 0);
+
+    // Expired key must be gone.
+    {
+        std::unique_ptr<Transaction> txn;
+        ASSERT_EQ(txn_kv->create_txn(&txn), TxnErrorCode::TXN_OK);
+        std::string val;
+        ASSERT_EQ(txn->get(tt_version_rowset_key({instance_id, tablet_id, 2}), &val),
+                  TxnErrorCode::TXN_KEY_NOT_FOUND)
+                << "expired TT manifest key must be deleted by recycle_tt_version_rowsets";
+    }
+
+    // Active key must still be present.
+    {
+        std::unique_ptr<Transaction> txn;
+        ASSERT_EQ(txn_kv->create_txn(&txn), TxnErrorCode::TXN_OK);
+        std::string val;
+        ASSERT_EQ(txn->get(tt_version_rowset_key({instance_id, tablet_id, 3}), &val),
+                  TxnErrorCode::TXN_OK)
+                << "active TT manifest key must NOT be deleted before retention expires";
+    }
+}
+
 } // namespace doris::cloud

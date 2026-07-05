@@ -58,6 +58,7 @@ static const char* META_KEY_INFIX_MOW_TABLET_JOB        = "mow_tablet_job";
 static const char* META_KEY_INFIX_SCHEMA_DICTIONARY     = "tablet_schema_pb_dict";
 static const char* META_KEY_INFIX_PACKED_FILE          = "packed_file";
 static const char* META_KEY_INFIX_TIME_TRAVEL_TABLE    = "time_travel_table";
+static const char* META_KEY_INFIX_TT_COMPACTION        = "tt_compaction";
 
 static const char* RECYCLE_KEY_INFIX_INDEX              = "index";
 static const char* RECYCLE_KEY_INFIX_PART               = "partition";
@@ -153,7 +154,8 @@ static void encode_prefix(const T& t, std::string* key) {
         JobTabletKeyInfo, JobRecycleKeyInfo, JobSnapshotDataMigratorKeyInfo, JobSnapshotChainCompactorKeyInfo,
         RLJobProgressKeyInfo, StreamingJobKeyInfo,
         CopyJobKeyInfo, CopyFileKeyInfo,  StorageVaultKeyInfo, MetaSchemaPBDictionaryInfo,
-        MowTabletJobInfo, PackedFileKeyInfo, TimeTravelTableKeyInfo>);
+        MowTabletJobInfo, PackedFileKeyInfo, TimeTravelTableKeyInfo,
+        TtCompactionKeyInfo>);
 
     key->push_back(CLOUD_USER_KEY_SPACE01);
     // Prefixes for key families
@@ -175,7 +177,8 @@ static void encode_prefix(const T& t, std::string* key) {
                       || std::is_same_v<T, MetaPendingDeleteBitmapInfo>
                       || std::is_same_v<T, MowTabletJobInfo>
                       || std::is_same_v<T, PackedFileKeyInfo>
-                      || std::is_same_v<T, TimeTravelTableKeyInfo>) {
+                      || std::is_same_v<T, TimeTravelTableKeyInfo>
+                      || std::is_same_v<T, TtCompactionKeyInfo>) {
         encode_bytes(META_KEY_PREFIX, key);
     } else if constexpr (std::is_same_v<T, PartitionVersionKeyInfo>
                       || std::is_same_v<T, TableVersionKeyInfo>) {
@@ -363,6 +366,14 @@ void time_travel_table_key(const TimeTravelTableKeyInfo& in, std::string* out) {
     encode_prefix(in, out);                               // 0x01 "meta" ${instance_id}
     encode_bytes(META_KEY_INFIX_TIME_TRAVEL_TABLE, out);  // "time_travel_table"
     encode_int64(std::get<1>(in), out);                   // table_id
+}
+
+void tt_compaction_key(const TtCompactionKeyInfo& in, std::string* out) {
+    encode_prefix(in, out);                               // 0x01 "meta" ${instance_id}
+    encode_bytes(META_KEY_INFIX_TT_COMPACTION, out);      // "tt_compaction"
+    encode_int64(std::get<1>(in), out);                   // tablet_id
+    encode_int64(std::get<2>(in), out);                   // start_version
+    encode_int64(std::get<3>(in), out);                   // end_version
 }
 
 void meta_pending_delete_bitmap_key(const MetaPendingDeleteBitmapInfo& in, std::string* out) {

@@ -872,6 +872,30 @@ Status OlapScanLocalState::_sync_cloud_tablets(RuntimeState* state) {
                     }
                     RETURN_IF_ERROR(std::dynamic_pointer_cast<CloudTablet>(_tablets[i].tablet)
                                             ->sync_rowsets(options, sync_stats));
+
+                    // V2: Build scan-local TT extra rowsets from manifests.
+                    // These are NEVER injected into the shared tablet state.
+                    // The tablet object is untouched — pure FDB state throughout.
+                    if (p._olap_scan_node.__isset.tt_rowset_manifests) {
+                        const auto& manifests = p._olap_scan_node.tt_rowset_manifests;
+                        auto it = manifests.find(_scan_ranges[i]->tablet_id);
+                        if (it != manifests.end()) {
+                            for (const auto& bytes : it->second) {
+                                // Each entry is a serialised RowsetMetaCloudPB.
+                                doris::RowsetMetaCloudPB cloud_meta;
+                                if (!cloud_meta.ParseFromString(bytes)) continue;
+                                RowsetMetaPB rs_meta_pb =
+                                        cloud_rowset_meta_to_doris(std::move(cloud_meta));
+                                auto rs_meta = std::make_shared<RowsetMeta>();
+                                rs_meta->init_from_pb(rs_meta_pb);
+                                RowsetSharedPtr rs;
+                                if (RowsetFactory::create_rowset(nullptr, "", rs_meta, &rs)
+                                        .ok()) {
+                                    _tablets[i].tt_extra_rowsets.push_back(std::move(rs));
+                                }
+                            }
+                        }
+                    }
                     // FIXME(plat1ko): Avoid pointer cast
                     ExecEnv::GetInstance()->storage_engine().to_cloud().tablet_hotspot().count(
                             *_tablets[i].tablet);
@@ -981,16 +1005,32 @@ Status OlapScanLocalState::prepare(RuntimeState* state) {
     }
 
     for (size_t i = 0; i < _scan_ranges.size(); i++) {
-        _read_sources[i] = DORIS_TRY(_tablets[i].tablet->capture_read_source(
-                {0, _tablets[i].version},
-                {.skip_missing_versions = _state->skip_missing_version(),
-                 .enable_fetch_rowsets_from_peers = config::enable_fetch_rowsets_from_peer_replicas,
-                 .capture_row_binlog = olap_scan_node().__isset.read_row_binlog &&
-                                       olap_scan_node().read_row_binlog,
-                 .enable_prefer_cached_rowset =
-                         config::is_cloud_mode() ? _state->enable_prefer_cached_rowset() : false,
-                 .query_freshness_tolerance_ms =
-                         config::is_cloud_mode() ? _state->query_freshness_tolerance_ms() : -1}));
+        // For TT reads with extra rowsets from manifests, use the dedicated method
+        // that augments the version path WITHOUT modifying the shared tablet state.
+        if (!_tablets[i].tt_extra_rowsets.empty()) {
+            auto cloud_tablet =
+                    std::dynamic_pointer_cast<CloudTablet>(_tablets[i].tablet);
+            RETURN_IF_ERROR(cloud_tablet->capture_rs_readers_with_tt_rowsets(
+                    {0, _tablets[i].version}, _tablets[i].tt_extra_rowsets,
+                    &_read_sources[i].rs_splits,
+                    _state->skip_missing_version()));
+        } else {
+            _read_sources[i] = DORIS_TRY(_tablets[i].tablet->capture_read_source(
+                    {0, _tablets[i].version},
+                    {.skip_missing_versions = _state->skip_missing_version(),
+                     .enable_fetch_rowsets_from_peers =
+                             config::enable_fetch_rowsets_from_peer_replicas,
+                     .capture_row_binlog = olap_scan_node().__isset.read_row_binlog &&
+                                           olap_scan_node().read_row_binlog,
+                     .enable_prefer_cached_rowset =
+                             config::is_cloud_mode()
+                                     ? _state->enable_prefer_cached_rowset()
+                                     : false,
+                     .query_freshness_tolerance_ms =
+                             config::is_cloud_mode()
+                                     ? _state->query_freshness_tolerance_ms()
+                                     : -1}));
+        }
         if (!PipelineXLocalState<>::_state->skip_delete_predicate()) {
             _read_sources[i].fill_delete_predicates();
         }

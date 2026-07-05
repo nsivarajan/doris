@@ -29,6 +29,7 @@
 #include "cpp/sync_point.h"
 #include "meta-service/meta_service_helper.h"
 #include "meta-store/keys.h"
+#include "meta-store/codec.h"
 #include "meta-store/txn_kv_error.h"
 #include "snapshot/snapshot_manager.h"
 
@@ -114,6 +115,34 @@ int ResourceManager::init() {
         }
         if (inst.has_multi_version_status()) {
             instance_multi_version_status_[inst_id] = inst.multi_version_status();
+        }
+    }
+
+    // Pre-populate the TT table cache at startup by scanning existing marker keys.
+    // Prevents a burst of FDB reads on the first commit after a process restart.
+    {
+        std::unique_ptr<Transaction> tt_txn;
+        if (txn_kv_->create_txn(&tt_txn) == TxnErrorCode::TXN_OK) {
+            for (auto& [inst_id, inst] : instances) {
+                std::string tt_begin, tt_end;
+                time_travel_table_key({inst_id, 0}, &tt_begin);
+                time_travel_table_key({inst_id, std::numeric_limits<int64_t>::max()}, &tt_end);
+                tt_end.push_back('\xff');
+                std::unique_ptr<RangeGetIterator> tt_it;
+                if (tt_txn->get(tt_begin, tt_end, &tt_it) != TxnErrorCode::TXN_OK || !tt_it) {
+                    continue;
+                }
+                while (tt_it->has_next()) {
+                    auto [k, v] = tt_it->next();
+                    // time_travel_table_key trailing 9 bytes = encode_int64(table_id).
+                    if (k.size() < 9) continue;
+                    std::string_view tail = k.substr(k.size() - 9, 9);
+                    int64_t table_id = 0;
+                    if (decode_int64(&tail, &table_id) == 0 && table_id > 0) {
+                        time_travel_tables_[inst_id].insert(table_id);
+                    }
+                }
+            }
         }
     }
 

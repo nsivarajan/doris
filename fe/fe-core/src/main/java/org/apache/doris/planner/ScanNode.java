@@ -691,11 +691,9 @@ public abstract class ScanNode extends PlanNode implements SplitGenerator {
         // -----------------------------------------------------------------------
         // Time travel path: ONE batch RPC to meta service for all historical versions.
         // This is the performance-critical path — N partitions, 1 RPC.
+        // All time-travel partitions in a single query must share the same timestamp.
         // -----------------------------------------------------------------------
         if (!timeTravelPartitionTimestamps.isEmpty()) {
-            // All time-travel partitions in a single query must share the same timestamp.
-            // Different timestamps (e.g. two separate FOR TIME AS OF clauses in one query)
-            // are not supported — the batch RPC uses a single timestamp_ms for all partitions.
             long timestampMs = timeTravelPartitionTimestamps.values().iterator().next();
             int retentionDays = timeTravelPartitionRetentions.values().iterator().next();
             for (Map.Entry<Long, Long> e : timeTravelPartitionTimestamps.entrySet()) {
@@ -707,21 +705,13 @@ public abstract class ScanNode extends PlanNode implements SplitGenerator {
                 }
             }
 
-            // Build the partition list in stable order (LinkedHashMap preserves insertion order).
             List<CloudPartition> ttPartitions = new ArrayList<>();
-            OlapScanNode firstTt = timeTravelScanNodes.get(0);
-            OlapTable firstTable = firstTt.getOlapTable();
-
             for (Map.Entry<Long, Long> entry : timeTravelPartitionTimestamps.entrySet()) {
                 long partId = entry.getKey();
-                org.apache.doris.catalog.Partition p = firstTable.getPartition(partId);
-                if (p == null) {
-                    for (OlapScanNode ttNode : timeTravelScanNodes) {
-                        p = ttNode.getOlapTable().getPartition(partId);
-                        if (p != null) {
-                            break;
-                        }
-                    }
+                org.apache.doris.catalog.Partition p = null;
+                for (OlapScanNode ttNode : timeTravelScanNodes) {
+                    p = ttNode.getOlapTable().getPartition(partId);
+                    if (p != null) break;
                 }
                 if (p == null) {
                     throw new UserException("time travel: partition " + partId + " not found");
@@ -729,25 +719,61 @@ public abstract class ScanNode extends PlanNode implements SplitGenerator {
                 ttPartitions.add((CloudPartition) p);
             }
 
-            List<Long> ttVersions;
+            // Build partition_id → tablet_ids mapping once, O(total tablets), from all TT nodes.
+            // Used by tabletIdsProvider so the meta service fetches manifests in the same RPC.
+            java.util.Map<Long, List<Long>> partitionToTablets = new java.util.HashMap<>();
+            for (OlapScanNode node : timeTravelScanNodes) {
+                for (long partId : node.getSelectedPartitionIds()) {
+                    org.apache.doris.catalog.Partition part =
+                            node.getOlapTable().getPartition(partId);
+                    if (part == null) continue;
+                    org.apache.doris.catalog.MaterializedIndex idx =
+                            node.getOlapTable().getPartitionIndex(part, node.getSelectedIndexId());
+                    if (idx == null) continue;
+                    List<Long> tids = partitionToTablets.computeIfAbsent(partId,
+                            k -> new java.util.ArrayList<>());
+                    for (org.apache.doris.catalog.Tablet t : idx.getTablets()) {
+                        tids.add(t.getId());
+                    }
+                }
+            }
+
+            java.util.function.Function<org.apache.doris.cloud.catalog.CloudPartition, List<Long>>
+                    tabletIdsProvider = partition ->
+                        partitionToTablets.getOrDefault(partition.getId(),
+                                java.util.Collections.emptyList());
+
+            org.apache.doris.cloud.catalog.CloudPartition.VersionAtTimeResult versionResult;
             try {
-                ttVersions = org.apache.doris.cloud.catalog.CloudPartition
-                        .getVersionsAtTime(ttPartitions, timestampMs, retentionDays);
+                versionResult = org.apache.doris.cloud.catalog.CloudPartition
+                        .getVersionsAtTime(ttPartitions, timestampMs, retentionDays,
+                                tabletIdsProvider);
             } catch (RpcException e) {
                 throw new UserException("time travel: get version at time failed", e);
             }
 
-            // Build partition_id → version map. -1 means no data at that timestamp
-            // (treat as PARTITION_INIT_VERSION = 1 to avoid scan errors; scanner returns empty).
+            // Build partition_id → version map.
             Map<Long, Long> ttVersionMap = new LinkedHashMap<>();
             for (int i = 0; i < ttPartitions.size(); i++) {
-                long v = ttVersions.get(i);
+                long v = versionResult.versions.get(i);
                 ttVersionMap.put(ttPartitions.get(i).getId(),
                         v < 0 ? org.apache.doris.catalog.Partition.PARTITION_INIT_VERSION : v);
             }
 
             for (OlapScanNode ttNode : timeTravelScanNodes) {
                 ttNode.updateScanRangeVersions(ttVersionMap);
+            }
+
+            // Distribute the V2 manifests (List<byte[]> per tablet) to each scan node.
+            if (!versionResult.tabletManifests.isEmpty()) {
+                for (OlapScanNode ttNode : timeTravelScanNodes) {
+                    java.util.Map<Long, List<byte[]>> nodeManifests = new java.util.HashMap<>();
+                    for (long tid : ttNode.getScanTabletIds()) {
+                        List<byte[]> mlist = versionResult.tabletManifests.get(tid);
+                        if (mlist != null && !mlist.isEmpty()) nodeManifests.put(tid, mlist);
+                    }
+                    if (!nodeManifests.isEmpty()) ttNode.setTtRowsetManifests(nodeManifests);
+                }
             }
         }
 

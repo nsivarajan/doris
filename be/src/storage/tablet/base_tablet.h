@@ -54,6 +54,9 @@ class FixedReadPlan;
 struct TabletWithVersion {
     BaseTabletSPtr tablet;
     int64_t version;
+    // V2 TT: pre-compaction rowsets from manifest, scan-local only.
+    // NEVER written to the shared tablet object. Discarded after scan completes.
+    std::vector<RowsetSharedPtr> tt_extra_rowsets;
 };
 
 enum class CompactionStage { NOT_SCHEDULED, PENDING, EXECUTING };

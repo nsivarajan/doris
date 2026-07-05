@@ -1254,6 +1254,11 @@ message GetVersionAtTimeRequest {
     repeated int64       db_ids        = 8;
     repeated int64       table_ids     = 9;
     repeated int64       partition_ids = 10;
+    // Per-partition tablet_ids for TT manifest lookup (parallel to partition_ids entries).
+    // Each entry is a flat list of tablet_ids belonging to that partition.
+    // When provided, get_version_at_time also fetches the TT rowset manifest for each tablet
+    // in the same FDB transaction — eliminating a second RPC for post-compaction TT reads.
+    repeated TtPartitionTabletsInfo tablet_infos = 11;
 };
 
 message GetVersionAtTimeResponse {
@@ -1265,6 +1270,39 @@ message GetVersionAtTimeResponse {
     // -1 means no committed version found at or before timestamp_ms for that partition.
     repeated int64  versions                   = 4;
     repeated int64  version_update_times_ms    = 5;
+    // Per-tablet rowset manifests for versions that have been compacted away.
+    // Populated only when request.tablet_infos is provided and manifests exist in FDB.
+    // Empty entry (no rowset_meta) = version still in active chain — BE reads normally.
+    repeated TtTabletRowsetsPB tablet_rowsets  = 6;
+};
+
+// Per-tablet rowset list returned alongside the resolved version.
+// Contains ALL rowsets from compaction start to query_version so the BE can
+// reconstruct the full historical state. Empty = version in active chain.
+message TtTabletRowsetsPB {
+    optional int64              tablet_id    = 1;
+    repeated RowsetMetaCloudPB  rowset_metas = 2;
+};
+
+// Per-partition tablet list embedded in GetVersionAtTimeRequest.
+// Allows get_version_at_time to also fetch TT rowset manifests in the same FDB transaction,
+// eliminating the need for a separate RPC.
+message TtPartitionTabletsInfo {
+    repeated int64 tablet_ids = 1;
+};
+
+// One entry per version within a compaction checkpoint.
+message TtVersionEntry {
+    optional int64             version     = 1;
+    optional RowsetMetaCloudPB rowset_meta = 2;
+};
+
+// Compaction checkpoint — written once per compaction event per tablet.
+// Keyed by tt_compaction_key({instance_id, tablet_id, start_version, end_version}).
+// TTL is anchored to the oldest rowset's original commit time, not the compaction time.
+message TtCompactionManifestPB {
+    repeated TtVersionEntry entries    = 1;
+    optional int64          created_ms = 2;
 };
 
 // Disables time travel on a table: removes the persistent FDB marker key so that the

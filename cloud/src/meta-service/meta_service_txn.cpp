@@ -1807,6 +1807,7 @@ void MetaServiceImpl::commit_txn_immediately(
         int64_t version_update_time_ms =
                 duration_cast<milliseconds>(system_clock::now().time_since_epoch()).count();
         response->set_version_update_time_ms(version_update_time_ms);
+
         for (auto& [partition_id, version] : versions) {
             int64_t new_version = version + 1;
             std::string ver_val;
@@ -1838,7 +1839,7 @@ void MetaServiceImpl::commit_txn_immediately(
                 std::string partition_version_key =
                         versioned::partition_version_key({instance_id, partition_id});
                 versioned_put(txn.get(), partition_version_key, ver_val);
-                LOG(INFO) << "put versioned partition key=" << hex(partition_version_key)
+                VLOG(1) << "put versioned partition key=" << hex(partition_version_key)
                           << ", txn_id=" << txn_id;
             }
 
@@ -2518,7 +2519,7 @@ void MetaServiceImpl::commit_txn_eventually(
                 std::string partition_version_key =
                         versioned::partition_version_key({instance_id, partition_id});
                 versioned_put(txn.get(), partition_version_key, ver_val);
-                LOG(INFO) << "put versioned partition key=" << hex(partition_version_key)
+                VLOG(1) << "put versioned partition key=" << hex(partition_version_key)
                           << ", txn_id=" << txn_id;
             }
 
@@ -3044,7 +3045,7 @@ void MetaServiceImpl::commit_txn_with_sub_txn(const CommitTxnRequest* request,
                 std::string partition_version_key =
                         versioned::partition_version_key({instance_id, partition_id});
                 versioned_put(txn.get(), partition_version_key, ver_val);
-                LOG(INFO) << "put versioned partition key=" << hex(partition_version_key)
+                VLOG(1) << "put versioned partition key=" << hex(partition_version_key)
                           << ", txn_id=" << txn_id;
             }
             commit_txn_log.mutable_partition_version_map()->insert({partition_id, new_version});

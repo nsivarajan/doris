@@ -206,6 +206,9 @@ public class OlapScanNode extends ScanNode {
     // Time travel: timestamp_ms from FOR TIME AS OF. -1 = read current version.
     private long timeTravelTimestampMs = -1L;
     private int timeTravelRetentionDays = -1;
+    // Key = tablet_id, Value = list of serialised RowsetMetaCloudPB bytes,
+    // one per compacted-away version needed for this tablet's historical read.
+    private java.util.Map<Long, List<byte[]>> ttRowsetManifests = null;
 
     private Map<Long, Integer> tabletId2BucketSeq = Maps.newHashMap();
     // a bucket seq may map to many tablets, and each tablet has a
@@ -293,6 +296,11 @@ public class OlapScanNode extends ScanNode {
         return timeTravelRetentionDays;
     }
 
+    public void setTtRowsetManifests(java.util.Map<Long, List<byte[]>> manifests) {
+        this.ttRowsetManifests = manifests;
+    }
+
+    /**
     public Set<Integer> getExtraKeyColumnSlotIds() {
         return extraKeyColumnSlotIds;
     }
@@ -1391,6 +1399,9 @@ public class OlapScanNode extends ScanNode {
             msg.olap_scan_node.setTimeTravelTimestampMs(timeTravelTimestampMs);
             if (timeTravelRetentionDays > 0) {
                 msg.olap_scan_node.setTimeTravelRetentionDays(timeTravelRetentionDays);
+            }
+            if (ttRowsetManifests != null && !ttRowsetManifests.isEmpty()) {
+                msg.olap_scan_node.setTtRowsetManifests(ttRowsetManifests);
             }
         }
 

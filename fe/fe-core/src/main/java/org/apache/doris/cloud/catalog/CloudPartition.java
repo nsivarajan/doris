@@ -294,10 +294,28 @@ public class CloudPartition extends Partition {
      * <p>Non-time-travel queries are completely unaffected — this method is only called
      * when {@code OlapScanNode.timeTravelTimestampMs >= 0}.
      */
-    public static List<Long> getVersionsAtTime(List<CloudPartition> partitions,
-            long timestampMs, int retentionDays) throws RpcException {
+    /**
+     * Result of getVersionsAtTime — bundles the resolved versions with any TT rowset manifests
+     * returned in the same RPC response (for post-compaction time travel reads).
+     */
+    public static class VersionAtTimeResult {
+        public final List<Long> versions;
+        /** tablet_id → list of serialised RowsetMetaCloudPB bytes, one per compacted version. */
+        public final java.util.Map<Long, List<byte[]>> tabletManifests;
+
+        public VersionAtTimeResult(List<Long> versions,
+                java.util.Map<Long, List<byte[]>> tabletManifests) {
+            this.versions = versions;
+            this.tabletManifests = tabletManifests;
+        }
+    }
+
+    public static VersionAtTimeResult getVersionsAtTime(List<CloudPartition> partitions,
+            long timestampMs, int retentionDays,
+            java.util.function.Function<CloudPartition, List<Long>> tabletIdsProvider)
+            throws RpcException {
         if (partitions.isEmpty()) {
-            return new ArrayList<>();
+            return new VersionAtTimeResult(new ArrayList<>(), java.util.Collections.emptyMap());
         }
 
         Cloud.GetVersionAtTimeRequest.Builder req = Cloud.GetVersionAtTimeRequest.newBuilder()
@@ -311,6 +329,15 @@ public class CloudPartition extends Partition {
             req.addDbIds(p.getDbId());
             req.addTableIds(p.getTableId());
             req.addPartitionIds(p.getId());
+            // Include tablet_ids so the meta service fetches manifests in the same transaction.
+            List<Long> tabletIds = tabletIdsProvider != null ? tabletIdsProvider.apply(p)
+                    : java.util.Collections.emptyList();
+            Cloud.TtPartitionTabletsInfo.Builder info =
+                    Cloud.TtPartitionTabletsInfo.newBuilder();
+            if (tabletIds != null) {
+                tabletIds.forEach(info::addTabletIds);
+            }
+            req.addTabletInfos(info.build());
         }
 
         Cloud.GetVersionAtTimeResponse resp;
@@ -334,9 +361,30 @@ public class CloudPartition extends Partition {
 
         List<Long> result = new ArrayList<>(n);
         for (int i = 0; i < n; i++) {
-            result.add(resp.getVersions(i)); // -1 means no data at that timestamp
+            result.add(resp.getVersions(i));
         }
-        return result;
+
+        // Extract tablet manifests from the response.
+        // Each entry contains one RowsetMetaCloudPB per compacted-away version.
+        // The bytes are passed to BE for direct rowset construction.
+        java.util.Map<Long, List<byte[]>> manifests = new java.util.HashMap<>();
+        for (Cloud.TtTabletRowsetsPB entry : resp.getTabletRowsetsList()) {
+            if (entry.getRowsetMetasCount() > 0) {
+                List<byte[]> bytesList = new java.util.ArrayList<>();
+                for (Cloud.RowsetMetaCloudPB meta : entry.getRowsetMetasList()) {
+                    bytesList.add(meta.toByteArray());
+                }
+                manifests.put(entry.getTabletId(), bytesList);
+            }
+        }
+
+        return new VersionAtTimeResult(result, manifests);
+    }
+
+    // Legacy overload without tablet manifest support (keeps existing callers compiling).
+    public static List<Long> getVersionsAtTime(List<CloudPartition> partitions,
+            long timestampMs, int retentionDays) throws RpcException {
+        return getVersionsAtTime(partitions, timestampMs, retentionDays, null).versions;
     }
 
     // Get visible version from the specified partitions;

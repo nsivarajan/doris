@@ -1023,6 +1023,10 @@ struct TOlapScanNode {
   29: optional i64 time_travel_timestamp_ms
   // Retention days from the table property — used by BE to validate the time travel window.
   30: optional i32 time_travel_retention_days
+  // Per-tablet rowset manifests for post-compaction time travel reads.
+  // Key = tablet_id. Value = list of serialised RowsetMetaCloudPB proto bytes,
+  // one per compacted-away version needed to reconstruct the historical state.
+  31: optional map<i64, list<binary>> tt_rowset_manifests
 }
 
 struct TEqJoinCondition {
