@@ -300,7 +300,6 @@ public class OlapScanNode extends ScanNode {
         this.ttRowsetManifests = manifests;
     }
 
-    /**
     public Set<Integer> getExtraKeyColumnSlotIds() {
         return extraKeyColumnSlotIds;
     }
@@ -1401,7 +1400,17 @@ public class OlapScanNode extends ScanNode {
                 msg.olap_scan_node.setTimeTravelRetentionDays(timeTravelRetentionDays);
             }
             if (ttRowsetManifests != null && !ttRowsetManifests.isEmpty()) {
-                msg.olap_scan_node.setTtRowsetManifests(ttRowsetManifests);
+                // Thrift binary type uses ByteBuffer; convert at the wire boundary.
+                java.util.Map<Long, List<java.nio.ByteBuffer>> thriftManifests =
+                        new java.util.HashMap<>();
+                for (java.util.Map.Entry<Long, List<byte[]>> e : ttRowsetManifests.entrySet()) {
+                    List<java.nio.ByteBuffer> bufs = new java.util.ArrayList<>();
+                    for (byte[] b : e.getValue()) {
+                        bufs.add(java.nio.ByteBuffer.wrap(b));
+                    }
+                    thriftManifests.put(e.getKey(), bufs);
+                }
+                msg.olap_scan_node.setTtRowsetManifests(thriftManifests);
             }
         }
 
@@ -1432,7 +1441,7 @@ public class OlapScanNode extends ScanNode {
             return;
         }
 
-        // Build partition column name → slot ID mapping
+        // Build partition column name to slot ID mapping
         Map<String, Integer> partColToSlotId = Maps.newHashMap();
         for (SlotDescriptor slot : desc.getSlots()) {
             if (slot.getColumn() == null) {
@@ -1476,14 +1485,14 @@ public class OlapScanNode extends ScanNode {
         // boundaries. Projection rules (lex compare semantics):
         //
         //   single column [L, U):
-        //       projection = [L, U)              → range_end_inclusive = false
+        //       projection = [L, U)              -> range_end_inclusive = false
         //
         //   multi-column [(L1, L2, ...), (U1, U2, ...)):
-        //       k1 = L1 is reachable (inner tuple can be ≥ (L2, ...))
-        //       k1 ∈ (L1, U1) is fully reachable
+        //       k1 = L1 is reachable (inner tuple can be >= (L2, ...))
+        //       k1 in (L1, U1) is fully reachable
         //       k1 = U1 may be reachable via inner tuple < (U2, ...)
         //       projection = [L1, U1] (CLOSED both ends, conservative)
-        //                                        → range_end_inclusive = true
+        //                                        -> range_end_inclusive = true
         //
         // The half-open form [L1, U1) for multi-column would be a strict
         // UNDER-approximation. Example: partition [(1,1), (1,5)) projects to

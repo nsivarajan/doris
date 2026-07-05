@@ -31,6 +31,7 @@ import org.apache.doris.common.Config;
 import org.apache.doris.common.Pair;
 import org.apache.doris.common.profile.SummaryProfile;
 import org.apache.doris.nereids.rules.RuleType;
+import org.apache.doris.proto.OlapFile;
 import org.apache.doris.qe.ConnectContext;
 import org.apache.doris.qe.StmtExecutor;
 import org.apache.doris.qe.VariableMgr;
@@ -371,7 +372,7 @@ public class CloudPartition extends Partition {
         for (Cloud.TtTabletRowsetsPB entry : resp.getTabletRowsetsList()) {
             if (entry.getRowsetMetasCount() > 0) {
                 List<byte[]> bytesList = new java.util.ArrayList<>();
-                for (Cloud.RowsetMetaCloudPB meta : entry.getRowsetMetasList()) {
+                for (OlapFile.RowsetMetaCloudPB meta : entry.getRowsetMetasList()) {
                     bytesList.add(meta.toByteArray());
                 }
                 manifests.put(entry.getTabletId(), bytesList);

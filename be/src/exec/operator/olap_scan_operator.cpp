@@ -49,6 +49,8 @@
 #include "storage/index/ann/ann_topn_runtime.h"
 #include "storage/storage_engine.h"
 #include "storage/tablet/tablet.h"
+#include "cloud/pb_convert.h"
+#include "storage/rowset/rowset_factory.h"
 #include "storage/tablet/tablet_manager.h"
 #include "util/to_string.h"
 
@@ -839,7 +841,7 @@ Status OlapScanLocalState::_sync_cloud_tablets(RuntimeState* state) {
                 auto task_ctx = state->get_task_execution_context();
                 auto task_create_time = std::chrono::steady_clock::now();
                 tasks.emplace_back([this, sync_stats, version, i, task_ctx, task_create_time,
-                                    tt_timestamp_ms]() mutable {
+                                    tt_timestamp_ms, &p]() mutable {
                     // Record bthread scheduling delay
                     auto task_start_time = std::chrono::steady_clock::now();
                     if (sync_stats) {
@@ -861,7 +863,7 @@ Status OlapScanLocalState::_sync_cloud_tablets(RuntimeState* state) {
                     // Fetch tablet. Version is already resolved by FE — use it directly.
                     auto tablet = DORIS_TRY(ExecEnv::get_tablet(
                             _scan_ranges[i]->tablet_id, sync_stats));
-                    _tablets[i] = {std::move(tablet), version};
+                    _tablets[i] = {std::move(tablet), version, {}};
                     SyncOptions options;
                     options.query_version = version;
                     options.merge_schema = true;
@@ -885,7 +887,7 @@ Status OlapScanLocalState::_sync_cloud_tablets(RuntimeState* state) {
                                 doris::RowsetMetaCloudPB cloud_meta;
                                 if (!cloud_meta.ParseFromString(bytes)) continue;
                                 RowsetMetaPB rs_meta_pb =
-                                        cloud_rowset_meta_to_doris(std::move(cloud_meta));
+                                        cloud::cloud_rowset_meta_to_doris(std::move(cloud_meta));
                                 auto rs_meta = std::make_shared<RowsetMeta>();
                                 rs_meta->init_from_pb(rs_meta_pb);
                                 RowsetSharedPtr rs;
@@ -1000,7 +1002,7 @@ Status OlapScanLocalState::prepare(RuntimeState* state) {
                             _scan_ranges[i]->version.data() + _scan_ranges[i]->version.size(),
                             version);
             auto tablet = DORIS_TRY(ExecEnv::get_tablet(_scan_ranges[i]->tablet_id));
-            _tablets[i] = {std::move(tablet), version};
+            _tablets[i] = {std::move(tablet), version, {}};
         }
     }
 

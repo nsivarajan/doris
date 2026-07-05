@@ -1255,7 +1255,7 @@ void process_compaction_job(MetaServiceCode& code, std::string& msg, std::string
                     entry->mutable_rowset_meta()->Swap(&rs_copy);
                 }
                 min_created_ms = std::min(min_created_ms,
-                                          static_cast<int64_t>(rs.creation_time()) * 1000LL);
+                                          static_cast<int64_t>(rs.creation_time()) * static_cast<int64_t>(1000));
             }
             checkpoint.set_created_ms(min_created_ms);
 

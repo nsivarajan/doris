@@ -711,7 +711,9 @@ public abstract class ScanNode extends PlanNode implements SplitGenerator {
                 org.apache.doris.catalog.Partition p = null;
                 for (OlapScanNode ttNode : timeTravelScanNodes) {
                     p = ttNode.getOlapTable().getPartition(partId);
-                    if (p != null) break;
+                    if (p != null) {
+                        break;
+                    }
                 }
                 if (p == null) {
                     throw new UserException("time travel: partition " + partId + " not found");
@@ -726,10 +728,14 @@ public abstract class ScanNode extends PlanNode implements SplitGenerator {
                 for (long partId : node.getSelectedPartitionIds()) {
                     org.apache.doris.catalog.Partition part =
                             node.getOlapTable().getPartition(partId);
-                    if (part == null) continue;
+                    if (part == null) {
+                        continue;
+                    }
                     org.apache.doris.catalog.MaterializedIndex idx =
                             node.getOlapTable().getPartitionIndex(part, node.getSelectedIndexId());
-                    if (idx == null) continue;
+                    if (idx == null) {
+                        continue;
+                    }
                     List<Long> tids = partitionToTablets.computeIfAbsent(partId,
                             k -> new java.util.ArrayList<>());
                     for (org.apache.doris.catalog.Tablet t : idx.getTablets()) {
@@ -770,9 +776,13 @@ public abstract class ScanNode extends PlanNode implements SplitGenerator {
                     java.util.Map<Long, List<byte[]>> nodeManifests = new java.util.HashMap<>();
                     for (long tid : ttNode.getScanTabletIds()) {
                         List<byte[]> mlist = versionResult.tabletManifests.get(tid);
-                        if (mlist != null && !mlist.isEmpty()) nodeManifests.put(tid, mlist);
+                        if (mlist != null && !mlist.isEmpty()) {
+                            nodeManifests.put(tid, mlist);
+                        }
                     }
-                    if (!nodeManifests.isEmpty()) ttNode.setTtRowsetManifests(nodeManifests);
+                    if (!nodeManifests.isEmpty()) {
+                        ttNode.setTtRowsetManifests(nodeManifests);
+                    }
                 }
             }
         }
