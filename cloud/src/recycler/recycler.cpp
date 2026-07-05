@@ -5714,6 +5714,9 @@ int InstanceRecycler::recycle_tt_compaction() {
     int64_t num_scanned = 0, num_expired = 0;
     int64_t now_sec = ::time(nullptr);
     std::vector<std::string> expired_keys;
+    // For MoW tables: also delete retained delete bitmaps when checkpoint expires.
+    // Each entry: {tablet_id, rowset_id_v2} for each version in the expired checkpoint.
+    std::vector<std::pair<int64_t, std::string>> expired_bitmap_rowsets;
 
     auto recycle_func = [&](std::string_view k, std::string_view v) -> int {
         ++num_scanned;
@@ -5735,6 +5738,13 @@ int InstanceRecycler::recycle_tt_compaction() {
 
         ++num_expired;
         expired_keys.emplace_back(k);
+        // Collect rowset_ids whose retained delete bitmaps should be cleaned up.
+        for (const auto& entry : checkpoint.entries()) {
+            if (entry.has_rowset_meta() && !entry.rowset_meta().rowset_id_v2().empty()) {
+                expired_bitmap_rowsets.emplace_back(tablet_id,
+                                                     entry.rowset_meta().rowset_id_v2());
+            }
+        }
         return 0;
     };
 
@@ -5743,7 +5753,14 @@ int InstanceRecycler::recycle_tt_compaction() {
         std::unique_ptr<Transaction> txn;
         if (txn_kv_->create_txn(&txn) != TxnErrorCode::TXN_OK) return -1;
         for (auto& key : expired_keys) txn->remove(key);
+        // Delete retained delete bitmaps for expired MoW checkpoints.
+        for (auto& [tid, rowset_id] : expired_bitmap_rowsets) {
+            txn->remove(meta_delete_bitmap_key({instance_id_, tid, rowset_id, 0, 0}),
+                        meta_delete_bitmap_key({instance_id_, tid, rowset_id,
+                                                INT64_MAX, INT64_MAX}));
+        }
         expired_keys.clear();
+        expired_bitmap_rowsets.clear();
         TxnErrorCode err = txn->commit();
         if (err != TxnErrorCode::TXN_OK) {
             LOG(WARNING) << "recycle_tt_compaction: failed to delete expired checkpoints err="

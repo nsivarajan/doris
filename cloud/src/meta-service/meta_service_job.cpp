@@ -1199,11 +1199,18 @@ void process_compaction_job(MetaServiceCode& code, std::string& msg, std::string
 
     auto handle_compaction_input_rowset_meta = [&](doris::RowsetMetaCloudPB rs) {
         if (compaction.has_delete_bitmap_lock_initiator()) {
-            auto delete_bitmap_start =
-                    meta_delete_bitmap_key({instance_id, tablet_id, rs.rowset_id_v2(), 0, 0});
-            auto delete_bitmap_end = meta_delete_bitmap_key(
-                    {instance_id, tablet_id, rs.rowset_id_v2(), INT64_MAX, INT64_MAX});
-            txn->remove(delete_bitmap_start, delete_bitmap_end);
+            if (tt_retention_days > 0) {
+                // Retain delete bitmaps for TT-enabled MoW tables so that historical
+                // reads can reconstruct the correct deleted/overwritten row state at
+                // any version within the retention window.
+                // The recycler deletes them when the compaction checkpoint expires.
+            } else {
+                auto delete_bitmap_start =
+                        meta_delete_bitmap_key({instance_id, tablet_id, rs.rowset_id_v2(), 0, 0});
+                auto delete_bitmap_end = meta_delete_bitmap_key(
+                        {instance_id, tablet_id, rs.rowset_id_v2(), INT64_MAX, INT64_MAX});
+                txn->remove(delete_bitmap_start, delete_bitmap_end);
+            }
         }
 
         auto recycle_key = recycle_rowset_key({instance_id, tablet_id, rs.rowset_id_v2()});
