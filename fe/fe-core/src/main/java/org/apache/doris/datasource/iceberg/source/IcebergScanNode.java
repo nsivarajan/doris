@@ -58,6 +58,7 @@ import org.apache.doris.thrift.TColumnCategory;
 import org.apache.doris.thrift.TExplainLevel;
 import org.apache.doris.thrift.TFileFormatType;
 import org.apache.doris.thrift.TFileRangeDesc;
+import org.apache.doris.thrift.TIcebergColumnStats;
 import org.apache.doris.thrift.TIcebergDeleteFileDesc;
 import org.apache.doris.thrift.TIcebergFileDesc;
 import org.apache.doris.thrift.TPlanNode;
@@ -97,6 +98,8 @@ import org.apache.iceberg.mapping.MappedField;
 import org.apache.iceberg.mapping.MappedFields;
 import org.apache.iceberg.mapping.NameMapping;
 import org.apache.iceberg.mapping.NameMappingParser;
+import org.apache.iceberg.types.Type;
+import org.apache.iceberg.types.Types;
 import org.apache.iceberg.util.ScanTaskUtil;
 import org.apache.iceberg.util.SerializationUtil;
 import org.apache.iceberg.util.TableScanUtil;
@@ -392,6 +395,10 @@ public class IcebergScanNode extends FileQueryScanNode {
             }
         }
         rangeDesc.setTableFormatParams(tableFormatFileDesc);
+        // Forward per-file column stats for BE file-level pruning.
+        if (icebergSplit.getIcebergColumnStats() != null) {
+            rangeDesc.setIcebergColumnStats(icebergSplit.getIcebergColumnStats());
+        }
     }
 
     @Override
@@ -873,6 +880,11 @@ public class IcebergScanNode extends FileQueryScanNode {
         }
         split.setTableFormatType(TableFormatType.ICEBERG);
         split.setTargetSplitSize(targetSplitSize);
+        // Attach manifest column stats so BE can prune files via runtime-filter min/max.
+        Map<String, TIcebergColumnStats> colStats = buildColumnStats(dataFile);
+        if (colStats != null) {
+            split.setIcebergColumnStats(colStats);
+        }
         if (isPartitionedTable) {
             int specId = fileScanTask.file().specId();
             PartitionSpec partitionSpec = icebergTable.specs().get(specId);
@@ -896,10 +908,73 @@ public class IcebergScanNode extends FileQueryScanNode {
         return split;
     }
 
+    /** Extracts per-file min/max bounds from an Iceberg DataFile for BE file pruning. */
+    private Map<String, TIcebergColumnStats> buildColumnStats(DataFile dataFile) {
+        java.util.Map<Integer, java.nio.ByteBuffer> lowerBounds = dataFile.lowerBounds();
+        java.util.Map<Integer, java.nio.ByteBuffer> upperBounds = dataFile.upperBounds();
+        if (lowerBounds == null && upperBounds == null) {
+            return null;
+        }
+
+        java.util.Set<Integer> fieldIds = new java.util.HashSet<>();
+        if (lowerBounds != null) {
+            fieldIds.addAll(lowerBounds.keySet());
+        }
+        if (upperBounds != null) {
+            fieldIds.addAll(upperBounds.keySet());
+        }
+
+        Map<String, TIcebergColumnStats> result = new java.util.HashMap<>();
+        for (int fieldId : fieldIds) {
+            Types.NestedField field = icebergTable.schema().findField(fieldId);
+            if (field == null) {
+                continue;
+            }
+            int typeId = getIcebergTypeId(field.type());
+            if (typeId < 0) {
+                continue;  // unsupported type — skip to avoid incorrect pruning
+            }
+
+            TIcebergColumnStats stats = new TIcebergColumnStats();
+            stats.setIcebergTypeId(typeId);
+            stats.setRowCount(dataFile.recordCount());
+
+            if (lowerBounds != null && lowerBounds.containsKey(fieldId)) {
+                java.nio.ByteBuffer buf = lowerBounds.get(fieldId).duplicate();
+                byte[] bytes = new byte[buf.remaining()];
+                buf.get(bytes);
+                stats.setLowerBound(bytes);
+            }
+            if (upperBounds != null && upperBounds.containsKey(fieldId)) {
+                java.nio.ByteBuffer buf = upperBounds.get(fieldId).duplicate();
+                byte[] bytes = new byte[buf.remaining()];
+                buf.get(bytes);
+                stats.setUpperBound(bytes);
+            }
+            if (dataFile.nullValueCounts() != null
+                    && dataFile.nullValueCounts().containsKey(fieldId)) {
+                stats.setNullCount(dataFile.nullValueCounts().get(fieldId));
+            }
+            result.put(field.name().toLowerCase(), stats);
+        }
+        return result.isEmpty() ? null : result;
+    }
+
+    /** Maps an Iceberg type to its numeric ID for the BE decoder; -1 = unsupported. */
+    private int getIcebergTypeId(Type type) {
+        switch (type.typeId()) {
+            case INTEGER:   return 5;
+            case LONG:      return 7;
+            case FLOAT:     return 8;
+            case DOUBLE:    return 9;
+            case DATE:      return 18;
+            case TIMESTAMP: return 19;
+            default:        return -1;
+        }
+    }
+
     private Split createIcebergSysSplit(FileScanTask fileScanTask) {
         long rowCount = fileScanTask.file() == null ? 1 : fileScanTask.file().recordCount();
-        IcebergSplit split = IcebergSplit.newSysTableSplit(
-                SerializationUtil.serializeToBase64(fileScanTask), rowCount);
         split.setTableFormatType(TableFormatType.ICEBERG);
         return split;
     }

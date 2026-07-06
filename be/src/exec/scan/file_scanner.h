@@ -218,6 +218,7 @@ private:
     RuntimeProfile::Counter* _file_read_calls_counter = nullptr;
     RuntimeProfile::Counter* _file_read_time_counter = nullptr;
     RuntimeProfile::Counter* _runtime_filter_partition_pruned_range_counter = nullptr;
+    RuntimeProfile::Counter* _iceberg_files_pruned_by_rf_counter = nullptr;
     RuntimeProfile::Counter* _adaptive_batch_predicted_rows_counter = nullptr;
     RuntimeProfile::Counter* _adaptive_batch_actual_bytes_before_truncate_counter = nullptr;
     RuntimeProfile::Counter* _adaptive_batch_actual_bytes_after_truncate_counter = nullptr;
@@ -277,6 +278,8 @@ private:
     void _init_runtime_filter_partition_prune_ctxs();
     void _init_runtime_filter_partition_prune_block();
     Status _process_runtime_filters_partition_prune(bool& is_partition_pruned);
+    // Returns true when Iceberg manifest stats show the file cannot contain RF-matching rows.
+    bool _should_skip_file_by_iceberg_col_stats(const TFileRangeDesc& range);
     Status _process_conjuncts();
     Status _process_late_arrival_conjuncts();
     void _get_slot_ids(VExpr* expr, std::vector<int>* slot_ids);

@@ -51,6 +51,12 @@
 #include "exec/common/stringop_substring.h"
 #include "exec/rowid_fetcher.h"
 #include "exec/scan/scan_node.h"
+#include "exec/scan/iceberg_column_stats.h"
+#include "core/field.h"
+#include "exprs/runtime_filter_expr.h"
+#include "storage/index/zone_map/zone_map_index.h"
+#include "storage/index/zone_map/zonemap_eval_context.h"
+#include "storage/index/zone_map/zonemap_filter_result.h"
 #include "exprs/aggregate/aggregate_function.h"
 #include "exprs/function/function.h"
 #include "exprs/function/simple_function_factory.h"
@@ -185,6 +191,9 @@ Status FileScanner::init(RuntimeState* state, const VExprContextSPtrs& conjuncts
     _runtime_filter_partition_pruned_range_counter =
             ADD_COUNTER_WITH_LEVEL(_local_state->scanner_profile(),
                                    "RuntimeFilterPartitionPrunedRangeNum", TUnit::UNIT, 1);
+    _iceberg_files_pruned_by_rf_counter =
+            ADD_COUNTER_WITH_LEVEL(_local_state->scanner_profile(),
+                                   "IcebergFilesPrunedByRuntimeFilter", TUnit::UNIT, 1);
     // Keep the current file's adaptive state while also preserving the peak value across all
     // files handled by this scanner instance.
     _adaptive_batch_predicted_rows_counter =
@@ -1033,6 +1042,11 @@ Status FileScanner::_get_next_reader() {
                     // this range can be filtered out by runtime filter partition pruning
                     // so we need to skip this range
                     COUNTER_UPDATE(_runtime_filter_partition_pruned_range_counter, 1);
+                    continue;
+                }
+
+                // Skip file if its column ranges are disjoint from any ready RF range.
+                if (_should_skip_file_by_iceberg_col_stats(range)) {
                     continue;
                 }
             }
@@ -2143,6 +2157,102 @@ void FileScanner::_collect_profile_before_close() {
 
     DorisMetrics::instance()->query_scan_bytes->increment(_file_reader_stats->read_bytes);
     DorisMetrics::instance()->query_scan_rows->increment(_file_reader_stats->read_rows);
+}
+
+bool FileScanner::_should_skip_file_by_iceberg_col_stats(const TFileRangeDesc& range) {
+    if (!range.__isset.iceberg_column_stats || range.iceberg_column_stats.empty()) {
+        return false;
+    }
+
+    // Map slot_id → file stats for columns present in this file's manifest entry.
+    std::unordered_map<int, const TIcebergColumnStats*> slot_id_to_stats;
+    for (const auto* slot : _real_tuple_desc->slots()) {
+        std::string lower_name = slot->col_name();
+        std::transform(lower_name.begin(), lower_name.end(), lower_name.begin(), ::tolower);
+        auto it = range.iceberg_column_stats.find(lower_name);
+        if (it != range.iceberg_column_stats.end()) {
+            slot_id_to_stats[slot->id().asInt()] = &it->second;
+        }
+    }
+    if (slot_id_to_stats.empty()) {
+        return false;
+    }
+
+    // Build ZoneMapEvalContext from decoded Iceberg manifest column stats.
+    ZoneMapEvalContext ctx;
+    for (const auto& [slot_id, stats_ptr] : slot_id_to_stats) {
+        IcebergFileColStats decoded;
+        if (!decode_iceberg_column_stats(*stats_ptr, &decoded)) {
+            continue;
+        }
+
+        auto zone_map = std::make_shared<segment_v2::ZoneMap>();
+        zone_map->has_null     = decoded.all_nulls;
+        zone_map->has_not_null = !decoded.all_nulls;
+
+        if (decoded.all_nulls) {
+            ctx.slots[slot_id] = {nullptr, zone_map};
+            continue;
+        }
+        if (!decoded.has_min_max) {
+            continue;
+        }
+
+        // Iceberg type IDs: INTEGER=5 LONG=7 FLOAT=8 DOUBLE=9 DATE=18 TIMESTAMP=19
+        const int type_id = decoded.type_id;
+        if (type_id == 5) {
+            zone_map->min_value = Field::create_field<TYPE_INT>(static_cast<int32_t>(decoded.min_val));
+            zone_map->max_value = Field::create_field<TYPE_INT>(static_cast<int32_t>(decoded.max_val));
+        } else if (type_id == 7) {
+            zone_map->min_value = Field::create_field<TYPE_BIGINT>(decoded.min_val);
+            zone_map->max_value = Field::create_field<TYPE_BIGINT>(decoded.max_val);
+        } else if (type_id == 18) {
+            zone_map->min_value = Field::create_field<TYPE_DATEV2>(static_cast<uint32_t>(decoded.min_val));
+            zone_map->max_value = Field::create_field<TYPE_DATEV2>(static_cast<uint32_t>(decoded.max_val));
+        } else if (type_id == 19) {
+            zone_map->min_value = Field::create_field<TYPE_DATETIMEV2>(static_cast<uint64_t>(decoded.min_val));
+            zone_map->max_value = Field::create_field<TYPE_DATETIMEV2>(static_cast<uint64_t>(decoded.max_val));
+        } else if (type_id == 8) {
+            zone_map->min_value = Field::create_field<TYPE_FLOAT>(decoded.min_flt);
+            zone_map->max_value = Field::create_field<TYPE_FLOAT>(decoded.max_flt);
+        } else if (type_id == 9) {
+            zone_map->min_value = Field::create_field<TYPE_DOUBLE>(decoded.min_dbl);
+            zone_map->max_value = Field::create_field<TYPE_DOUBLE>(decoded.max_dbl);
+        } else {
+            continue;
+        }
+
+        for (const auto* slot : _real_tuple_desc->slots()) {
+            if (slot->id().asInt() == slot_id) {
+                ctx.slots[slot_id] = {slot->get_data_type_ptr(), zone_map};
+                break;
+            }
+        }
+    }
+
+    if (ctx.slots.empty()) {
+        return false;
+    }
+
+    // Evaluate runtime-filter conjuncts; skip file if any filter excludes its range.
+    for (const auto& conjunct : _conjuncts) {
+        const auto* root = conjunct->root().get();
+        if (!root->is_rf_wrapper() || !root->can_evaluate_zonemap_filter()) {
+            continue;
+        }
+        std::set<int> column_ids;
+        root->collect_slot_column_ids(column_ids);
+        bool have_stats = std::any_of(column_ids.begin(), column_ids.end(),
+                                       [&ctx](int id) { return ctx.slots.count(id) > 0; });
+        if (!have_stats) {
+            continue;
+        }
+        if (root->evaluate_zonemap_filter(ctx) == ZoneMapFilterResult::kFilter) {
+            COUNTER_UPDATE(_iceberg_files_pruned_by_rf_counter, 1);
+            return true;
+        }
+    }
+    return false;
 }
 
 } // namespace doris
