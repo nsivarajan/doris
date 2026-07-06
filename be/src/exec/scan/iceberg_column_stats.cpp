@@ -63,7 +63,7 @@ double decode_big_endian_double(const std::string& bytes) {
 
 } // anonymous namespace
 
-bool decode_iceberg_column_stats(const TIcebergColumnStats& s, IcebergFileColStats* out) {
+bool decode_iceberg_column_stats(const TIcebergFileColumnStats& s, IcebergFileColStats* out) {
     out->type_id = s.iceberg_type_id;
 
     // All-null file: skip regardless of the filter value.

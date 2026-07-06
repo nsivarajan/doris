@@ -2165,7 +2165,7 @@ bool FileScanner::_should_skip_file_by_iceberg_col_stats(const TFileRangeDesc& r
     }
 
     // Map slot_id → file stats for columns present in this file's manifest entry.
-    std::unordered_map<int, const TIcebergColumnStats*> slot_id_to_stats;
+    std::unordered_map<int, const TIcebergFileColumnStats*> slot_id_to_stats;
     for (const auto* slot : _real_tuple_desc->slots()) {
         std::string lower_name = slot->col_name();
         std::transform(lower_name.begin(), lower_name.end(), lower_name.begin(), ::tolower);

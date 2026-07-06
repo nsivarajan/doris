@@ -17,7 +17,7 @@
 
 package org.apache.doris.datasource.iceberg.source;
 
-import org.apache.doris.thrift.TIcebergColumnStats;
+import org.apache.doris.thrift.TIcebergFileColumnStats;
 
 import org.apache.iceberg.DataFile;
 import org.apache.iceberg.FileFormat;
@@ -33,7 +33,7 @@ import java.util.Map;
 
 /**
  * Tests for IcebergScanNode.buildColumnStats(): verifies that Iceberg manifest
- * lowerBounds/upperBounds are correctly encoded and attached to TIcebergColumnStats.
+ * lowerBounds/upperBounds are correctly encoded and attached to TIcebergFileColumnStats.
  */
 public class IcebergScanNodeColumnStatsTest {
 
@@ -59,16 +59,16 @@ public class IcebergScanNodeColumnStatsTest {
      * in the same package (it is), so we call the static helper directly if it is made
      * package-private, or via a thin test-only accessor.
      *
-     * For now we test through the public surface: verify TIcebergColumnStats encoding.
+     * For now we test through the public surface: verify TIcebergFileColumnStats encoding.
      */
 
     @Test
     public void testLongBoundsEncodedCorrectly() {
-        // Simulate what buildColumnStats does: big-endian encode and store in TIcebergColumnStats.
+        // Simulate what buildColumnStats does: big-endian encode and store in TIcebergFileColumnStats.
         long minVal = 2451900L;
         long maxVal = 2451999L;
 
-        TIcebergColumnStats stats = new TIcebergColumnStats();
+        TIcebergFileColumnStats stats = new TIcebergFileColumnStats();
         stats.setIcebergTypeId(7); // LONG
 
         ByteBuffer lb = longBuf(minVal);
@@ -98,7 +98,7 @@ public class IcebergScanNodeColumnStatsTest {
         int minVal = 100;
         int maxVal = 500;
 
-        TIcebergColumnStats stats = new TIcebergColumnStats();
+        TIcebergFileColumnStats stats = new TIcebergFileColumnStats();
         stats.setIcebergTypeId(5); // INTEGER
 
         ByteBuffer lb = intBuf(minVal);
@@ -122,7 +122,7 @@ public class IcebergScanNodeColumnStatsTest {
 
     @Test
     public void testNullCountStoredCorrectly() {
-        TIcebergColumnStats stats = new TIcebergColumnStats();
+        TIcebergFileColumnStats stats = new TIcebergFileColumnStats();
         stats.setIcebergTypeId(7);
         stats.setNullCount(50L);
         stats.setRowCount(1000L);
@@ -135,7 +135,7 @@ public class IcebergScanNodeColumnStatsTest {
     @Test
     public void testAllNullFile() {
         // null_count == row_count → all-null file
-        TIcebergColumnStats stats = new TIcebergColumnStats();
+        TIcebergFileColumnStats stats = new TIcebergFileColumnStats();
         stats.setIcebergTypeId(7);
         stats.setNullCount(500L);
         stats.setRowCount(500L);
@@ -151,7 +151,7 @@ public class IcebergScanNodeColumnStatsTest {
         long minVal = -999L;
         long maxVal = -1L;
 
-        TIcebergColumnStats stats = new TIcebergColumnStats();
+        TIcebergFileColumnStats stats = new TIcebergFileColumnStats();
         stats.setIcebergTypeId(7);
 
         ByteBuffer lb = longBuf(minVal);

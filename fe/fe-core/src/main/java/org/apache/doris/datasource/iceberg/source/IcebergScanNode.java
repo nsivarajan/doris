@@ -58,7 +58,7 @@ import org.apache.doris.thrift.TColumnCategory;
 import org.apache.doris.thrift.TExplainLevel;
 import org.apache.doris.thrift.TFileFormatType;
 import org.apache.doris.thrift.TFileRangeDesc;
-import org.apache.doris.thrift.TIcebergColumnStats;
+import org.apache.doris.thrift.TIcebergFileColumnStats;
 import org.apache.doris.thrift.TIcebergDeleteFileDesc;
 import org.apache.doris.thrift.TIcebergFileDesc;
 import org.apache.doris.thrift.TPlanNode;
@@ -881,7 +881,7 @@ public class IcebergScanNode extends FileQueryScanNode {
         split.setTableFormatType(TableFormatType.ICEBERG);
         split.setTargetSplitSize(targetSplitSize);
         // Attach manifest column stats so BE can prune files via runtime-filter min/max.
-        Map<String, TIcebergColumnStats> colStats = buildColumnStats(dataFile);
+        Map<String, TIcebergFileColumnStats> colStats = buildColumnStats(dataFile);
         if (colStats != null) {
             split.setIcebergColumnStats(colStats);
         }
@@ -909,7 +909,7 @@ public class IcebergScanNode extends FileQueryScanNode {
     }
 
     /** Extracts per-file min/max bounds from an Iceberg DataFile for BE file pruning. */
-    private Map<String, TIcebergColumnStats> buildColumnStats(DataFile dataFile) {
+    private Map<String, TIcebergFileColumnStats> buildColumnStats(DataFile dataFile) {
         java.util.Map<Integer, java.nio.ByteBuffer> lowerBounds = dataFile.lowerBounds();
         java.util.Map<Integer, java.nio.ByteBuffer> upperBounds = dataFile.upperBounds();
         if (lowerBounds == null && upperBounds == null) {
@@ -924,7 +924,7 @@ public class IcebergScanNode extends FileQueryScanNode {
             fieldIds.addAll(upperBounds.keySet());
         }
 
-        Map<String, TIcebergColumnStats> result = new java.util.HashMap<>();
+        Map<String, TIcebergFileColumnStats> result = new java.util.HashMap<>();
         for (int fieldId : fieldIds) {
             Types.NestedField field = icebergTable.schema().findField(fieldId);
             if (field == null) {
@@ -935,7 +935,7 @@ public class IcebergScanNode extends FileQueryScanNode {
                 continue;  // unsupported type — skip to avoid incorrect pruning
             }
 
-            TIcebergColumnStats stats = new TIcebergColumnStats();
+            TIcebergFileColumnStats stats = new TIcebergFileColumnStats();
             stats.setIcebergTypeId(typeId);
             stats.setRowCount(dataFile.recordCount());
 

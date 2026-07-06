@@ -22,9 +22,9 @@
 
 namespace doris {
 
-// Build a TIcebergColumnStats with big-endian encoded int64 bounds.
-static TIcebergColumnStats make_int_stats(int64_t lo, int64_t hi, int32_t type_id = 7) {
-    TIcebergColumnStats s;
+// Build a TIcebergFileColumnStats with big-endian encoded int64 bounds.
+static TIcebergFileColumnStats make_int_stats(int64_t lo, int64_t hi, int32_t type_id = 7) {
+    TIcebergFileColumnStats s;
     s.__set_iceberg_type_id(type_id);
     s.__set_row_count(1000);
     s.__set_null_count(0);
@@ -68,7 +68,7 @@ TEST(IcebergColumnStatsTest, DecodeDate) {
     // Iceberg uses 4-byte big-endian for DATE
     int32_t day_min = 18000; // ~2019-04-14
     int32_t day_max = 18365; // ~2020-04-03
-    TIcebergColumnStats s;
+    TIcebergFileColumnStats s;
     s.__set_iceberg_type_id(18 /*DATE*/);
     s.__set_row_count(500);
     s.__set_null_count(0);
@@ -91,7 +91,7 @@ TEST(IcebergColumnStatsTest, DecodeDate) {
 }
 
 TEST(IcebergColumnStatsTest, AllNullFile) {
-    TIcebergColumnStats s;
+    TIcebergFileColumnStats s;
     s.__set_iceberg_type_id(7);
     s.__set_row_count(1000);
     s.__set_null_count(1000); // all nulls
@@ -104,7 +104,7 @@ TEST(IcebergColumnStatsTest, AllNullFile) {
 }
 
 TEST(IcebergColumnStatsTest, MissingBounds) {
-    TIcebergColumnStats s;
+    TIcebergFileColumnStats s;
     s.__set_iceberg_type_id(7);
     // No lower_bound or upper_bound set
 
@@ -114,7 +114,7 @@ TEST(IcebergColumnStatsTest, MissingBounds) {
 }
 
 TEST(IcebergColumnStatsTest, UnsupportedType) {
-    TIcebergColumnStats s;
+    TIcebergFileColumnStats s;
     s.__set_iceberg_type_id(99); // unknown type
     s.__set_lower_bound("xxxx");
     s.__set_upper_bound("yyyy");

@@ -36,7 +36,7 @@ struct IcebergFileColStats {
 
 // Decode Iceberg binary-encoded column statistics into IcebergFileColStats.
 // Returns false if stats cannot be decoded; caller should not prune in that case.
-bool decode_iceberg_column_stats(const TIcebergColumnStats& thrift_stats,
+bool decode_iceberg_column_stats(const TIcebergFileColumnStats& thrift_stats,
                                   IcebergFileColStats* out);
 
 // Returns true if [file_min, file_max] and [rf_min, rf_max] have no overlap.
