@@ -101,6 +101,7 @@ import org.apache.iceberg.mapping.NameMappingParser;
 import org.apache.iceberg.types.Type;
 import org.apache.iceberg.types.Types;
 import org.apache.iceberg.util.ScanTaskUtil;
+import org.apache.iceberg.util.SerializationUtil;
 import org.apache.iceberg.util.TableScanUtil;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
@@ -976,6 +977,9 @@ public class IcebergScanNode extends FileQueryScanNode {
     }
 
     private Split createIcebergSysSplit(FileScanTask fileScanTask) {
+        long rowCount = fileScanTask.file() == null ? 1 : fileScanTask.file().recordCount();
+        IcebergSplit split = IcebergSplit.newSysTableSplit(
+                SerializationUtil.serializeToBase64(fileScanTask), rowCount);
         split.setTableFormatType(TableFormatType.ICEBERG);
         return split;
     }
