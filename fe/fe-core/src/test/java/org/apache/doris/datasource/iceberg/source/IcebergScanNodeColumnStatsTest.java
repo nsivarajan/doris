@@ -19,52 +19,37 @@ package org.apache.doris.datasource.iceberg.source;
 
 import org.apache.doris.thrift.TIcebergFileColumnStats;
 
-import org.apache.iceberg.DataFile;
-import org.apache.iceberg.FileFormat;
-import org.apache.iceberg.Metrics;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
-import org.mockito.Mockito;
 
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
-import java.util.HashMap;
-import java.util.Map;
 
 /**
  * Tests for IcebergScanNode.buildColumnStats(): verifies that Iceberg manifest
  * lowerBounds/upperBounds are correctly encoded and attached to TIcebergFileColumnStats.
+ * Iceberg spec (Appendix D) mandates little-endian encoding for all numeric bounds.
  */
 public class IcebergScanNodeColumnStatsTest {
 
-    // Encode a long as big-endian 8 bytes (Iceberg wire format for LONG).
+    // Encode a long as little-endian 8 bytes (Iceberg wire format for LONG/TIMESTAMP).
     private static ByteBuffer longBuf(long v) {
-        ByteBuffer buf = ByteBuffer.allocate(8).order(ByteOrder.BIG_ENDIAN);
+        ByteBuffer buf = ByteBuffer.allocate(8).order(ByteOrder.LITTLE_ENDIAN);
         buf.putLong(v);
         buf.flip();
         return buf;
     }
 
-    // Encode an int as big-endian 4 bytes (Iceberg wire format for INTEGER/DATE).
+    // Encode an int as little-endian 4 bytes (Iceberg wire format for INTEGER/DATE).
     private static ByteBuffer intBuf(int v) {
-        ByteBuffer buf = ByteBuffer.allocate(4).order(ByteOrder.BIG_ENDIAN);
+        ByteBuffer buf = ByteBuffer.allocate(4).order(ByteOrder.LITTLE_ENDIAN);
         buf.putInt(v);
         buf.flip();
         return buf;
     }
 
-    /**
-     * Helper that calls the package-private buildColumnStats via reflection so we don't
-     * need a fully-constructed IcebergScanNode.  In practice, unit test should be placed
-     * in the same package (it is), so we call the static helper directly if it is made
-     * package-private, or via a thin test-only accessor.
-     *
-     * For now we test through the public surface: verify TIcebergFileColumnStats encoding.
-     */
-
     @Test
     public void testLongBoundsEncodedCorrectly() {
-        // Simulate what buildColumnStats does: big-endian encode and store in TIcebergFileColumnStats.
         long minVal = 2451900L;
         long maxVal = 2451999L;
 
@@ -81,14 +66,13 @@ public class IcebergScanNodeColumnStatsTest {
         ub.get(ubBytes);
         stats.setUpperBound(ubBytes);
 
-        // Verify round-trip: big-endian decode
         Assertions.assertEquals(8, stats.getLowerBound().length);
         Assertions.assertEquals(8, stats.getUpperBound().length);
         Assertions.assertEquals(7, stats.getIcebergTypeId());
 
-        // Decode manually to verify correctness
-        long decodedMin = decodeBigEndianLong(stats.getLowerBound());
-        long decodedMax = decodeBigEndianLong(stats.getUpperBound());
+        // Verify round-trip with little-endian decode (mirrors BE logic)
+        long decodedMin = decodeLittleEndianLong(stats.getLowerBound());
+        long decodedMax = decodeLittleEndianLong(stats.getUpperBound());
         Assertions.assertEquals(minVal, decodedMin);
         Assertions.assertEquals(maxVal, decodedMax);
     }
@@ -114,8 +98,8 @@ public class IcebergScanNodeColumnStatsTest {
         Assertions.assertEquals(4, stats.getLowerBound().length);
         Assertions.assertEquals(5, stats.getIcebergTypeId());
 
-        long decodedMin = decodeBigEndianLong(stats.getLowerBound());
-        long decodedMax = decodeBigEndianLong(stats.getUpperBound());
+        long decodedMin = decodeLittleEndianLong(stats.getLowerBound());
+        long decodedMax = decodeLittleEndianLong(stats.getUpperBound());
         Assertions.assertEquals(minVal, decodedMin);
         Assertions.assertEquals(maxVal, decodedMax);
     }
@@ -134,12 +118,10 @@ public class IcebergScanNodeColumnStatsTest {
 
     @Test
     public void testAllNullFile() {
-        // null_count == row_count → all-null file
         TIcebergFileColumnStats stats = new TIcebergFileColumnStats();
         stats.setIcebergTypeId(7);
         stats.setNullCount(500L);
         stats.setRowCount(500L);
-        // No bounds set
 
         Assertions.assertFalse(stats.isSetLowerBound());
         Assertions.assertFalse(stats.isSetUpperBound());
@@ -164,15 +146,15 @@ public class IcebergScanNodeColumnStatsTest {
         ub.get(ubBytes);
         stats.setUpperBound(ubBytes);
 
-        Assertions.assertEquals(minVal, decodeBigEndianLong(stats.getLowerBound()));
-        Assertions.assertEquals(maxVal, decodeBigEndianLong(stats.getUpperBound()));
+        Assertions.assertEquals(minVal, decodeLittleEndianLong(stats.getLowerBound()));
+        Assertions.assertEquals(maxVal, decodeLittleEndianLong(stats.getUpperBound()));
     }
 
-    // Mirror the BE decoding logic: big-endian sign-extended int
-    private static long decodeBigEndianLong(byte[] bytes) {
+    // Mirror the BE decoding logic: little-endian sign-extended int (LSB at index 0).
+    private static long decodeLittleEndianLong(byte[] bytes) {
         long val = 0;
-        for (byte b : bytes) {
-            val = (val << 8) | (b & 0xFFL);
+        for (int i = bytes.length - 1; i >= 0; i--) {
+            val = (val << 8) | (bytes[i] & 0xFFL);
         }
         int shift = 64 - bytes.length * 8;
         if (shift > 0 && shift < 64) {

@@ -96,6 +96,7 @@
 #include "runtime/descriptors.h"
 #include "runtime/runtime_profile.h"
 #include "runtime/runtime_state.h"
+#include "core/value/vdatetime_value.h"
 
 namespace cctz {
 class time_zone;
@@ -1045,11 +1046,14 @@ Status FileScanner::_get_next_reader() {
                     continue;
                 }
 
-                // Skip file if its column ranges are disjoint from any ready RF range.
-                if (_should_skip_file_by_iceberg_col_stats(range)) {
-                    continue;
-                }
             }
+        }
+
+        // Iceberg manifest column-stats pruning: independent of partition columns so it
+        // also applies to unpartitioned tables.
+        if (_state->query_options().enable_runtime_filter_partition_prune &&
+            _should_skip_file_by_iceberg_col_stats(range)) {
+            continue;
         }
 
         // create reader for specific format
@@ -2207,11 +2211,47 @@ bool FileScanner::_should_skip_file_by_iceberg_col_stats(const TFileRangeDesc& r
             zone_map->min_value = Field::create_field<TYPE_BIGINT>(decoded.min_val);
             zone_map->max_value = Field::create_field<TYPE_BIGINT>(decoded.max_val);
         } else if (type_id == 18) {
-            zone_map->min_value = Field::create_field<TYPE_DATEV2>(static_cast<uint32_t>(decoded.min_val));
-            zone_map->max_value = Field::create_field<TYPE_DATEV2>(static_cast<uint32_t>(decoded.max_val));
+            // Iceberg DATE = days since epoch (int32). Convert to Doris DateV2 packed uint32.
+            static const uint64_t EPOCH_DAYNR = calc_daynr(1970, 1, 1);
+            auto to_datev2 = [&](int64_t days) -> std::optional<uint32_t> {
+                int64_t daynr = static_cast<int64_t>(EPOCH_DAYNR) + days;
+                if (daynr <= 0) return std::nullopt;
+                DateV2Value<DateV2ValueType> d;
+                if (!d.get_date_from_daynr(static_cast<uint64_t>(daynr))) return std::nullopt;
+                return d.to_date_int_val();
+            };
+            auto min_opt = to_datev2(decoded.min_val);
+            auto max_opt = to_datev2(decoded.max_val);
+            if (!min_opt || !max_opt) continue;
+            zone_map->min_value = Field::create_field<TYPE_DATEV2>(*min_opt);
+            zone_map->max_value = Field::create_field<TYPE_DATEV2>(*max_opt);
         } else if (type_id == 19) {
-            zone_map->min_value = Field::create_field<TYPE_DATETIMEV2>(static_cast<uint64_t>(decoded.min_val));
-            zone_map->max_value = Field::create_field<TYPE_DATETIMEV2>(static_cast<uint64_t>(decoded.max_val));
+            // Iceberg TIMESTAMP = microseconds since epoch (int64). Convert to Doris DateTimeV2.
+            static const uint64_t EPOCH_DAYNR = calc_daynr(1970, 1, 1);
+            static constexpr int64_t MICROS_PER_DAY    = 86400LL * 1000000LL;
+            static constexpr int64_t MICROS_PER_HOUR   = 3600LL  * 1000000LL;
+            static constexpr int64_t MICROS_PER_MINUTE = 60LL    * 1000000LL;
+            static constexpr int64_t MICROS_PER_SECOND = 1000000LL;
+            auto to_datetimev2 = [&](int64_t micros) -> std::optional<uint64_t> {
+                int64_t days = micros / MICROS_PER_DAY;
+                int64_t rem  = micros % MICROS_PER_DAY;
+                if (rem < 0) { rem += MICROS_PER_DAY; --days; }
+                int64_t daynr = static_cast<int64_t>(EPOCH_DAYNR) + days;
+                if (daynr <= 0) return std::nullopt;
+                DateV2Value<DateTimeV2ValueType> dt;
+                if (!dt.get_date_from_daynr(static_cast<uint64_t>(daynr))) return std::nullopt;
+                dt.unchecked_set_time(dt.year(), dt.month(), dt.day(),
+                    static_cast<uint8_t>(rem / MICROS_PER_HOUR),
+                    static_cast<uint8_t>((rem % MICROS_PER_HOUR) / MICROS_PER_MINUTE),
+                    static_cast<uint16_t>((rem % MICROS_PER_MINUTE) / MICROS_PER_SECOND),
+                    static_cast<uint32_t>(rem % MICROS_PER_SECOND));
+                return dt.to_date_int_val();
+            };
+            auto min_opt = to_datetimev2(decoded.min_val);
+            auto max_opt = to_datetimev2(decoded.max_val);
+            if (!min_opt || !max_opt) continue;
+            zone_map->min_value = Field::create_field<TYPE_DATETIMEV2>(*min_opt);
+            zone_map->max_value = Field::create_field<TYPE_DATETIMEV2>(*max_opt);
         } else if (type_id == 8) {
             zone_map->min_value = Field::create_field<TYPE_FLOAT>(decoded.min_flt);
             zone_map->max_value = Field::create_field<TYPE_FLOAT>(decoded.max_flt);
@@ -2247,7 +2287,7 @@ bool FileScanner::_should_skip_file_by_iceberg_col_stats(const TFileRangeDesc& r
         if (!have_stats) {
             continue;
         }
-        if (root->evaluate_zonemap_filter(ctx) == ZoneMapFilterResult::kFilter) {
+        if (root->evaluate_zonemap_filter(ctx) == ZoneMapFilterResult::kNoMatch) {
             COUNTER_UPDATE(_iceberg_files_pruned_by_rf_counter, 1);
             return true;
         }

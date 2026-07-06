@@ -23,11 +23,13 @@ namespace doris {
 
 namespace {
 
-// Decode big-endian two's complement bytes → int64_t (Iceberg INTEGER/LONG/DATE/TIMESTAMP).
-int64_t decode_big_endian_int(const std::string& bytes) {
+// Iceberg spec (Appendix D) mandates little-endian encoding for all numeric bounds.
+// Java Conversions.toByteBuffer() uses ByteOrder.LITTLE_ENDIAN for INTEGER/LONG/FLOAT/DOUBLE.
+
+int64_t decode_little_endian_int(const std::string& bytes) {
     int64_t val = 0;
-    for (unsigned char b : bytes) {
-        val = (val << 8) | static_cast<int64_t>(b);
+    for (int i = static_cast<int>(bytes.size()) - 1; i >= 0; --i) {
+        val = (val << 8) | static_cast<int64_t>(static_cast<unsigned char>(bytes[i]));
     }
     // Sign-extend based on the actual byte width.
     int shift = 64 - static_cast<int>(bytes.size() * 8);
@@ -37,11 +39,10 @@ int64_t decode_big_endian_int(const std::string& bytes) {
     return val;
 }
 
-// Decode IEEE 754 big-endian bytes → float (Iceberg FLOAT).
-float decode_big_endian_float(const std::string& bytes) {
+float decode_little_endian_float(const std::string& bytes) {
     if (bytes.size() < 4) return 0.0f;
     uint32_t raw = 0;
-    for (int i = 0; i < 4; ++i) {
+    for (int i = 3; i >= 0; --i) {
         raw = (raw << 8) | static_cast<uint32_t>(static_cast<unsigned char>(bytes[i]));
     }
     float val;
@@ -49,11 +50,10 @@ float decode_big_endian_float(const std::string& bytes) {
     return val;
 }
 
-// Decode IEEE 754 big-endian bytes → double (Iceberg DOUBLE).
-double decode_big_endian_double(const std::string& bytes) {
+double decode_little_endian_double(const std::string& bytes) {
     if (bytes.size() < 8) return 0.0;
     uint64_t raw = 0;
-    for (int i = 0; i < 8; ++i) {
+    for (int i = 7; i >= 0; --i) {
         raw = (raw << 8) | static_cast<uint64_t>(static_cast<unsigned char>(bytes[i]));
     }
     double val;
@@ -79,34 +79,25 @@ bool decode_iceberg_column_stats(const TIcebergFileColumnStats& s, IcebergFileCo
     const int type_id = s.iceberg_type_id;
 
     if (type_id == 5 || type_id == 7 || type_id == 18 || type_id == 19) {
-        // INTEGER(5), LONG(7), DATE(18), TIMESTAMP(19) — big-endian signed int
-        out->min_val = decode_big_endian_int(s.lower_bound);
-        out->max_val = decode_big_endian_int(s.upper_bound);
+        // INTEGER(5), LONG(7), DATE(18 = days since epoch), TIMESTAMP(19 = micros since epoch)
+        out->min_val = decode_little_endian_int(s.lower_bound);
+        out->max_val = decode_little_endian_int(s.upper_bound);
         out->has_min_max = true;
     } else if (type_id == 8) {
-        // FLOAT(8) — IEEE 754 big-endian 32-bit
-        out->min_flt = decode_big_endian_float(s.lower_bound);
-        out->max_flt = decode_big_endian_float(s.upper_bound);
+        // FLOAT(8) — IEEE 754 little-endian 32-bit
+        out->min_flt = decode_little_endian_float(s.lower_bound);
+        out->max_flt = decode_little_endian_float(s.upper_bound);
         out->has_min_max = true;
     } else if (type_id == 9) {
-        // DOUBLE(9) — IEEE 754 big-endian 64-bit
-        out->min_dbl = decode_big_endian_double(s.lower_bound);
-        out->max_dbl = decode_big_endian_double(s.upper_bound);
+        // DOUBLE(9) — IEEE 754 little-endian 64-bit
+        out->min_dbl = decode_little_endian_double(s.lower_bound);
+        out->max_dbl = decode_little_endian_double(s.upper_bound);
         out->has_min_max = true;
     } else {
         return false; // unsupported type — caller should not prune
     }
 
     return true;
-}
-
-bool file_excluded_by_minmax(const IcebergFileColStats& fs,
-                              int64_t rf_min, int64_t rf_max) {
-    if (!fs.has_min_max) {
-        return false;
-    }
-    // No overlap between [file_min, file_max] and [rf_min, rf_max].
-    return fs.max_val < rf_min || fs.min_val > rf_max;
 }
 
 } // namespace doris

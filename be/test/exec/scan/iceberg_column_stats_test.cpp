@@ -22,23 +22,25 @@
 
 namespace doris {
 
-// Build a TIcebergFileColumnStats with big-endian encoded int64 bounds.
+// Iceberg spec (Appendix D) uses little-endian for all numeric bounds.
+// Encode int64 value as 8-byte LE (matches Java Conversions.toByteBuffer LONG/TIMESTAMP).
 static TIcebergFileColumnStats make_int_stats(int64_t lo, int64_t hi, int32_t type_id = 7) {
     TIcebergFileColumnStats s;
     s.__set_iceberg_type_id(type_id);
     s.__set_row_count(1000);
     s.__set_null_count(0);
 
-    auto encode = [](int64_t v) -> std::string {
+    // little-endian: LSB at index 0
+    auto encode8 = [](int64_t v) -> std::string {
         std::string b(8, '\0');
-        for (int i = 7; i >= 0; --i) {
+        for (int i = 0; i < 8; ++i) {
             b[i] = static_cast<char>(v & 0xFF);
             v >>= 8;
         }
         return b;
     };
-    s.__set_lower_bound(encode(lo));
-    s.__set_upper_bound(encode(hi));
+    s.__set_lower_bound(encode8(lo));
+    s.__set_upper_bound(encode8(hi));
     return s;
 }
 
@@ -64,17 +66,17 @@ TEST(IcebergColumnStatsTest, DecodeLong) {
 }
 
 TEST(IcebergColumnStatsTest, DecodeDate) {
-    // DATE is stored as days since epoch (int32, big-endian in 4 bytes)
-    // Iceberg uses 4-byte big-endian for DATE
+    // DATE = days since epoch, 4-byte little-endian (Iceberg INTEGER encoding).
     int32_t day_min = 18000; // ~2019-04-14
     int32_t day_max = 18365; // ~2020-04-03
     TIcebergFileColumnStats s;
     s.__set_iceberg_type_id(18 /*DATE*/);
     s.__set_row_count(500);
     s.__set_null_count(0);
+    // little-endian 4-byte encode
     auto encode4 = [](int32_t v) -> std::string {
         std::string b(4, '\0');
-        for (int i = 3; i >= 0; --i) {
+        for (int i = 0; i < 4; ++i) {
             b[i] = static_cast<char>(v & 0xFF);
             v >>= 8;
         }
@@ -138,7 +140,6 @@ TEST(IcebergColumnStatsTest, ExcludedWhenRFAboveFileMax) {
     fs.has_min_max = true;
     fs.min_val = 100;
     fs.max_val = 200;
-    // RF wants values in [300, 400] — no overlap with file [100, 200]
     EXPECT_TRUE(file_excluded_by_minmax(fs, 300, 400));
 }
 
@@ -147,7 +148,6 @@ TEST(IcebergColumnStatsTest, ExcludedWhenRFBelowFileMin) {
     fs.has_min_max = true;
     fs.min_val = 500;
     fs.max_val = 600;
-    // RF wants [100, 200] — no overlap with file [500, 600]
     EXPECT_TRUE(file_excluded_by_minmax(fs, 100, 200));
 }
 
@@ -156,7 +156,6 @@ TEST(IcebergColumnStatsTest, NotExcludedWhenOverlap) {
     fs.has_min_max = true;
     fs.min_val = 100;
     fs.max_val = 300;
-    // RF [200, 400] overlaps file [100, 300]
     EXPECT_FALSE(file_excluded_by_minmax(fs, 200, 400));
 }
 
@@ -166,7 +165,7 @@ TEST(IcebergColumnStatsTest, NotExcludedWhenRFExactlyAtBoundary) {
     fs.min_val = 100;
     fs.max_val = 200;
     EXPECT_FALSE(file_excluded_by_minmax(fs, 200, 300)); // touches max
-    EXPECT_FALSE(file_excluded_by_minmax(fs, 50,  100)); // touches min
+    EXPECT_FALSE(file_excluded_by_minmax(fs, 50, 100));  // touches min
 }
 
 TEST(IcebergColumnStatsTest, NotExcludedWhenNoMinMax) {

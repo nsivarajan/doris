@@ -58,8 +58,8 @@ import org.apache.doris.thrift.TColumnCategory;
 import org.apache.doris.thrift.TExplainLevel;
 import org.apache.doris.thrift.TFileFormatType;
 import org.apache.doris.thrift.TFileRangeDesc;
-import org.apache.doris.thrift.TIcebergFileColumnStats;
 import org.apache.doris.thrift.TIcebergDeleteFileDesc;
+import org.apache.doris.thrift.TIcebergFileColumnStats;
 import org.apache.doris.thrift.TIcebergFileDesc;
 import org.apache.doris.thrift.TPlanNode;
 import org.apache.doris.thrift.TPushAggOp;
@@ -101,7 +101,6 @@ import org.apache.iceberg.mapping.NameMappingParser;
 import org.apache.iceberg.types.Type;
 import org.apache.iceberg.types.Types;
 import org.apache.iceberg.util.ScanTaskUtil;
-import org.apache.iceberg.util.SerializationUtil;
 import org.apache.iceberg.util.TableScanUtil;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
@@ -953,7 +952,10 @@ public class IcebergScanNode extends FileQueryScanNode {
             }
             if (dataFile.nullValueCounts() != null
                     && dataFile.nullValueCounts().containsKey(fieldId)) {
-                stats.setNullCount(dataFile.nullValueCounts().get(fieldId));
+                Long nc = dataFile.nullValueCounts().get(fieldId);
+                if (nc != null) {
+                    stats.setNullCount(nc);
+                }
             }
             result.put(field.name().toLowerCase(), stats);
         }
@@ -974,7 +976,6 @@ public class IcebergScanNode extends FileQueryScanNode {
     }
 
     private Split createIcebergSysSplit(FileScanTask fileScanTask) {
-        long rowCount = fileScanTask.file() == null ? 1 : fileScanTask.file().recordCount();
         split.setTableFormatType(TableFormatType.ICEBERG);
         return split;
     }
