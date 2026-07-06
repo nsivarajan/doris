@@ -19,6 +19,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <map>
+#include <unordered_map>
 #include <memory>
 #include <string>
 #include <utility>

@@ -17,9 +17,12 @@
 
 #pragma once
 
+#include <vector>
+#include "exprs/vexpr_fwd.h"
 #include "gen_cpp/PlanNodes_types.h"
 
 namespace doris {
+class SlotDescriptor;
 
 // Decoded per-file column statistics from an Iceberg manifest entry.
 struct IcebergFileColStats {
@@ -42,5 +45,12 @@ bool decode_iceberg_column_stats(const TIcebergFileColumnStats& thrift_stats,
 // Returns true if [file_min, file_max] and [rf_min, rf_max] have no overlap.
 bool file_excluded_by_minmax(const IcebergFileColStats& file_stats,
                               int64_t rf_min, int64_t rf_max);
+
+// Returns true when Iceberg manifest column stats in `range` are disjoint from every
+// ready runtime-filter conjunct, meaning the file can be skipped without opening it.
+// Called by both FileScanner (old path) and FileScannerV2 (format_v2 path).
+bool iceberg_file_excluded_by_rf(const TFileRangeDesc& range,
+                                  const VExprContextSPtrs& conjuncts,
+                                  const std::vector<SlotDescriptor*>& slots);
 
 } // namespace doris

@@ -17,7 +17,18 @@
 
 #include "exec/scan/iceberg_column_stats.h"
 
+#include <algorithm>
 #include <cstring>
+#include <set>
+
+#include "core/value/vdatetime_value.h"
+#include "exprs/vexpr.h"
+#include "exprs/vexpr_context.h"
+#include "runtime/descriptors.h"
+#include "storage/index/zone_map/zone_map_index.h"
+#include "storage/index/zone_map/zonemap_eval_context.h"
+#include "storage/index/zone_map/zonemap_filter_result.h"
+#include "core/field.h"
 
 namespace doris {
 
@@ -98,6 +109,143 @@ bool decode_iceberg_column_stats(const TIcebergFileColumnStats& s, IcebergFileCo
     }
 
     return true;
+}
+
+bool file_excluded_by_minmax(const IcebergFileColStats& fs, int64_t rf_min, int64_t rf_max) {
+    if (!fs.has_min_max) {
+        return false;
+    }
+    // No overlap between [file_min, file_max] and [rf_min, rf_max].
+    return fs.max_val < rf_min || fs.min_val > rf_max;
+}
+
+bool iceberg_file_excluded_by_rf(const TFileRangeDesc& range,
+                                  const VExprContextSPtrs& conjuncts,
+                                  const std::vector<SlotDescriptor*>& slots) {
+    if (!range.__isset.iceberg_column_stats || range.iceberg_column_stats.empty()) {
+        return false;
+    }
+
+    // Map slot_id → manifest stats for columns present in this file's entry.
+    std::unordered_map<int, const TIcebergFileColumnStats*> slot_id_to_stats;
+    for (const auto* slot : slots) {
+        std::string lower_name = slot->col_name();
+        std::transform(lower_name.begin(), lower_name.end(), lower_name.begin(), ::tolower);
+        auto it = range.iceberg_column_stats.find(lower_name);
+        if (it != range.iceberg_column_stats.end()) {
+            slot_id_to_stats[slot->id()] = &it->second;
+        }
+    }
+    if (slot_id_to_stats.empty()) {
+        return false;
+    }
+
+    // Build ZoneMapEvalContext from decoded Iceberg manifest column stats.
+    ZoneMapEvalContext ctx;
+    for (const auto& [slot_id, stats_ptr] : slot_id_to_stats) {
+        IcebergFileColStats decoded;
+        if (!decode_iceberg_column_stats(*stats_ptr, &decoded)) {
+            continue;
+        }
+
+        auto zone_map = std::make_shared<segment_v2::ZoneMap>();
+        zone_map->has_null     = decoded.all_nulls;
+        zone_map->has_not_null = !decoded.all_nulls;
+
+        if (decoded.all_nulls) {
+            ctx.slots[slot_id] = {nullptr, zone_map};
+            continue;
+        }
+        if (!decoded.has_min_max) {
+            continue;
+        }
+
+        const int type_id = decoded.type_id;
+        if (type_id == 5) {
+            zone_map->min_value = Field::create_field<TYPE_INT>(static_cast<int32_t>(decoded.min_val));
+            zone_map->max_value = Field::create_field<TYPE_INT>(static_cast<int32_t>(decoded.max_val));
+        } else if (type_id == 7) {
+            zone_map->min_value = Field::create_field<TYPE_BIGINT>(decoded.min_val);
+            zone_map->max_value = Field::create_field<TYPE_BIGINT>(decoded.max_val);
+        } else if (type_id == 18) {
+            static const uint64_t EPOCH_DAYNR = calc_daynr(1970, 1, 1);
+            auto to_datev2 = [&](int64_t days) -> std::optional<uint32_t> {
+                int64_t daynr = static_cast<int64_t>(EPOCH_DAYNR) + days;
+                if (daynr <= 0) return std::nullopt;
+                DateV2Value<DateV2ValueType> d;
+                if (!d.get_date_from_daynr(static_cast<uint64_t>(daynr))) return std::nullopt;
+                return d.to_date_int_val();
+            };
+            auto min_opt = to_datev2(decoded.min_val);
+            auto max_opt = to_datev2(decoded.max_val);
+            if (!min_opt || !max_opt) continue;
+            zone_map->min_value = Field::create_field<TYPE_DATEV2>(*min_opt);
+            zone_map->max_value = Field::create_field<TYPE_DATEV2>(*max_opt);
+        } else if (type_id == 19) {
+            static const uint64_t EPOCH_DAYNR = calc_daynr(1970, 1, 1);
+            static constexpr int64_t MICROS_PER_DAY    = 86400LL * 1000000LL;
+            static constexpr int64_t MICROS_PER_HOUR   = 3600LL  * 1000000LL;
+            static constexpr int64_t MICROS_PER_MINUTE = 60LL    * 1000000LL;
+            static constexpr int64_t MICROS_PER_SECOND = 1000000LL;
+            auto to_datetimev2 = [&](int64_t micros) -> std::optional<uint64_t> {
+                int64_t days = micros / MICROS_PER_DAY;
+                int64_t rem  = micros % MICROS_PER_DAY;
+                if (rem < 0) { rem += MICROS_PER_DAY; --days; }
+                int64_t daynr = static_cast<int64_t>(EPOCH_DAYNR) + days;
+                if (daynr <= 0) return std::nullopt;
+                DateV2Value<DateTimeV2ValueType> dt;
+                if (!dt.get_date_from_daynr(static_cast<uint64_t>(daynr))) return std::nullopt;
+                dt.unchecked_set_time(dt.year(), dt.month(), dt.day(),
+                    static_cast<uint8_t>(rem / MICROS_PER_HOUR),
+                    static_cast<uint8_t>((rem % MICROS_PER_HOUR) / MICROS_PER_MINUTE),
+                    static_cast<uint16_t>((rem % MICROS_PER_MINUTE) / MICROS_PER_SECOND),
+                    static_cast<uint32_t>(rem % MICROS_PER_SECOND));
+                return dt.to_date_int_val();
+            };
+            auto min_opt = to_datetimev2(decoded.min_val);
+            auto max_opt = to_datetimev2(decoded.max_val);
+            if (!min_opt || !max_opt) continue;
+            zone_map->min_value = Field::create_field<TYPE_DATETIMEV2>(*min_opt);
+            zone_map->max_value = Field::create_field<TYPE_DATETIMEV2>(*max_opt);
+        } else if (type_id == 8) {
+            zone_map->min_value = Field::create_field<TYPE_FLOAT>(decoded.min_flt);
+            zone_map->max_value = Field::create_field<TYPE_FLOAT>(decoded.max_flt);
+        } else if (type_id == 9) {
+            zone_map->min_value = Field::create_field<TYPE_DOUBLE>(decoded.min_dbl);
+            zone_map->max_value = Field::create_field<TYPE_DOUBLE>(decoded.max_dbl);
+        } else {
+            continue;
+        }
+
+        for (const auto* slot : slots) {
+            if (slot->id() == slot_id) {
+                ctx.slots[slot_id] = {slot->get_data_type_ptr(), zone_map};
+                break;
+            }
+        }
+    }
+
+    if (ctx.slots.empty()) {
+        return false;
+    }
+
+    for (const auto& conjunct : conjuncts) {
+        const auto* root = conjunct->root().get();
+        if (!root->is_rf_wrapper() || !root->can_evaluate_zonemap_filter()) {
+            continue;
+        }
+        std::set<int> column_ids;
+        root->collect_slot_column_ids(column_ids);
+        bool have_stats = std::any_of(column_ids.begin(), column_ids.end(),
+                                       [&ctx](int id) { return ctx.slots.count(id) > 0; });
+        if (!have_stats) {
+            continue;
+        }
+        if (root->evaluate_zonemap_filter(ctx) == ZoneMapFilterResult::kNoMatch) {
+            return true;
+        }
+    }
+    return false;
 }
 
 } // namespace doris

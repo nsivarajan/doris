@@ -168,6 +168,7 @@ private:
 
     RuntimeProfile::Counter* _get_block_timer = nullptr;
     RuntimeProfile::Counter* _file_counter = nullptr;
+    RuntimeProfile::Counter* _iceberg_files_pruned_by_rf_counter = nullptr;
     RuntimeProfile::Counter* _file_read_bytes_counter = nullptr;
     RuntimeProfile::Counter* _file_read_calls_counter = nullptr;
     RuntimeProfile::Counter* _file_read_time_counter = nullptr;

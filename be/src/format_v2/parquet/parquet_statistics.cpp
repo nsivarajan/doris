@@ -43,11 +43,13 @@
 #include "core/data_type_serde/data_type_serde.h"
 #include "core/field.h"
 #include "exprs/expr_zonemap_filter.h"
+#include "exprs/vexpr.h"
 #include "exprs/vexpr_context.h"
 #include "format_v2/parquet/parquet_column_schema.h"
 #include "runtime/runtime_profile.h"
 #include "storage/index/zone_map/zone_map_index.h"
 #include "storage/index/zone_map/zonemap_eval_context.h"
+#include "storage/index/zone_map/zonemap_filter_result.h"
 
 namespace doris::format::parquet {
 
