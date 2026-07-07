@@ -28,13 +28,17 @@ class SlotDescriptor;
 struct IcebergFileColStats {
     bool has_min_max = false; // bounds decoded successfully
     bool all_nulls   = false; // null_count == row_count
-    int64_t min_val  = 0;     // INTEGER / LONG / DATE / TIMESTAMP
-    int64_t max_val  = 0;
-    float   min_flt  = 0.0f;  // FLOAT
-    float   max_flt  = 0.0f;
-    double  min_dbl  = 0.0;   // DOUBLE
-    double  max_dbl  = 0.0;
-    int32_t type_id  = 0;     // 5=INT 7=LONG 8=FLOAT 9=DOUBLE 18=DATE 19=TIMESTAMP
+    int64_t     min_val = 0;     // INTEGER(5) / LONG(7) / DATE(18) / TIMESTAMP(19)
+    int64_t     max_val = 0;
+    float       min_flt = 0.0f;  // FLOAT(8)
+    float       max_flt = 0.0f;
+    double      min_dbl = 0.0;   // DOUBLE(9)
+    double      max_dbl = 0.0;
+    std::string min_str;         // STRING(10) — raw UTF-8 bytes from manifest
+    std::string max_str;
+    int32_t type_id = 0;
+    // type_id values (internal Doris FE→BE protocol, not Iceberg enum ordinals):
+    // 5=INTEGER  7=LONG  8=FLOAT  9=DOUBLE  10=STRING  18=DATE  19=TIMESTAMP
 };
 
 // Decode Iceberg binary-encoded column statistics into IcebergFileColStats.

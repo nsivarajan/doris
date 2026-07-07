@@ -91,8 +91,16 @@ bool decode_iceberg_column_stats(const TIcebergFileColumnStats& s, IcebergFileCo
 
     if (type_id == 5 || type_id == 7 || type_id == 18 || type_id == 19) {
         // INTEGER(5), LONG(7), DATE(18 = days since epoch), TIMESTAMP(19 = micros since epoch)
+        // All stored as little-endian signed integers per Iceberg spec Appendix D.
         out->min_val = decode_little_endian_int(s.lower_bound);
         out->max_val = decode_little_endian_int(s.upper_bound);
+        out->has_min_max = true;
+    } else if (type_id == 10) {
+        // STRING(10): raw UTF-8 bytes, no length prefix, no byte order.
+        // Iceberg Conversions.toByteBuffer uses CharsetEncoder(UTF_8).encode(charBuffer).
+        // Lexicographic byte comparison equals code-point ordering for well-formed UTF-8.
+        out->min_str = s.lower_bound;
+        out->max_str = s.upper_bound;
         out->has_min_max = true;
     } else if (type_id == 8) {
         // FLOAT(8) — IEEE 754 little-endian 32-bit
@@ -213,6 +221,10 @@ bool iceberg_file_excluded_by_rf(const TFileRangeDesc& range,
         } else if (type_id == 9) {
             zone_map->min_value = Field::create_field<TYPE_DOUBLE>(decoded.min_dbl);
             zone_map->max_value = Field::create_field<TYPE_DOUBLE>(decoded.max_dbl);
+        } else if (type_id == 10) {
+            // STRING: raw UTF-8 bytes — lexicographic byte comparison equals code-point order.
+            zone_map->min_value = Field::create_field<TYPE_STRING>(decoded.min_str);
+            zone_map->max_value = Field::create_field<TYPE_STRING>(decoded.max_str);
         } else {
             continue;
         }

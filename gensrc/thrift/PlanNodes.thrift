@@ -570,8 +570,8 @@ struct TIcebergFileColumnStats {
     3: optional i64    null_count
     // Total row count; combined with null_count to detect all-null files.
     4: optional i64    row_count
-    // Iceberg type identifier for decoding the binary bounds:
-    // INTEGER=5  LONG=7  FLOAT=8  DOUBLE=9  DATE=18  TIMESTAMP=19
+    // Internal Doris FE→BE protocol type identifier (not Iceberg enum ordinals):
+    // INTEGER=5  LONG=7  FLOAT=8  DOUBLE=9  STRING=10  DATE=18  TIMESTAMP=19
     5: required i32    iceberg_type_id
 }
 

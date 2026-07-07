@@ -963,13 +963,16 @@ public class IcebergScanNode extends FileQueryScanNode {
         return result.isEmpty() ? null : result;
     }
 
-    /** Maps an Iceberg type to its numeric ID for the BE decoder; -1 = unsupported. */
+    /** Maps an Iceberg type to its numeric ID for the BE decoder; -1 = unsupported.
+     * These are internal Doris FE→BE protocol IDs, not Iceberg enum ordinals.
+     * DECIMAL: big-endian unscaled bytes + scale from schema — deferred to follow-up. */
     private int getIcebergTypeId(Type type) {
         switch (type.typeId()) {
             case INTEGER:   return 5;
             case LONG:      return 7;
             case FLOAT:     return 8;
             case DOUBLE:    return 9;
+            case STRING:    return 10; // raw UTF-8 bytes, Conversions.toByteBuffer uses UTF-8 encoder
             case DATE:      return 18;
             case TIMESTAMP: return 19;
             default:        return -1;

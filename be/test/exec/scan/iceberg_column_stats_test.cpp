@@ -174,6 +174,39 @@ TEST(IcebergColumnStatsTest, NotExcludedWhenNoMinMax) {
     EXPECT_FALSE(file_excluded_by_minmax(fs, 100, 200));
 }
 
+TEST(IcebergColumnStatsTest, DecodeString) {
+    // STRING: raw UTF-8 bytes, no length prefix, no byte order.
+    // Iceberg Conversions.toByteBuffer uses UTF_8 CharsetEncoder — byte-for-byte UTF-8.
+    TIcebergFileColumnStats s;
+    s.__set_iceberg_type_id(10 /*STRING*/);
+    s.__set_row_count(200);
+    s.__set_null_count(0);
+    s.__set_lower_bound("apple");
+    s.__set_upper_bound("mango");
+
+    IcebergFileColStats out;
+    EXPECT_TRUE(decode_iceberg_column_stats(s, &out));
+    EXPECT_TRUE(out.has_min_max);
+    EXPECT_EQ(out.min_str, "apple");
+    EXPECT_EQ(out.max_str, "mango");
+    EXPECT_EQ(out.type_id, 10);
+}
+
+TEST(IcebergColumnStatsTest, DecodeStringWithNonAsciiUtf8) {
+    // Multi-byte UTF-8 code points: lexicographic byte comparison equals code-point order.
+    TIcebergFileColumnStats s;
+    s.__set_iceberg_type_id(10);
+    s.__set_row_count(50);
+    s.__set_null_count(0);
+    // "café" in UTF-8: bytes 63 61 66 c3 a9 (c3 a9 = U+00E9 é)
+    s.__set_lower_bound("cafe");
+    s.__set_upper_bound("caf\xc3\xa9"); // café
+    IcebergFileColStats out;
+    EXPECT_TRUE(decode_iceberg_column_stats(s, &out));
+    EXPECT_EQ(out.min_str, "cafe");
+    EXPECT_EQ(out.max_str, "caf\xc3\xa9");
+}
+
 // ── iceberg_file_excluded_by_rf guard paths ───────────────────────────────────
 // Full RF evaluation requires a running RuntimeState; these tests cover the
 // guard paths that return early without touching the ZoneMapEvalContext.

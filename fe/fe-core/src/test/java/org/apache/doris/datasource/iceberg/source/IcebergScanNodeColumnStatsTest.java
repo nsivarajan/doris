@@ -150,6 +150,28 @@ public class IcebergScanNodeColumnStatsTest {
         Assertions.assertEquals(maxVal, decodeLittleEndianLong(stats.getUpperBound()));
     }
 
+    @Test
+    public void testStringBoundsEncodedCorrectly() {
+        // STRING: Iceberg Conversions.toByteBuffer uses UTF_8 CharsetEncoder.encode(charBuffer)
+        // = raw UTF-8 bytes, no length prefix, no byte order marker.
+        String minVal = "apple";
+        String maxVal = "mango";
+
+        TIcebergFileColumnStats stats = new TIcebergFileColumnStats();
+        stats.setIcebergTypeId(10); // STRING — internal Doris FE→BE protocol ID
+
+        byte[] minBytes = minVal.getBytes(java.nio.charset.StandardCharsets.UTF_8);
+        byte[] maxBytes = maxVal.getBytes(java.nio.charset.StandardCharsets.UTF_8);
+        stats.setLowerBound(minBytes);
+        stats.setUpperBound(maxBytes);
+
+        Assertions.assertEquals(10, stats.getIcebergTypeId());
+        Assertions.assertEquals(minVal,
+                new String(stats.getLowerBound(), java.nio.charset.StandardCharsets.UTF_8));
+        Assertions.assertEquals(maxVal,
+                new String(stats.getUpperBound(), java.nio.charset.StandardCharsets.UTF_8));
+    }
+
     // Mirror the BE decoding logic: little-endian sign-extended int (LSB at index 0).
     private static long decodeLittleEndianLong(byte[] bytes) {
         long val = 0;
