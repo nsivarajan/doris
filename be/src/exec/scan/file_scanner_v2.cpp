@@ -55,6 +55,7 @@
 #include "format_v2/table/hive_reader.h"
 #include "format_v2/table/hudi_reader.h"
 #include "format_v2/table/iceberg_reader.h"
+#include "exec/scan/filtering_split_source.h"
 #include "exec/scan/iceberg_column_stats.h"
 #include "format_v2/table/paimon_reader.h"
 #include "format_v2/table/remote_doris_reader.h"
@@ -285,8 +286,14 @@ Status FileScannerV2::init(RuntimeState* state, const VExprContextSPtrs& conjunc
             ADD_TIMER_WITH_LEVEL(_local_state->scanner_profile(), "FileScannerV2GetBlockTime", 1);
     _file_counter =
             ADD_COUNTER_WITH_LEVEL(_local_state->scanner_profile(), "FileNumber", TUnit::UNIT, 1);
-    _iceberg_files_pruned_by_rf_counter = ADD_COUNTER_WITH_LEVEL(
-            _local_state->scanner_profile(), "IcebergFilesPrunedByRuntimeFilter", TUnit::UNIT, 1);
+    _files_pruned_by_col_bounds_counter = ADD_COUNTER_WITH_LEVEL(
+            _local_state->scanner_profile(), "FilesPrunedByColBounds", TUnit::UNIT, 1);
+    _files_deferred_pending_rf_counter = ADD_COUNTER_WITH_LEVEL(
+            _local_state->scanner_profile(), "FilesDeferredPendingRF", TUnit::UNIT, 1);
+    _files_deferred_pruned_counter = ADD_COUNTER_WITH_LEVEL(
+            _local_state->scanner_profile(), "FilesDeferredPruned", TUnit::UNIT, 1);
+    _files_deferred_emitted_counter = ADD_COUNTER_WITH_LEVEL(
+            _local_state->scanner_profile(), "FilesDeferredEmitted", TUnit::UNIT, 1);
     _file_read_bytes_counter = ADD_COUNTER_WITH_LEVEL(_local_state->scanner_profile(),
                                                       "FileReadBytes", TUnit::BYTES, 1);
     _file_read_calls_counter = ADD_COUNTER_WITH_LEVEL(_local_state->scanner_profile(),
@@ -311,6 +318,18 @@ Status FileScannerV2::init(RuntimeState* state, const VExprContextSPtrs& conjunc
 Status FileScannerV2::_open_impl(RuntimeState* state) {
     RETURN_IF_CANCELLED(state);
     RETURN_IF_ERROR(Scanner::_open_impl(state));
+    // Wrap the split source with col-bounds RF filtering (same as old FileScanner).
+    // FilteringSplitSourceConnector holds &_conjuncts (live pointer) so the first
+    // get_next() on line below already benefits from any RF ready at open time.
+    if (_state->query_options().enable_runtime_filter_partition_prune &&
+            _output_tuple_desc != nullptr) {
+        _split_source = std::make_shared<FilteringSplitSourceConnector>(
+                std::move(_split_source), &_conjuncts, _output_tuple_desc,
+                _files_pruned_by_col_bounds_counter,
+                _files_deferred_pending_rf_counter,
+                _files_deferred_pruned_counter,
+                _files_deferred_emitted_counter);
+    }
     RETURN_IF_ERROR(_split_source->get_next(&_first_scan_range, &_current_range));
     if (_first_scan_range) {
         RETURN_IF_ERROR(_create_table_reader_for_format(_current_range, &_table_reader));
@@ -350,36 +369,23 @@ Status FileScannerV2::_get_block_impl(RuntimeState* state, Block* block, bool* e
 }
 
 Status FileScannerV2::_prepare_next_split(bool* eos) {
-    while (true) {
-        bool has_next = _first_scan_range;
-        if (!_first_scan_range) {
-            RETURN_IF_ERROR(_split_source->get_next(&has_next, &_current_range));
-        }
-        _first_scan_range = false;
-        if (!has_next || _should_stop) {
-            *eos = true;
-            return Status::OK();
-        }
-        DORIS_CHECK(_table_reader != nullptr);
-        _current_range_path = _current_range.path;
-        _init_adaptive_batch_size_state(get_range_format_type(*_params, _current_range));
-
-        // Skip file if Iceberg manifest column stats are disjoint from any ready RF.
-        if (_output_tuple_desc != nullptr &&
-            _state->query_options().enable_runtime_filter_partition_prune) {
-            if (iceberg_file_excluded_by_rf(_current_range, _conjuncts,
-                                             _output_tuple_desc->slots())) {
-                COUNTER_UPDATE(_iceberg_files_pruned_by_rf_counter, 1);
-                continue; // fetch next range
-            }
-        }
-
-        RETURN_IF_ERROR(_prepare_table_reader_split(_current_range));
-        COUNTER_UPDATE(_file_counter, 1);
-        _has_prepared_split = true;
-        *eos = false;
+    bool has_next = _first_scan_range;
+    if (!_first_scan_range) {
+        RETURN_IF_ERROR(_split_source->get_next(&has_next, &_current_range));
+    }
+    _first_scan_range = false;
+    if (!has_next || _should_stop) {
+        *eos = true;
         return Status::OK();
     }
+    DORIS_CHECK(_table_reader != nullptr);
+    _current_range_path = _current_range.path;
+    _init_adaptive_batch_size_state(get_range_format_type(*_params, _current_range));
+    RETURN_IF_ERROR(_prepare_table_reader_split(_current_range));
+    COUNTER_UPDATE(_file_counter, 1);
+    _has_prepared_split = true;
+    *eos = false;
+    return Status::OK();
 }
 
 Status FileScannerV2::_init_table_reader(const TFileRangeDesc& range) {

@@ -20,7 +20,7 @@ package org.apache.doris.datasource.iceberg.source;
 import org.apache.doris.common.util.LocationPath;
 import org.apache.doris.datasource.FileSplit;
 import org.apache.doris.datasource.property.storage.StorageProperties;
-import org.apache.doris.thrift.TIcebergFileColumnStats;
+import org.apache.doris.thrift.TFileSplitColBounds;
 
 import lombok.Data;
 import org.apache.iceberg.DeleteFile;
@@ -53,8 +53,8 @@ public class IcebergSplit extends FileSplit {
     private Long firstRowId = null;
     private Long lastUpdatedSequenceNumber = null;
     private String serializedSplit;
-    // Per-file column statistics from Iceberg manifest for BE-side file pruning via runtime filters.
-    private Map<String, TIcebergFileColumnStats> icebergColumnStats = null;
+    // Per-file column bounds for BE-side file pruning via runtime filters.
+    private Map<String, TFileSplitColBounds> colBounds = null;
 
     // File path will be changed if the file is modified, so there's no need to get modification time.
     public IcebergSplit(LocationPath file, long start, long length, long fileLength, String[] hosts,

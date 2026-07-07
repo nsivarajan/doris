@@ -71,6 +71,7 @@ struct ParquetProfile {
     RuntimeProfile::Counter* filtered_row_groups_by_dictionary = nullptr;
     RuntimeProfile::Counter* filtered_row_groups_by_bloom_filter = nullptr;
     RuntimeProfile::Counter* filtered_row_groups_by_page_index = nullptr;
+    RuntimeProfile::Counter* filtered_row_groups_by_rf_zonemap = nullptr;
     RuntimeProfile::Counter* to_read_row_groups = nullptr;
     RuntimeProfile::Counter* total_row_groups = nullptr;
     RuntimeProfile::Counter* selected_row_ranges = nullptr;

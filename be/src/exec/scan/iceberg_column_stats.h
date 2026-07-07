@@ -22,6 +22,7 @@
 #include "gen_cpp/PlanNodes_types.h"
 
 namespace doris {
+class FileSplitStatsIndex;
 class SlotDescriptor;
 
 // Decoded per-file column statistics from an Iceberg manifest entry.
@@ -43,7 +44,7 @@ struct IcebergFileColStats {
 
 // Decode Iceberg binary-encoded column statistics into IcebergFileColStats.
 // Returns false if stats cannot be decoded; caller should not prune in that case.
-bool decode_iceberg_column_stats(const TIcebergFileColumnStats& thrift_stats,
+bool decode_iceberg_column_stats(const TFileSplitColBounds& thrift_stats,
                                   IcebergFileColStats* out);
 
 // Returns true if [file_min, file_max] and [rf_min, rf_max] have no overlap.
@@ -53,8 +54,11 @@ bool file_excluded_by_minmax(const IcebergFileColStats& file_stats,
 // Returns true when Iceberg manifest column stats in `range` are disjoint from every
 // ready runtime-filter conjunct, meaning the file can be skipped without opening it.
 // Called by both FileScanner (old path) and FileScannerV2 (format_v2 path).
+// If `index` is non-null, the decoded ZoneMapEvalContext is looked up / cached there
+// so per-file ZoneMap construction is paid at most once per file path per scan node.
 bool iceberg_file_excluded_by_rf(const TFileRangeDesc& range,
                                   const VExprContextSPtrs& conjuncts,
-                                  const std::vector<SlotDescriptor*>& slots);
+                                  const std::vector<SlotDescriptor*>& slots,
+                                  FileSplitStatsIndex* index = nullptr);
 
 } // namespace doris

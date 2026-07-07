@@ -24,8 +24,8 @@ namespace doris {
 
 // Iceberg spec (Appendix D) uses little-endian for all numeric bounds.
 // Encode int64 value as 8-byte LE (matches Java Conversions.toByteBuffer LONG/TIMESTAMP).
-static TIcebergFileColumnStats make_int_stats(int64_t lo, int64_t hi, int32_t type_id = 7) {
-    TIcebergFileColumnStats s;
+static TFileSplitColBounds make_int_stats(int64_t lo, int64_t hi, int32_t type_id = 7) {
+    TFileSplitColBounds s;
     s.__set_iceberg_type_id(type_id);
     s.__set_row_count(1000);
     s.__set_null_count(0);
@@ -69,7 +69,7 @@ TEST(IcebergColumnStatsTest, DecodeDate) {
     // DATE = days since epoch, 4-byte little-endian (Iceberg INTEGER encoding).
     int32_t day_min = 18000; // ~2019-04-14
     int32_t day_max = 18365; // ~2020-04-03
-    TIcebergFileColumnStats s;
+    TFileSplitColBounds s;
     s.__set_iceberg_type_id(18 /*DATE*/);
     s.__set_row_count(500);
     s.__set_null_count(0);
@@ -93,7 +93,7 @@ TEST(IcebergColumnStatsTest, DecodeDate) {
 }
 
 TEST(IcebergColumnStatsTest, AllNullFile) {
-    TIcebergFileColumnStats s;
+    TFileSplitColBounds s;
     s.__set_iceberg_type_id(7);
     s.__set_row_count(1000);
     s.__set_null_count(1000); // all nulls
@@ -106,7 +106,7 @@ TEST(IcebergColumnStatsTest, AllNullFile) {
 }
 
 TEST(IcebergColumnStatsTest, MissingBounds) {
-    TIcebergFileColumnStats s;
+    TFileSplitColBounds s;
     s.__set_iceberg_type_id(7);
     // No lower_bound or upper_bound set
 
@@ -116,7 +116,7 @@ TEST(IcebergColumnStatsTest, MissingBounds) {
 }
 
 TEST(IcebergColumnStatsTest, UnsupportedType) {
-    TIcebergFileColumnStats s;
+    TFileSplitColBounds s;
     s.__set_iceberg_type_id(99); // unknown type
     s.__set_lower_bound("xxxx");
     s.__set_upper_bound("yyyy");
@@ -177,7 +177,7 @@ TEST(IcebergColumnStatsTest, NotExcludedWhenNoMinMax) {
 TEST(IcebergColumnStatsTest, DecodeString) {
     // STRING: raw UTF-8 bytes, no length prefix, no byte order.
     // Iceberg Conversions.toByteBuffer uses UTF_8 CharsetEncoder — byte-for-byte UTF-8.
-    TIcebergFileColumnStats s;
+    TFileSplitColBounds s;
     s.__set_iceberg_type_id(10 /*STRING*/);
     s.__set_row_count(200);
     s.__set_null_count(0);
@@ -194,7 +194,7 @@ TEST(IcebergColumnStatsTest, DecodeString) {
 
 TEST(IcebergColumnStatsTest, DecodeStringWithNonAsciiUtf8) {
     // Multi-byte UTF-8 code points: lexicographic byte comparison equals code-point order.
-    TIcebergFileColumnStats s;
+    TFileSplitColBounds s;
     s.__set_iceberg_type_id(10);
     s.__set_row_count(50);
     s.__set_null_count(0);
@@ -213,7 +213,7 @@ TEST(IcebergColumnStatsTest, DecodeStringWithNonAsciiUtf8) {
 
 TEST(IcebergFileExcludedByRFTest, ReturnsFalseWhenStatsNotSet) {
     TFileRangeDesc range;
-    // iceberg_column_stats not set at all
+    // col_bounds not set at all
     VExprContextSPtrs conjuncts;
     std::vector<SlotDescriptor*> slots;
     EXPECT_FALSE(iceberg_file_excluded_by_rf(range, conjuncts, slots));
@@ -221,7 +221,7 @@ TEST(IcebergFileExcludedByRFTest, ReturnsFalseWhenStatsNotSet) {
 
 TEST(IcebergFileExcludedByRFTest, ReturnsFalseWhenStatsEmpty) {
     TFileRangeDesc range;
-    range.__isset.iceberg_column_stats = true;
+    range.__isset.col_bounds = true;
     // map is empty
     VExprContextSPtrs conjuncts;
     std::vector<SlotDescriptor*> slots;
@@ -230,12 +230,12 @@ TEST(IcebergFileExcludedByRFTest, ReturnsFalseWhenStatsEmpty) {
 
 TEST(IcebergFileExcludedByRFTest, ReturnsFalseWhenNoSlotsMatchStats) {
     TFileRangeDesc range;
-    TIcebergFileColumnStats col_stats;
+    TFileSplitColBounds col_stats;
     col_stats.__set_iceberg_type_id(7);
     col_stats.__set_row_count(1000);
     col_stats.__set_null_count(0);
-    range.iceberg_column_stats["date_key"] = col_stats;
-    range.__isset.iceberg_column_stats = true;
+    range.col_bounds["date_key"] = col_stats;
+    range.__isset.col_bounds = true;
 
     VExprContextSPtrs conjuncts;
     // Empty slots — nothing maps "date_key" to a slot_id
@@ -245,9 +245,9 @@ TEST(IcebergFileExcludedByRFTest, ReturnsFalseWhenNoSlotsMatchStats) {
 
 TEST(IcebergFileExcludedByRFTest, ReturnsFalseWhenNoConjuncts) {
     TFileRangeDesc range;
-    TIcebergFileColumnStats col_stats = make_int_stats(100, 200, 7);
-    range.iceberg_column_stats["val"] = col_stats;
-    range.__isset.iceberg_column_stats = true;
+    TFileSplitColBounds col_stats = make_int_stats(100, 200, 7);
+    range.col_bounds["val"] = col_stats;
+    range.__isset.col_bounds = true;
 
     // Slots present but zero conjuncts — nothing to evaluate
     VExprContextSPtrs empty_conjuncts;
@@ -267,8 +267,8 @@ namespace doris {
 
 // Iceberg spec (Appendix D) uses little-endian for all numeric bounds.
 // Encode int64 value as 8-byte LE (matches Java Conversions.toByteBuffer LONG/TIMESTAMP).
-static TIcebergFileColumnStats make_int_stats(int64_t lo, int64_t hi, int32_t type_id = 7) {
-    TIcebergFileColumnStats s;
+static TFileSplitColBounds make_int_stats(int64_t lo, int64_t hi, int32_t type_id = 7) {
+    TFileSplitColBounds s;
     s.__set_iceberg_type_id(type_id);
     s.__set_row_count(1000);
     s.__set_null_count(0);
@@ -312,7 +312,7 @@ TEST(IcebergColumnStatsTest, DecodeDate) {
     // DATE = days since epoch, 4-byte little-endian (Iceberg INTEGER encoding).
     int32_t day_min = 18000; // ~2019-04-14
     int32_t day_max = 18365; // ~2020-04-03
-    TIcebergFileColumnStats s;
+    TFileSplitColBounds s;
     s.__set_iceberg_type_id(18 /*DATE*/);
     s.__set_row_count(500);
     s.__set_null_count(0);
@@ -336,7 +336,7 @@ TEST(IcebergColumnStatsTest, DecodeDate) {
 }
 
 TEST(IcebergColumnStatsTest, AllNullFile) {
-    TIcebergFileColumnStats s;
+    TFileSplitColBounds s;
     s.__set_iceberg_type_id(7);
     s.__set_row_count(1000);
     s.__set_null_count(1000); // all nulls
@@ -349,7 +349,7 @@ TEST(IcebergColumnStatsTest, AllNullFile) {
 }
 
 TEST(IcebergColumnStatsTest, MissingBounds) {
-    TIcebergFileColumnStats s;
+    TFileSplitColBounds s;
     s.__set_iceberg_type_id(7);
     // No lower_bound or upper_bound set
 
@@ -359,7 +359,7 @@ TEST(IcebergColumnStatsTest, MissingBounds) {
 }
 
 TEST(IcebergColumnStatsTest, UnsupportedType) {
-    TIcebergFileColumnStats s;
+    TFileSplitColBounds s;
     s.__set_iceberg_type_id(99); // unknown type
     s.__set_lower_bound("xxxx");
     s.__set_upper_bound("yyyy");

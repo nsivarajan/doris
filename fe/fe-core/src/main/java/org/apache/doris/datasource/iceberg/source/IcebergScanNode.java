@@ -59,7 +59,7 @@ import org.apache.doris.thrift.TExplainLevel;
 import org.apache.doris.thrift.TFileFormatType;
 import org.apache.doris.thrift.TFileRangeDesc;
 import org.apache.doris.thrift.TIcebergDeleteFileDesc;
-import org.apache.doris.thrift.TIcebergFileColumnStats;
+import org.apache.doris.thrift.TFileSplitColBounds;
 import org.apache.doris.thrift.TIcebergFileDesc;
 import org.apache.doris.thrift.TPlanNode;
 import org.apache.doris.thrift.TPushAggOp;
@@ -127,6 +127,14 @@ public class IcebergScanNode extends FileQueryScanNode {
     private IcebergSource source;
     private Table icebergTable;
     private List<String> pushdownIcebergPredicates = Lists.newArrayList();
+    // Two-tier file pruning counters for EXPLAIN and profile output.
+    //   Tier 1 (coordinator): FE InclusiveMetricsEvaluator prunes files at plan time
+    //                         using pushed-down static predicates (e.g. WHERE date_key > X).
+    //   Tier 2 (BE):          FilteringSplitSourceConnector prunes files at execution time
+    //                         using runtime-filter min/max against the attached col_bounds.
+    // The gap between what tier 1 can prune and what tier 2 can prune is exactly the set of
+    // files that are statically-ambiguous but dynamically excluded by the join's RF.
+    private long feTier1FilesPruned = 0;
     // If tableLevelPushDownCount is true, means we can do count push down opt at table level.
     // which means all splits have no position/equality delete files,
     // so for query like "select count(*) from ice_tbl", we can get count from snapshot row count info directly.
@@ -396,8 +404,8 @@ public class IcebergScanNode extends FileQueryScanNode {
         }
         rangeDesc.setTableFormatParams(tableFormatFileDesc);
         // Forward per-file column stats for BE file-level pruning.
-        if (icebergSplit.getIcebergColumnStats() != null) {
-            rangeDesc.setIcebergColumnStats(icebergSplit.getIcebergColumnStats());
+        if (icebergSplit.getColBounds() != null) {
+            rangeDesc.setColBounds(icebergSplit.getColBounds());
         }
     }
 
@@ -760,8 +768,9 @@ public class IcebergScanNode extends FileQueryScanNode {
 
                 // Process each data file in the manifest
                 for (org.apache.iceberg.DataFile dataFile : value.getDataFiles()) {
-                    // Skip file if column statistics indicate no matching rows (metrics-based pruning)
+                    // Tier 1 pruning: skip file if static column stats exclude it.
                     if (metricsEvaluator != null && !metricsEvaluator.eval(dataFile)) {
+                        feTier1FilesPruned++;
                         continue;
                     }
                     // Skip file if partition values don't match the residual filter
@@ -881,9 +890,9 @@ public class IcebergScanNode extends FileQueryScanNode {
         split.setTableFormatType(TableFormatType.ICEBERG);
         split.setTargetSplitSize(targetSplitSize);
         // Attach manifest column stats so BE can prune files via runtime-filter min/max.
-        Map<String, TIcebergFileColumnStats> colStats = buildColumnStats(dataFile);
+        Map<String, TFileSplitColBounds> colStats = buildColumnStats(dataFile);
         if (colStats != null) {
-            split.setIcebergColumnStats(colStats);
+            split.setColBounds(colStats);
         }
         if (isPartitionedTable) {
             int specId = fileScanTask.file().specId();
@@ -909,7 +918,7 @@ public class IcebergScanNode extends FileQueryScanNode {
     }
 
     /** Extracts per-file min/max bounds from an Iceberg DataFile for BE file pruning. */
-    private Map<String, TIcebergFileColumnStats> buildColumnStats(DataFile dataFile) {
+    private Map<String, TFileSplitColBounds> buildColumnStats(DataFile dataFile) {
         java.util.Map<Integer, java.nio.ByteBuffer> lowerBounds = dataFile.lowerBounds();
         java.util.Map<Integer, java.nio.ByteBuffer> upperBounds = dataFile.upperBounds();
         if (lowerBounds == null && upperBounds == null) {
@@ -924,7 +933,7 @@ public class IcebergScanNode extends FileQueryScanNode {
             fieldIds.addAll(upperBounds.keySet());
         }
 
-        Map<String, TIcebergFileColumnStats> result = new java.util.HashMap<>();
+        Map<String, TFileSplitColBounds> result = new java.util.HashMap<>();
         for (int fieldId : fieldIds) {
             Types.NestedField field = icebergTable.schema().findField(fieldId);
             if (field == null) {
@@ -935,7 +944,7 @@ public class IcebergScanNode extends FileQueryScanNode {
                 continue;  // unsupported type — skip to avoid incorrect pruning
             }
 
-            TIcebergFileColumnStats stats = new TIcebergFileColumnStats();
+            TFileSplitColBounds stats = new TFileSplitColBounds();
             stats.setIcebergTypeId(typeId);
             stats.setRowCount(dataFile.recordCount());
 
@@ -1002,6 +1011,7 @@ public class IcebergScanNode extends FileQueryScanNode {
     }
 
     private List<Split> doGetSplits(int numBackends) throws UserException {
+        feTier1FilesPruned = 0; // reset so EXPLAIN is accurate on retry / plan reuse
         if (isSystemTable) {
             return doGetSystemTableSplits();
         }
@@ -1258,6 +1268,12 @@ public class IcebergScanNode extends FileQueryScanNode {
                 sb.append(prefix).append(prefix).append(predicate).append("\n");
             }
             builder.append(String.format("%sicebergPredicatePushdown=\n%s\n", prefix, sb));
+        }
+        // Show two-tier file pruning stats so operators can distinguish FE (static) vs
+        // BE (runtime-filter) pruning. BE tier-2 count appears in the profile as FilesPrunedByColBounds.
+        if (feTier1FilesPruned > 0) {
+            builder.append(prefix).append("filesPrunedByFEMetrics=").append(feTier1FilesPruned)
+                    .append(" (tier-1: static predicate vs manifest col_bounds)\n");
         }
         return builder.toString();
     }

@@ -558,10 +558,10 @@ struct TFileScanRangeParams {
     33: optional map<string, string> es_fields_context
 }
 
-// Per-file column statistics from the Iceberg manifest (lowerBounds/upperBounds).
+// Format-agnostic per-file column bounds for file-level pruning.
 // Passed from FE to BE so the scanner can prune files using runtime-filter min/max
 // values before opening them, avoiding unnecessary object-storage reads.
-struct TIcebergFileColumnStats {
+struct TFileSplitColBounds {
     // Iceberg big-endian encoded minimum value for this column in the file.
     1: optional binary lower_bound
     // Iceberg big-endian encoded maximum value for this column in the file.
@@ -605,10 +605,10 @@ struct TFileRangeDesc {
     // whether the value of columns_from_path is null
     15: optional list<bool> columns_from_path_is_null;
     16: optional bool file_cache_admission;
-    // Per-file column statistics from Iceberg manifest.
+    // Per-file column bounds (format-agnostic).
     // Key = lowercase column name, value = encoded min/max bounds.
     // Used by BE to prune files via runtime-filter min/max before opening them.
-    17: optional map<string, TIcebergFileColumnStats> iceberg_column_stats;
+    17: optional map<string, TFileSplitColBounds> col_bounds;
 }
 
 struct TSplitSource {

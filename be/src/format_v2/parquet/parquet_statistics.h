@@ -55,6 +55,7 @@ struct ParquetPruningStats {
     int64_t filtered_row_groups_by_dictionary = 0;   // row groups pruned by dictionary
     int64_t filtered_row_groups_by_bloom_filter = 0; // row groups pruned by bloom filter
     int64_t filtered_row_groups_by_page_index = 0;   // row groups fully pruned by page index
+    int64_t filtered_row_groups_by_rf_zonemap = 0;   // row groups pruned by RF-inclusive VExpr ZoneMap
     int64_t filtered_group_rows = 0;                 // rows in pruned row groups
     int64_t filtered_page_rows = 0;                  // rows pruned by page index
     int64_t selected_row_ranges = 0;                 // selected row range count

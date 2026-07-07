@@ -51,7 +51,7 @@
 #include "exec/common/stringop_substring.h"
 #include "exec/rowid_fetcher.h"
 #include "exec/scan/scan_node.h"
-#include "exec/scan/iceberg_column_stats.h"
+#include "exec/scan/filtering_split_source.h"
 #include "core/field.h"
 #include "exprs/runtime_filter_expr.h"
 #include "storage/index/zone_map/zone_map_index.h"
@@ -188,9 +188,18 @@ Status FileScanner::init(RuntimeState* state, const VExprContextSPtrs& conjuncts
     _runtime_filter_partition_pruned_range_counter =
             ADD_COUNTER_WITH_LEVEL(_local_state->scanner_profile(),
                                    "RuntimeFilterPartitionPrunedRangeNum", TUnit::UNIT, 1);
-    _iceberg_files_pruned_by_rf_counter =
+    _files_pruned_by_col_bounds_counter =
             ADD_COUNTER_WITH_LEVEL(_local_state->scanner_profile(),
-                                   "IcebergFilesPrunedByRuntimeFilter", TUnit::UNIT, 1);
+                                   "FilesPrunedByColBounds", TUnit::UNIT, 1);
+    _files_deferred_pending_rf_counter =
+            ADD_COUNTER_WITH_LEVEL(_local_state->scanner_profile(),
+                                   "FilesDeferredPendingRF", TUnit::UNIT, 1);
+    _files_deferred_pruned_counter =
+            ADD_COUNTER_WITH_LEVEL(_local_state->scanner_profile(),
+                                   "FilesDeferredPruned", TUnit::UNIT, 1);
+    _files_deferred_emitted_counter =
+            ADD_COUNTER_WITH_LEVEL(_local_state->scanner_profile(),
+                                   "FilesDeferredEmitted", TUnit::UNIT, 1);
     // Keep the current file's adaptive state while also preserving the peak value across all
     // files handled by this scanner instance.
     _adaptive_batch_predicted_rows_counter =
@@ -495,6 +504,19 @@ Status FileScanner::_open_impl(RuntimeState* state) {
     RETURN_IF_ERROR(Scanner::_open_impl(state));
     if (_local_state) {
         _condition_cache_digest = _local_state->get_condition_cache_digest();
+    }
+    // Wrap the split source with col-bounds RF filtering so files are pruned at the
+    // SplitSource boundary — before any S3 open. Use &_conjuncts (populated in
+    // Scanner::init) so RF wrappers are visible from the first get_next() call.
+    // _push_down_conjuncts starts empty and is only filled in the scan loop.
+    if (_state->query_options().enable_runtime_filter_partition_prune &&
+            _real_tuple_desc != nullptr) {
+        _split_source = std::make_shared<FilteringSplitSourceConnector>(
+                std::move(_split_source), &_conjuncts, _real_tuple_desc,
+                _files_pruned_by_col_bounds_counter,
+                _files_deferred_pending_rf_counter,
+                _files_deferred_pruned_counter,
+                _files_deferred_emitted_counter);
     }
     RETURN_IF_ERROR(_split_source->get_next(&_first_scan_range, &_current_range));
     if (_first_scan_range) {
@@ -1043,13 +1065,6 @@ Status FileScanner::_get_next_reader() {
                 }
 
             }
-        }
-
-        // Iceberg manifest column-stats pruning: independent of partition columns so it
-        // also applies to unpartitioned tables.
-        if (_state->query_options().enable_runtime_filter_partition_prune &&
-            _should_skip_file_by_iceberg_col_stats(range)) {
-            continue;
         }
 
         // create reader for specific format
@@ -2157,14 +2172,6 @@ void FileScanner::_collect_profile_before_close() {
 
     DorisMetrics::instance()->query_scan_bytes->increment(_file_reader_stats->read_bytes);
     DorisMetrics::instance()->query_scan_rows->increment(_file_reader_stats->read_rows);
-}
-
-bool FileScanner::_should_skip_file_by_iceberg_col_stats(const TFileRangeDesc& range) {
-    if (iceberg_file_excluded_by_rf(range, _conjuncts, _real_tuple_desc->slots())) {
-        COUNTER_UPDATE(_iceberg_files_pruned_by_rf_counter, 1);
-        return true;
-    }
-    return false;
 }
 
 } // namespace doris

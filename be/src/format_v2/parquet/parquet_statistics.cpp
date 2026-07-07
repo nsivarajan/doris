@@ -928,6 +928,19 @@ Status select_row_groups_by_metadata_impl(
         if (has_expr_zonemap_filter(request, runtime_state) &&
             check_statistics(*row_group, file_schema, request, pruning_stats, timezone)) {
             prune_reason = ParquetRowGroupPruneReason::STATISTICS;
+            // If any RF conjunct is ready, this pruning may be RF-driven.
+            // Tracked separately so operators can observe RF vs static ZoneMap impact.
+            if (pruning_stats != nullptr) {
+                const bool has_rf = std::any_of(
+                        request.conjuncts.begin(), request.conjuncts.end(),
+                        [](const auto& ctx) {
+                            return ctx->root()->is_rf_wrapper() &&
+                                   ctx->root()->can_evaluate_zonemap_filter();
+                        });
+                if (has_rf) {
+                    ++pruning_stats->filtered_row_groups_by_rf_zonemap;
+                }
+            }
         }
 
         if (prune_reason == ParquetRowGroupPruneReason::NONE) {

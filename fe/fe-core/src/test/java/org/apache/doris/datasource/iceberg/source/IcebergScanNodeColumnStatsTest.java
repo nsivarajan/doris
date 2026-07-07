@@ -17,7 +17,7 @@
 
 package org.apache.doris.datasource.iceberg.source;
 
-import org.apache.doris.thrift.TIcebergFileColumnStats;
+import org.apache.doris.thrift.TFileSplitColBounds;
 
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
@@ -27,7 +27,7 @@ import java.nio.ByteOrder;
 
 /**
  * Tests for IcebergScanNode.buildColumnStats(): verifies that Iceberg manifest
- * lowerBounds/upperBounds are correctly encoded and attached to TIcebergFileColumnStats.
+ * lowerBounds/upperBounds are correctly encoded and attached to TFileSplitColBounds.
  * Iceberg spec (Appendix D) mandates little-endian encoding for all numeric bounds.
  */
 public class IcebergScanNodeColumnStatsTest {
@@ -53,7 +53,7 @@ public class IcebergScanNodeColumnStatsTest {
         long minVal = 2451900L;
         long maxVal = 2451999L;
 
-        TIcebergFileColumnStats stats = new TIcebergFileColumnStats();
+        TFileSplitColBounds stats = new TFileSplitColBounds();
         stats.setIcebergTypeId(7); // LONG
 
         ByteBuffer lb = longBuf(minVal);
@@ -82,7 +82,7 @@ public class IcebergScanNodeColumnStatsTest {
         int minVal = 100;
         int maxVal = 500;
 
-        TIcebergFileColumnStats stats = new TIcebergFileColumnStats();
+        TFileSplitColBounds stats = new TFileSplitColBounds();
         stats.setIcebergTypeId(5); // INTEGER
 
         ByteBuffer lb = intBuf(minVal);
@@ -106,7 +106,7 @@ public class IcebergScanNodeColumnStatsTest {
 
     @Test
     public void testNullCountStoredCorrectly() {
-        TIcebergFileColumnStats stats = new TIcebergFileColumnStats();
+        TFileSplitColBounds stats = new TFileSplitColBounds();
         stats.setIcebergTypeId(7);
         stats.setNullCount(50L);
         stats.setRowCount(1000L);
@@ -118,7 +118,7 @@ public class IcebergScanNodeColumnStatsTest {
 
     @Test
     public void testAllNullFile() {
-        TIcebergFileColumnStats stats = new TIcebergFileColumnStats();
+        TFileSplitColBounds stats = new TFileSplitColBounds();
         stats.setIcebergTypeId(7);
         stats.setNullCount(500L);
         stats.setRowCount(500L);
@@ -133,7 +133,7 @@ public class IcebergScanNodeColumnStatsTest {
         long minVal = -999L;
         long maxVal = -1L;
 
-        TIcebergFileColumnStats stats = new TIcebergFileColumnStats();
+        TFileSplitColBounds stats = new TFileSplitColBounds();
         stats.setIcebergTypeId(7);
 
         ByteBuffer lb = longBuf(minVal);
@@ -157,7 +157,7 @@ public class IcebergScanNodeColumnStatsTest {
         String minVal = "apple";
         String maxVal = "mango";
 
-        TIcebergFileColumnStats stats = new TIcebergFileColumnStats();
+        TFileSplitColBounds stats = new TFileSplitColBounds();
         stats.setIcebergTypeId(10); // STRING — internal Doris FE→BE protocol ID
 
         byte[] minBytes = minVal.getBytes(java.nio.charset.StandardCharsets.UTF_8);

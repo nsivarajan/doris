@@ -106,12 +106,12 @@ suite("test_iceberg_file_pruning_by_manifest_stats", "p0,external") {
     assertEquals(count_via_join[0][0], count_via_where[0][0])
 
     // ── Test 3: Pruning observable via query profile counter ──
-    // IcebergFilesPrunedByRuntimeFilter should be > 0 after a join that
+    // FilesPrunedByColBounds should be > 0 after a join that
     // selects only rows from one of the two disjoint date-key files.
     explain {
         sql """SELECT count(*) FROM ${catalog_name}.${db_name}.fact_sales f
                JOIN ${catalog_name}.${db_name}.dim_date d ON f.date_key = d.date_key"""
-        contains "IcebergFilesPrunedByRuntimeFilter"
+        contains "FilesPrunedByColBounds"
     }
 
     // ── Test 4: All-null column stats — must never prune (conservative) ──
