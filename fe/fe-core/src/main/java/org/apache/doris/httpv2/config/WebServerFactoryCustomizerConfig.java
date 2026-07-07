@@ -26,6 +26,7 @@ import org.eclipse.jetty.ee10.webapp.WebAppContext;
 import org.eclipse.jetty.ee10.websocket.server.config.JettyWebSocketServletContainerInitializer;
 import org.eclipse.jetty.server.HttpConfiguration;
 import org.eclipse.jetty.server.HttpConnectionFactory;
+import org.eclipse.jetty.server.SecureRequestCustomizer;
 import org.eclipse.jetty.server.ServerConnector;
 import org.springframework.boot.web.embedded.jetty.ConfigurableJettyWebServerFactory;
 import org.springframework.boot.web.embedded.jetty.JettyServletWebServerFactory;
@@ -97,6 +98,15 @@ public class WebServerFactoryCustomizerConfig implements WebServerFactoryCustomi
                         HttpConfiguration httpConfig = httpFactory.getHttpConfiguration();
                         httpConfig.setSecurePort(Config.https_port);
                         httpConfig.setSecureScheme("https");
+                        // Disable server-side SNI host check so FE-to-FE calls via IP are accepted.
+                        // Spring Boot's SslServerCustomizer adds a SecureRequestCustomizer with
+                        // sniHostCheck=true by default. Trust is CA-based via InternalHttpsUtils;
+                        // mTLS client cert extraction is unaffected.
+                        SecureRequestCustomizer src =
+                                httpConfig.getCustomizer(SecureRequestCustomizer.class);
+                        if (src != null) {
+                            src.setSniHostCheck(false);
+                        }
                     }
                 }
             });
