@@ -33,6 +33,10 @@ import java.util.Map;
 
 public class HttpURLUtil {
 
+    public static int getHttpPort() {
+        return Config.enable_https ? Config.https_port : Config.http_port;
+    }
+
     public static HttpURLConnection getConnectionWithNodeIdent(String request) throws IOException {
         try {
             SecurityChecker.getInstance().startSSRFChecking(request);
