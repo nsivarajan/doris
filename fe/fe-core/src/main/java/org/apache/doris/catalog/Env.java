@@ -4209,6 +4209,13 @@ public class Env {
         if (olapTable.isInAtomicRestore()) {
             sb.append(",\n\"").append(PropertyAnalyzer.PROPERTIES_IN_ATOMIC_RESTORE).append("\" = \"true\"");
         }
+
+        // time travel
+        if (olapTable.isEnableTimeTravel()) {
+            sb.append(",\n\"").append(PropertyAnalyzer.PROPERTIES_ENABLE_TIME_TRAVEL).append("\" = \"true\"");
+            sb.append(",\n\"").append(PropertyAnalyzer.PROPERTIES_TIME_TRAVEL_RETENTION_DAYS)
+                    .append("\" = \"").append(olapTable.getTimeTravelRetentionDays()).append("\"");
+        }
     }
 
     /**.
@@ -6348,7 +6355,8 @@ public class Env {
                 .buildVerticalCompactionNumColumnsPerGroup()
                 .buildTTLSeconds()
                 .buildAutoAnalyzeProperty()
-                .buildPartitionRetentionCount();
+                .buildPartitionRetentionCount()
+                .buildTimeTravelConfig(); // disable-only via ALTER; enable only at CREATE TABLE
 
         // need to update partition info meta
         for (Partition partition : table.getPartitions()) {
