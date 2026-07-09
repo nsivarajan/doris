@@ -172,6 +172,24 @@ public class IcebergScanNodeColumnStatsTest {
                 new String(stats.getUpperBound(), java.nio.charset.StandardCharsets.UTF_8));
     }
 
+    @Test
+    public void testDecimalBoundsHaveScale() {
+        // DECIMAL: big-endian two's complement unscaled value; scale stored in decimal_scale field.
+        // 123456 = 0x01E240 in big-endian (3 bytes); scale=2 means the value represents 1234.56.
+        TFileSplitColBounds stats = new TFileSplitColBounds();
+        stats.setIcebergTypeId(11); // DECIMAL
+        stats.setDecimalScale(2);
+
+        byte[] boundBytes = new byte[] {0x01, (byte) 0xE2, 0x40}; // 123456 big-endian
+        stats.setLowerBound(boundBytes);
+        stats.setUpperBound(boundBytes);
+
+        Assertions.assertTrue(stats.isSetDecimalScale());
+        Assertions.assertEquals(2, stats.getDecimalScale());
+        Assertions.assertArrayEquals(boundBytes, stats.getLowerBound());
+        Assertions.assertArrayEquals(boundBytes, stats.getUpperBound());
+    }
+
     // Mirror the BE decoding logic: little-endian sign-extended int (LSB at index 0).
     private static long decodeLittleEndianLong(byte[] bytes) {
         long val = 0;

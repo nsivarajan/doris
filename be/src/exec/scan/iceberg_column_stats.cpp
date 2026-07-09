@@ -87,31 +87,67 @@ bool decode_iceberg_column_stats(const TFileSplitColBounds& s, IcebergFileColSta
 
     const int type_id = s.iceberg_type_id;
 
-    if (type_id == 5 || type_id == 7 || type_id == 18 || type_id == 19) {
-        // INTEGER(5), LONG(7), DATE(18 = days since epoch), TIMESTAMP(19 = micros since epoch)
-        // All stored as little-endian signed integers per Iceberg spec Appendix D.
+    if (type_id == 3) {
+        // BOOLEAN: 1 byte, 0=false/1=true.
+        out->min_val = s.lower_bound.empty() ? 0 : static_cast<unsigned char>(s.lower_bound[0]);
+        out->max_val = s.upper_bound.empty() ? 1 : static_cast<unsigned char>(s.upper_bound[0]);
+        out->has_min_max = true;
+    } else if (type_id == 5 || type_id == 7 || type_id == 18 || type_id == 19) {
+        // INTEGER/LONG/DATE/TIMESTAMP: little-endian signed integer (Iceberg spec Appendix D).
         out->min_val = decode_little_endian_int(s.lower_bound);
         out->max_val = decode_little_endian_int(s.upper_bound);
         out->has_min_max = true;
     } else if (type_id == 10) {
-        // STRING(10): raw UTF-8 bytes, no length prefix, no byte order.
-        // Iceberg Conversions.toByteBuffer uses CharsetEncoder(UTF_8).encode(charBuffer).
-        // Lexicographic byte comparison equals code-point ordering for well-formed UTF-8.
+        // STRING: raw UTF-8 bytes; lexicographic byte order equals code-point order.
         out->min_str = s.lower_bound;
         out->max_str = s.upper_bound;
         out->has_min_max = true;
     } else if (type_id == 8) {
-        // FLOAT(8) — IEEE 754 little-endian 32-bit
+        // FLOAT: IEEE 754 little-endian 32-bit.
         out->min_flt = decode_little_endian_float(s.lower_bound);
         out->max_flt = decode_little_endian_float(s.upper_bound);
         out->has_min_max = true;
     } else if (type_id == 9) {
-        // DOUBLE(9) — IEEE 754 little-endian 64-bit
+        // DOUBLE: IEEE 754 little-endian 64-bit.
         out->min_dbl = decode_little_endian_double(s.lower_bound);
         out->max_dbl = decode_little_endian_double(s.upper_bound);
         out->has_min_max = true;
+    } else if (type_id == 11) {
+        // DECIMAL: big-endian two's complement unscaled value; scale from decimal_scale field.
+        if (s.lower_bound.empty() || s.upper_bound.empty()) {
+            return false;
+        }
+        if (!s.__isset.decimal_scale) {
+            return false;
+        }
+        const auto* lo = reinterpret_cast<const uint8_t*>(s.lower_bound.data());
+        const auto* hi = reinterpret_cast<const uint8_t*>(s.upper_bound.data());
+        auto decode_be128 = [](const uint8_t* data, int len) -> __int128 {
+            using U128 = unsigned __int128;
+            U128 val = (data[0] & 0x80) ? static_cast<U128>(-1) : U128(0);
+            for (int i = 0; i < len; ++i) {
+                val = (val << 8) | data[i];
+            }
+            return static_cast<__int128>(val);
+        };
+        out->min_decimal = decode_be128(lo, static_cast<int>(s.lower_bound.size()));
+        out->max_decimal = decode_be128(hi, static_cast<int>(s.upper_bound.size()));
+        out->decimal_scale = s.decimal_scale;
+        out->has_min_max = true;
+    } else if (type_id == 20) {
+        // TIMESTAMP_NANO: nanoseconds since epoch, truncated to micros (floor min, ceil max).
+        int64_t nanos_min = decode_little_endian_int(s.lower_bound);
+        int64_t nanos_max = decode_little_endian_int(s.upper_bound);
+        out->min_val = nanos_min / 1000;
+        out->max_val = (nanos_max + 999) / 1000;
+        out->has_min_max = true;
+    } else if (type_id == 21 || type_id == 22) {
+        // UUID/FIXED: raw bytes; lexicographic comparison is a total order for equal-length values.
+        out->min_str = s.lower_bound;
+        out->max_str = s.upper_bound;
+        out->has_min_max = true;
     } else {
-        return false; // unsupported type — caller should not prune
+        return false;
     }
 
     return true;

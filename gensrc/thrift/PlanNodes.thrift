@@ -562,17 +562,18 @@ struct TFileScanRangeParams {
 // Passed from FE to BE so the scanner can prune files using runtime-filter min/max
 // values before opening them, avoiding unnecessary object-storage reads.
 struct TFileSplitColBounds {
-    // Iceberg big-endian encoded minimum value for this column in the file.
     1: optional binary lower_bound
-    // Iceberg big-endian encoded maximum value for this column in the file.
     2: optional binary upper_bound
-    // Number of null values; used to detect all-null files.
     3: optional i64    null_count
-    // Total row count; combined with null_count to detect all-null files.
     4: optional i64    row_count
     // Internal Doris FE→BE protocol type identifier (not Iceberg enum ordinals):
-    // INTEGER=5  LONG=7  FLOAT=8  DOUBLE=9  STRING=10  DATE=18  TIMESTAMP=19
+    // BOOLEAN=3  INTEGER=5  LONG=7  FLOAT=8  DOUBLE=9  STRING=10
+    // DATE=18  TIMESTAMP=19  TIMESTAMP_NANO=20  UUID=21  FIXED=22
+    // DECIMAL=11 (big-endian unscaled BigInteger, scale in field 6)
     5: required i32    iceberg_type_id
+    // Scale for DECIMAL columns only (Iceberg DecimalType.scale()).
+    // The unscaled integer in lower/upper_bound must be interpreted at this scale.
+    6: optional i32    decimal_scale
 }
 
 struct TFileRangeDesc {

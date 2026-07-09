@@ -59,12 +59,6 @@ class TupleDescriptor;
 //   FilesDeferredEmitted         — deferred files emitted (passed filter or timeout)
 class FilteringSplitSourceConnector : public SplitSourceConnector {
 public:
-    // `conjuncts`          — pointer to scanner's conjuncts; RF wrappers update in place.
-    // `tuple_desc`         — maps column names → slot IDs for ZoneMap context.
-    // `pruned_ctr`         — incremented for each file pruned immediately.
-    // `deferred_ctr`       — incremented each time a file is deferred.
-    // `deferred_pruned_ctr`— incremented when a deferred file is pruned after RF arrives.
-    // `deferred_emitted_ctr`— incremented when a deferred file is emitted (passed/timeout).
     FilteringSplitSourceConnector(std::shared_ptr<SplitSourceConnector> inner,
                                    const VExprContextSPtrs* conjuncts,
                                    const TupleDescriptor* tuple_desc,

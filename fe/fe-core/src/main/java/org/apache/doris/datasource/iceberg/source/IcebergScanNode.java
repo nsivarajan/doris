@@ -58,8 +58,8 @@ import org.apache.doris.thrift.TColumnCategory;
 import org.apache.doris.thrift.TExplainLevel;
 import org.apache.doris.thrift.TFileFormatType;
 import org.apache.doris.thrift.TFileRangeDesc;
-import org.apache.doris.thrift.TIcebergDeleteFileDesc;
 import org.apache.doris.thrift.TFileSplitColBounds;
+import org.apache.doris.thrift.TIcebergDeleteFileDesc;
 import org.apache.doris.thrift.TIcebergFileDesc;
 import org.apache.doris.thrift.TPlanNode;
 import org.apache.doris.thrift.TPushAggOp;
@@ -967,24 +967,32 @@ public class IcebergScanNode extends FileQueryScanNode {
                     stats.setNullCount(nc);
                 }
             }
+            // DECIMAL: pass scale so BE can interpret the unscaled BigInteger bytes.
+            if (typeId == 11 && field.type() instanceof Types.DecimalType) {
+                stats.setDecimalScale(((Types.DecimalType) field.type()).scale());
+            }
             result.put(field.name().toLowerCase(), stats);
         }
         return result.isEmpty() ? null : result;
     }
 
     /** Maps an Iceberg type to its numeric ID for the BE decoder; -1 = unsupported.
-     * These are internal Doris FE→BE protocol IDs, not Iceberg enum ordinals.
-     * DECIMAL: big-endian unscaled bytes + scale from schema — deferred to follow-up. */
+     * These are internal Doris FE→BE protocol IDs, not Iceberg enum ordinals. */
     private int getIcebergTypeId(Type type) {
         switch (type.typeId()) {
-            case INTEGER:   return 5;
-            case LONG:      return 7;
-            case FLOAT:     return 8;
-            case DOUBLE:    return 9;
-            case STRING:    return 10; // raw UTF-8 bytes, Conversions.toByteBuffer uses UTF-8 encoder
-            case DATE:      return 18;
-            case TIMESTAMP: return 19;
-            default:        return -1;
+            case BOOLEAN:        return 3;   // 1 byte: 0x00=false, 0x01=true
+            case INTEGER:        return 5;   // 4-byte LE
+            case LONG:           return 7;   // 8-byte LE
+            case FLOAT:          return 8;   // 4-byte LE IEEE 754
+            case DOUBLE:         return 9;   // 8-byte LE IEEE 754
+            case STRING:         return 10;  // raw UTF-8 bytes
+            case DECIMAL:        return 11;  // big-endian unscaled BigInteger; scale sent separately
+            case DATE:           return 18;  // 4-byte LE days since epoch
+            case TIMESTAMP:      return 19;  // 8-byte LE micros since epoch
+            case TIMESTAMP_NANO: return 20;  // 8-byte LE nanos since epoch (Iceberg v3)
+            case UUID:           return 21;  // 16-byte big-endian RFC 4122
+            case FIXED:          return 22;  // N-byte passthrough, equal-length lex order
+            default:             return -1;  // TIME/BINARY/GEOMETRY — skip
         }
     }
 
