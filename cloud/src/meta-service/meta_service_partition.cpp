@@ -443,6 +443,7 @@ void MetaServiceImpl::drop_index(::google::protobuf::RpcController* controller,
         pb.set_expiration(request->expiration());
         pb.set_state(RecycleIndexPB::DROPPED);
         // Check TT via the existing txn (snapshot read) to avoid an extra FDB transaction.
+        // time_travel_table_key is written by commit_txn for TT-enabled tables.
         std::string tt_key = time_travel_table_key({instance_id, request->table_id()});
         std::string tt_val;
         if (txn->get(tt_key, &tt_val, /*snapshot=*/true) == TxnErrorCode::TXN_OK) {
@@ -978,13 +979,16 @@ void MetaServiceImpl::drop_partition(::google::protobuf::RpcController* controll
         pb.set_expiration(request->expiration());
         pb.set_state(RecyclePartitionPB::DROPPED);
         // Check TT via the existing txn (snapshot read) to avoid an extra FDB transaction.
-        std::string tt_key = time_travel_table_key({instance_id, request->table_id()});
-        std::string tt_val;
-        if (txn->get(tt_key, &tt_val, /*snapshot=*/true) == TxnErrorCode::TXN_OK) {
-            using namespace std::chrono;
-            int64_t now_ms =
-                    duration_cast<milliseconds>(system_clock::now().time_since_epoch()).count();
-            pb.set_dropped_ms(now_ms);
+        // time_travel_table_key is written by commit_txn for TT-enabled tables.
+        {
+            std::string tt_key = time_travel_table_key({instance_id, request->table_id()});
+            std::string tt_val;
+            if (txn->get(tt_key, &tt_val, /*snapshot=*/true) == TxnErrorCode::TXN_OK) {
+                using namespace std::chrono;
+                int64_t now_ms =
+                        duration_cast<milliseconds>(system_clock::now().time_since_epoch()).count();
+                pb.set_dropped_ms(now_ms);
+            }
         }
         pb.SerializeToString(&to_save_val);
     }

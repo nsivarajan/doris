@@ -375,6 +375,12 @@ public class MetaServiceProxy {
                 (client) -> client.getTtSchemaAtTime(request));
     }
 
+    public Cloud.ShowTimeTravelResponse showTimeTravel(
+            Cloud.ShowTimeTravelRequest request) throws RpcException {
+        return executeWithMetrics("showTimeTravel",
+                (client) -> client.showTimeTravel(request));
+    }
+
     public Cloud.CreateTabletsResponse createTablets(Cloud.CreateTabletsRequest request) throws RpcException {
         return executeWithMetrics("createTablets", (client) -> client.createTablets(request));
     }
