@@ -27,6 +27,7 @@ Usage:
   ./replication_manager.py failback      --group-id ... --to-site beijing
   ./replication_manager.py add-vault-mapping --group-id ... --vault-name ...
   ./replication_manager.py reload-config --group-id ...
+  ./replication_manager.py dr-drill --group-id ... --secondary-site shanghai ...
 """
 
 import argparse
@@ -36,13 +37,14 @@ import os
 # make sub-packages importable when run as a script
 sys.path.insert(0, os.path.dirname(__file__))
 
-from commands.create_group import CreateGroupCommand
-from commands.show_group   import ShowGroupCommand
-from commands.verify       import VerifyCommand
-from commands.failover     import FailoverCommand
-from commands.failback     import FailbackCommand
-from commands.add_vault    import AddVaultMappingCommand
+from commands.create_group  import CreateGroupCommand
+from commands.show_group    import ShowGroupCommand
+from commands.verify        import VerifyCommand
+from commands.failover      import FailoverCommand
+from commands.failback      import FailbackCommand
+from commands.add_vault     import AddVaultMappingCommand
 from commands.reload_config import ReloadConfigCommand
+from commands.dr_drill      import DrDrillCommand
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -123,6 +125,27 @@ def build_parser() -> argparse.ArgumentParser:
                         help="Reload replication-group.json on all MS nodes")
     rc.add_argument("--group-id", required=True)
 
+    # ── dr-drill ──────────────────────────────────────────────────────────────
+    dd = sub.add_parser("dr-drill",
+                        help="Isolated DR write-path test (primary untouched)")
+    dd.add_argument("--group-id",           required=True)
+    dd.add_argument("--secondary-site",     required=True,
+                    help="Name of the secondary site to drill (e.g. shanghai)")
+    dd.add_argument("--drill-bucket",       required=True,
+                    help="New isolated OSS/S3 bucket for drill writes (no CRR)")
+    dd.add_argument("--drill-endpoint",     required=True,
+                    help="OSS/S3 endpoint for the drill bucket")
+    dd.add_argument("--drill-region",       default="cn-shanghai",
+                    help="Region of the drill bucket (default: cn-shanghai)")
+    dd.add_argument("--secondary-http-port", type=int, default=8030,
+                    help="Secondary FE HTTP port for API calls (default: 8030)")
+    dd.add_argument("--secondary-mysql-port", type=int, default=9030,
+                    help="Secondary FE MySQL port for SQL execution (default: 9030)")
+    dd.add_argument("--mysql-user",         default="root",
+                    help="MySQL user for SQL execution (default: root)")
+    dd.add_argument("--mysql-password",     default="",
+                    help="MySQL password (default: empty)")
+
     return parser
 
 
@@ -131,13 +154,14 @@ def main():
     args = parser.parse_args()
 
     commands = {
-        "create-group":     CreateGroupCommand,
-        "show-group":       ShowGroupCommand,
-        "verify":           VerifyCommand,
-        "failover":         FailoverCommand,
-        "failback":         FailbackCommand,
+        "create-group":      CreateGroupCommand,
+        "show-group":        ShowGroupCommand,
+        "verify":            VerifyCommand,
+        "failover":          FailoverCommand,
+        "failback":          FailbackCommand,
         "add-vault-mapping": AddVaultMappingCommand,
-        "reload-config":    ReloadConfigCommand,
+        "reload-config":     ReloadConfigCommand,
+        "dr-drill":          DrDrillCommand,
     }
 
     cmd_class = commands.get(args.command)

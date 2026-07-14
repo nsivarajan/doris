@@ -164,6 +164,59 @@ public class ReplicationAction extends RestBaseController {
         return ResponseEntityBuilder.ok(Map.of("status", "dr-mode"));
     }
 
+    // ── POST /api/replication/enter-drill-mode ───────────────────────────────
+
+    /**
+     * Lifts the write guard for a DR drill WITHOUT starting the EditLogS3Exporter.
+     * This allows writing to isolated test tables while keeping Beijing's replication
+     * bucket completely untouched. The secondary MS must have been re-pointed to its
+     * local FDB before calling this.
+     *
+     * Must be followed by exit-drill-mode to restore read-only state.
+     * Never use this as a substitute for a real failover.
+     */
+    @RequestMapping(path = "/api/replication/enter-drill-mode", method = RequestMethod.POST)
+    public Object enterDrillMode(HttpServletRequest request, HttpServletResponse response) {
+        executeCheckPassword(request, response);
+        if (!Config.enable_replication_group) {
+            return ResponseEntityBuilder.badRequest("enable_replication_group is false");
+        }
+        if (!Config.dr_read_only_mode) {
+            return ResponseEntityBuilder.badRequest(
+                    "FE is not in DR read-only mode — drill mode only valid on secondary");
+        }
+        Config.dr_read_only_mode = false;
+        // deliberately do NOT start EditLogS3Exporter — this is a drill,
+        // we must not write to Beijing's replication bucket
+        LOG.info("[Replication] DR drill mode activated: write guard lifted, exporter NOT started. "
+                + "group={} site={}", Config.replication_group_id, Config.replication_site_name);
+        return ResponseEntityBuilder.ok(Map.of(
+                "status", "drill-mode-active",
+                "site", Config.replication_site_name,
+                "warning", "MS must point to local FDB before running writes"));
+    }
+
+    // ── POST /api/replication/exit-drill-mode ────────────────────────────────
+
+    /**
+     * Restores the write guard after a DR drill.
+     * FE returns to read-only DR reader state. Exporter remains stopped.
+     * MS must be re-pointed back to primary FDB separately after this call.
+     */
+    @RequestMapping(path = "/api/replication/exit-drill-mode", method = RequestMethod.POST)
+    public Object exitDrillMode(HttpServletRequest request, HttpServletResponse response) {
+        executeCheckPassword(request, response);
+        if (!Config.enable_replication_group) {
+            return ResponseEntityBuilder.badRequest("enable_replication_group is false");
+        }
+        Config.dr_read_only_mode = true;
+        LOG.info("[Replication] DR drill mode deactivated: write guard restored. "
+                + "group={} site={}", Config.replication_group_id, Config.replication_site_name);
+        return ResponseEntityBuilder.ok(Map.of(
+                "status", "read-only-restored",
+                "site", Config.replication_site_name));
+    }
+
     // ── GET /api/replication/metrics ─────────────────────────────────────────
 
     /**
