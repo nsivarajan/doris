@@ -99,9 +99,33 @@ class CreateGroupCommand:
             print(f"\n  Warning: could not reach primary FE at {a.primary_fe}")
 
         print(f"\nReplication group '{a.group_id}' created successfully.")
-        print(f"Next steps:")
+        print(f"\nNext steps:")
         print(f"  1. Ensure bidirectional CRR is configured for all vault buckets")
         print(f"  2. Set enable_replication_group=true on primary FE")
-        print(f"  3. Start secondary FE with --dr-reader-mode")
-        print(f"  4. Run: ./replication_manager.py show-group --group-id {a.group_id}")
+        print(f"  3. Add the following to secondary meta_service.conf:")
+        print()
+        self._print_ms_config(config)
+        print()
+        print(f"  4. Start secondary FE with --dr-reader-mode")
+        print(f"  5. Run: ./replication_manager.py show-group --group-id {a.group_id}")
         return 0
+
+    def _print_ms_config(self, config):
+        """Generate the meta_service.conf snippet for the secondary MS."""
+        # build vault override string: vault1:endpoint:bucket,vault2:...
+        overrides = []
+        for m in config.vault_mappings:
+            overrides.append(
+                f"{m.vault_name}:{m.secondary.endpoint}:{m.secondary.bucket}"
+            )
+        overrides_str = ",".join(overrides)
+
+        print("  ┌─── secondary meta_service.conf ───────────────────────────────────")
+        print(f"  │  enable_replication_group = true")
+        print(f"  │  replication_site_name = {config.secondary_site}")
+        if overrides_str:
+            print(f"  │  replication_vault_overrides = {overrides_str}")
+        else:
+            print(f"  │  replication_vault_overrides = ")
+            print(f"  │    # (no vault mappings yet — run add-vault-mapping)")
+        print("  └────────────────────────────────────────────────────────────────────")

@@ -1,0 +1,88 @@
+# Doris Replication Group — Prometheus Alert Rules
+#
+# Add to your Prometheus configuration:
+#   rule_files:
+#     - /path/to/doris_replication_alerts.yml
+#
+# Scrape config:
+#   - job_name: doris_replication
+#     static_configs:
+#       - targets:
+#           - bj-fe-host:8040
+#           - sh-fe-host:8040
+#     metrics_path: /api/replication/metrics
+
+groups:
+  - name: doris_replication
+    rules:
+
+      # ── Exporter health ─────────────────────────────────────────────────────
+
+      - alert: ReplicationExporterDown
+        expr: doris_replication_exporter_running{site="beijing"} == 0
+          AND doris_replication_feature_enabled{site="beijing"} == 1
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Doris replication exporter stopped on primary ({{ $labels.site }})"
+          description: >
+            The EditLogS3Exporter thread is not running on the primary FE.
+            DR replication has stopped. Run:
+            curl -X POST http://bj-fe-host:8040/api/replication/promote-master
+            or restart the primary FE.
+
+      # ── RPO warnings ────────────────────────────────────────────────────────
+
+      - alert: ReplicationRPOHigh
+        expr: |
+          (time() * 1000 - doris_replication_last_journal_id) / 1000 > 600
+          AND doris_replication_feature_enabled == 1
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Doris replication RPO exceeds 10 minutes ({{ $labels.site }})"
+          description: >
+            The replication bucket has not received a new segment in over 10 minutes.
+            Check the primary FE exporter status.
+
+      - alert: ReplicationRPOCritical
+        expr: |
+          (time() * 1000 - doris_replication_last_journal_id) / 1000 > 1800
+          AND doris_replication_feature_enabled == 1
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Doris replication RPO exceeds 30 minutes ({{ $labels.site }})"
+          description: >
+            DR data is significantly behind. Investigate immediately.
+            A failover now would lose more than 30 minutes of data.
+
+      # ── DR cluster health ────────────────────────────────────────────────────
+
+      - alert: ReplicationDRNotReadOnly
+        expr: |
+          doris_replication_dr_read_only{site="shanghai"} == 0
+          AND doris_replication_feature_enabled{site="shanghai"} == 1
+          AND doris_replication_exporter_running{site="shanghai"} == 0
+        for: 1m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Secondary FE ({{ $labels.site }}) is not in read-only mode"
+          description: >
+            The secondary FE should have dr_read_only_mode=true when it is
+            not the active primary. Writes may be accepted incorrectly.
+
+      - alert: ReplicationFeatureDisabled
+        expr: doris_replication_feature_enabled == 0
+        for: 1m
+        labels:
+          severity: info
+        annotations:
+          summary: "Replication feature disabled on {{ $labels.site }}"
+          description: >
+            enable_replication_group is false. Replication is not running.
+            This is expected if the feature has not been configured yet.

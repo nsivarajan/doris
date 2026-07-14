@@ -163,4 +163,59 @@ public class ReplicationAction extends RestBaseController {
         LOG.info("[Replication] Entered DR mode — writes rejected, exporter stopped");
         return ResponseEntityBuilder.ok(Map.of("status", "dr-mode"));
     }
+
+    // ── GET /api/replication/metrics ─────────────────────────────────────────
+
+    /**
+     * Returns replication metrics in Prometheus text format.
+     * Scrape this endpoint from Prometheus with job="doris_replication".
+     *
+     * Metrics exported:
+     *   doris_replication_exporter_running{group,site}  1/0
+     *   doris_replication_last_journal_id{group,site}   long
+     *   doris_replication_dr_read_only{group,site}      1/0
+     *   doris_replication_feature_enabled{group,site}   1/0
+     */
+    @RequestMapping(path = "/api/replication/metrics", method = RequestMethod.GET)
+    public Object metrics(HttpServletRequest request, HttpServletResponse response) {
+        // no auth required for metrics scraping — Prometheus needs open access
+        String group = Config.replication_group_id.isEmpty() ? "default" : Config.replication_group_id;
+        String site  = Config.replication_site_name.isEmpty() ? "unknown" : Config.replication_site_name;
+        String labels = String.format("{group=\"%s\",site=\"%s\"}", group, site);
+
+        boolean exporterRunning = activeExporter != null
+                && exporterThread != null && exporterThread.isAlive();
+        long lastJournalId = activeExporter != null ? activeExporter.getLastExportedJournalId() : -1;
+
+        StringBuilder sb = new StringBuilder();
+        sb.append("# HELP doris_replication_feature_enabled Whether the replication group feature is enabled\n");
+        sb.append("# TYPE doris_replication_feature_enabled gauge\n");
+        sb.append("doris_replication_feature_enabled").append(labels)
+          .append(" ").append(Config.enable_replication_group ? 1 : 0).append("\n");
+
+        sb.append("# HELP doris_replication_exporter_running Whether the EditLogS3Exporter thread is alive\n");
+        sb.append("# TYPE doris_replication_exporter_running gauge\n");
+        sb.append("doris_replication_exporter_running").append(labels)
+          .append(" ").append(exporterRunning ? 1 : 0).append("\n");
+
+        sb.append("# HELP doris_replication_last_journal_id Last EditLog journal_id successfully exported to bucket\n");
+        sb.append("# TYPE doris_replication_last_journal_id gauge\n");
+        sb.append("doris_replication_last_journal_id").append(labels)
+          .append(" ").append(lastJournalId).append("\n");
+
+        sb.append("# HELP doris_replication_dr_read_only Whether this FE is in DR read-only mode (write guard active)\n");
+        sb.append("# TYPE doris_replication_dr_read_only gauge\n");
+        sb.append("doris_replication_dr_read_only").append(labels)
+          .append(" ").append(Config.dr_read_only_mode ? 1 : 0).append("\n");
+
+        try {
+            response.setContentType("text/plain; version=0.0.4; charset=utf-8");
+            response.setStatus(HttpServletResponse.SC_OK);
+            response.getWriter().write(sb.toString());
+            response.getWriter().flush();
+        } catch (Exception e) {
+            LOG.warn("[Replication] failed to write metrics response: {}", e.getMessage());
+        }
+        return null; // response written directly
+    }
 }
