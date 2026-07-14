@@ -3710,4 +3710,78 @@ public class Config extends ConfigBase {
                     + "（持有主副本的桶），并在单个 tablet 写入量超过阈值（默认 200 MB）后在本地桶之间轮转。"
                     + "可降低导入内存压力并提升随机分桶表的吞吐量，覆盖所有导入类型。"})
     public static boolean enable_adaptive_random_bucket_load = true;
+
+    // ── Replication Group (DR) ────────────────────────────────────────────────
+    // Master switch — entire replication feature is dormant when false (default).
+    // Set true only after the replication group has been configured and tested.
+    @ConfField(mutable = true)
+    public static boolean enable_replication_group = false;
+
+    // Set true on secondary (DR) FE nodes to reject all write SQL statements.
+    // Only checked when enable_replication_group = true.
+    @ConfField(mutable = true)
+    public static boolean dr_read_only_mode = false;
+
+    // Human-readable primary cluster endpoint shown in write-rejection error messages.
+    @ConfField
+    public static String replication_primary_endpoint = "";
+
+    // Replication group identity
+    @ConfField
+    public static String replication_group_id = "";
+
+    @ConfField
+    public static String replication_site_name = "";
+
+    // Storage backend for the replication bucket: S3 | OSS | GCS
+    @ConfField
+    public static String replication_storage_type = "OSS";
+
+    @ConfField
+    public static String replication_bucket = "";
+
+    @ConfField
+    public static String replication_endpoint = "";
+
+    // Credential type: instance_profile | assume_role | ak_sk
+    @ConfField
+    public static String replication_credential_type = "instance_profile";
+
+    // Used when credential_type = ak_sk (dev/test only)
+    @ConfField
+    public static String replication_access_key = "";
+
+    @ConfField
+    public static String replication_secret_key = "";
+
+    // Used when credential_type = assume_role
+    @ConfField
+    public static String replication_role_arn = "";
+
+    @ConfField
+    public static String replication_role_session_name = "doris-replication";
+
+    @ConfField
+    public static String replication_external_id = "";
+
+    // Tuning: EditLogS3Exporter flush interval in milliseconds
+    @ConfField(mutable = true)
+    public static int replication_export_interval_ms = 5000;
+
+    // Tuning: max journal entries per segment file
+    @ConfField(mutable = true)
+    public static int replication_export_batch_size = 500;
+
+    // Tuning: how often to write the consistency checkpoint (milliseconds)
+    @ConfField(mutable = true)
+    public static int replication_checkpoint_interval_ms = 30000;
+
+    // Assumed max OSS CRR lag (milliseconds) — used to compute oss_safe_before_ms in checkpoint
+    @ConfField(mutable = true)
+    public static int replication_crr_max_lag_ms = 300000;
+
+    // auto-standby: if true, FE checks replication-group.json on startup and
+    // enters DR reader mode automatically if it is not the current primary site
+    @ConfField
+    public static String replication_recovery_mode = "auto-standby";
 }

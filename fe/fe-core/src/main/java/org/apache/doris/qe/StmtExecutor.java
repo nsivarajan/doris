@@ -539,6 +539,21 @@ public class StmtExecutor {
         return false;
     }
 
+    /** Returns true for Command types that modify data or schema — used by the DR write guard. */
+    private static boolean isDrWriteCommand(
+            org.apache.doris.nereids.trees.plans.logical.LogicalPlan plan) {
+        return plan instanceof org.apache.doris.nereids.trees.plans.commands.InsertIntoTableCommand
+            || plan instanceof org.apache.doris.nereids.trees.plans.commands.InsertOverwriteTableCommand
+            || plan instanceof org.apache.doris.nereids.trees.plans.commands.UpdateCommand
+            || plan instanceof org.apache.doris.nereids.trees.plans.commands.DeleteFromCommand
+            || plan instanceof org.apache.doris.nereids.trees.plans.commands.DeleteFromUsingCommand
+            || plan instanceof org.apache.doris.nereids.trees.plans.commands.CreateTableCommand
+            || plan instanceof org.apache.doris.nereids.trees.plans.commands.AlterTableCommand
+            || plan instanceof org.apache.doris.nereids.trees.plans.commands.DropTableCommand
+            || plan instanceof org.apache.doris.nereids.trees.plans.commands.TruncateTableCommand
+            || plan instanceof org.apache.doris.nereids.trees.plans.commands.MergeIntoCommand;
+    }
+
     /**
      * Used for audit in ConnectProcessor.
      * <p>
@@ -795,6 +810,16 @@ public class StmtExecutor {
             }
         }
         if (logicalPlan instanceof Command) {
+            // DR read-only guard: reject all write operations on secondary cluster
+            if (org.apache.doris.common.Config.enable_replication_group
+                    && org.apache.doris.common.Config.dr_read_only_mode
+                    && isDrWriteCommand(logicalPlan)) {
+                throw new org.apache.doris.common.UserException(
+                        "This cluster is in DR read-only mode. "
+                        + "Connect to the primary cluster for write operations. "
+                        + "Primary endpoint: "
+                        + org.apache.doris.common.Config.replication_primary_endpoint);
+            }
             if (logicalPlan instanceof Redirect) {
                 OlapGroupCommitInsertExecutor.analyzeGroupCommit(context, logicalPlan);
                 redirectStatus = ((Redirect) logicalPlan).toRedirectStatus();

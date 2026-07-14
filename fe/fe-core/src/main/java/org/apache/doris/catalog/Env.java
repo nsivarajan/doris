@@ -1973,6 +1973,27 @@ public class Env {
         checkpointer.start();
         LOG.info("checkpointer thread started. thread id is {}", checkpointThreadId);
 
+        // start replication group exporter when feature is enabled
+        if (Config.enable_replication_group) {
+            try {
+                org.apache.doris.replication.ReplicationConfig replConfig =
+                        org.apache.doris.replication.ReplicationConfig.fromDorisConfig();
+                org.apache.doris.replication.storage.ReplicationStorageBackend replStorage =
+                        org.apache.doris.replication.storage.ReplicationStorageFactory
+                                .create(replConfig);
+                org.apache.doris.replication.EditLogS3Exporter exporter =
+                        new org.apache.doris.replication.EditLogS3Exporter(
+                                editLog, replStorage, replConfig);
+                Thread exporterThread = new Thread(exporter, "edit-log-s3-exporter");
+                exporterThread.setDaemon(true);
+                exporterThread.start();
+                LOG.info("[Replication] EditLogS3Exporter started group={} site={}",
+                        replConfig.groupId, replConfig.siteName);
+            } catch (Exception e) {
+                LOG.error("[Replication] Failed to start EditLogS3Exporter: {}", e.getMessage(), e);
+            }
+        }
+
         // heartbeat mgr
         heartbeatMgr.setMaster(clusterId, token, epoch);
         heartbeatMgr.start();
