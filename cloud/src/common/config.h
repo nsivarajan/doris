@@ -458,4 +458,21 @@ CONF_mBool(wait_txn_lazy_commit_during_reads, "true");
 
 // Whether to enable recycler. If false, the recycler will skip scanning instances to pending queue.
 CONF_mBool(enable_recycler, "true");
+
+// ── Replication Group (DR) ────────────────────────────────────────────────────
+// Master switch — whole replication feature is dormant when false (default).
+CONF_mBool(enable_replication_group, "false");
+
+// Identity of this Meta Service node within the replication group.
+// "primary" means this MS serves the primary site (Beijing).
+// Any other value (e.g. "shanghai") means secondary — vault mapping override applies.
+CONF_String(replication_site_name, "primary");
+
+// Comma-separated vault override mappings applied when this MS is NOT the primary site.
+// Format: vault_name1:secondary_endpoint1:secondary_bucket1,vault_name2:...
+// Example: primary_vault:oss-cn-shanghai-internal.aliyuncs.com:doris-shanghai-data
+// When set, get_obj_store_info() replaces endpoint+bucket for each matched vault
+// so BE reads data from the local-region bucket instead of the primary-region bucket.
+CONF_String(replication_vault_overrides, "");
+
 } // namespace doris::cloud::config

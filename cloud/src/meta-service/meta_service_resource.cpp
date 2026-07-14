@@ -24,9 +24,11 @@
 #include <cctype>
 #include <charconv>
 #include <chrono>
+#include <mutex>
 #include <numeric>
 #include <queue>
 #include <regex>
+#include <sstream>
 #include <string>
 #include <tuple>
 #include <unordered_set>
@@ -55,6 +57,66 @@ bool is_valid_storage_vault_name(const std::string& str) {
     const std::regex pattern(pattern_str);
     return std::regex_match(str, pattern);
 }
+
+// Parses config::replication_vault_overrides once and caches the result.
+// Format: "vault1:endpoint1:bucket1,vault2:endpoint2:bucket2"
+// Returns a map: vault_name → {endpoint, bucket}
+static const std::unordered_map<std::string,
+        std::pair<std::string, std::string>>& get_vault_override_map() {
+    static std::once_flag init_flag;
+    static std::unordered_map<std::string, std::pair<std::string, std::string>> overrides;
+    std::call_once(init_flag, []() {
+        const std::string& raw = config::replication_vault_overrides;
+        if (raw.empty()) return;
+        // split by comma, then each token by first two colons
+        std::stringstream ss(raw);
+        std::string token;
+        while (std::getline(ss, token, ',')) {
+            auto p1 = token.find(':');
+            if (p1 == std::string::npos) continue;
+            auto p2 = token.find(':', p1 + 1);
+            if (p2 == std::string::npos) continue;
+            std::string vault_name = token.substr(0, p1);
+            std::string endpoint   = token.substr(p1 + 1, p2 - p1 - 1);
+            std::string bucket     = token.substr(p2 + 1);
+            if (!vault_name.empty() && !endpoint.empty() && !bucket.empty()) {
+                overrides[vault_name] = {endpoint, bucket};
+                LOG(INFO) << "[Replication] vault override registered: vault=" << vault_name
+                          << " endpoint=" << endpoint << " bucket=" << bucket;
+            }
+        }
+        LOG(INFO) << "[Replication] loaded " << overrides.size() << " vault override(s)";
+    });
+    return overrides;
+}
+
+// Applies secondary vault endpoint/bucket when this MS is the standby site.
+// Called from get_obj_store_info() for each vault in the response.
+static void apply_replication_vault_override(StorageVaultPB& vault) {
+    const auto& overrides = get_vault_override_map();
+    auto it = overrides.find(vault.name());
+    if (it == overrides.end()) {
+        // no mapping for this vault — warn once per vault name
+        static std::unordered_set<std::string> warned;
+        if (warned.find(vault.name()) == warned.end()) {
+            LOG(WARNING) << "[Replication] vault '" << vault.name()
+                         << "' has no secondary mapping in replication_vault_overrides. "
+                         << "Add it with: replication-manager add-vault-mapping. "
+                         << "Falling back to primary endpoint (cross-region reads).";
+            warned.insert(vault.name());
+        }
+        return;
+    }
+    // apply secondary endpoint and bucket
+    if (vault.has_obj_info()) {
+        auto* obj = vault.mutable_obj_info();
+        obj->set_endpoint(it->second.first);
+        obj->set_bucket(it->second.second);
+        LOG(DEBUG) << "[Replication] vault '" << vault.name()
+                   << "' remapped to secondary bucket=" << it->second.second;
+    }
+}
+
 } // namespace
 
 namespace doris::cloud {
@@ -629,6 +691,14 @@ void MetaServiceImpl::get_obj_store_info(google::protobuf::RpcController* contro
                                       hex(k));
                     LOG(WARNING) << msg << " key=" << hex(k);
                     return;
+                }
+                // DR vault mapping: when this MS is the secondary site, override endpoint
+                // and bucket so BE reads from the local-region OSS bucket instead of
+                // the primary-region bucket. Mapping is loaded once at startup from config.
+                if (config::enable_replication_group
+                        && config::replication_site_name != "primary"
+                        && !config::replication_vault_overrides.empty()) {
+                    apply_replication_vault_override(*vault);
                 }
                 if (!it->has_next()) {
                     storage_vault_start = k;
