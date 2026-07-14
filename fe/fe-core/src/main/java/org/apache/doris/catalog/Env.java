@@ -1987,6 +1987,9 @@ public class Env {
                 Thread exporterThread = new Thread(exporter, "edit-log-s3-exporter");
                 exporterThread.setDaemon(true);
                 exporterThread.start();
+                // register with HTTP endpoint so status/pause/promote can reach the exporter
+                org.apache.doris.httpv2.rest.ReplicationAction.registerExporter(
+                        exporter, exporterThread);
                 LOG.info("[Replication] EditLogS3Exporter started group={} site={}",
                         replConfig.groupId, replConfig.siteName);
             } catch (Exception e) {
