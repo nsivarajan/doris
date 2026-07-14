@@ -114,9 +114,19 @@ public class S3JournalCursor implements JournalCursor {
                 if (firstId < 0) {
                     continue;
                 }
-                // if this segment starts after our next expected id, there's a gap — stop
+                // if this segment starts after our next expected id there are two cases:
+                // 1. genuine gap mid-stream (should not happen) — stop and wait
+                // 2. fresh start: nextJournalId=1 but exporter started at a higher id
+                //    in this case skip ahead to the first available segment
                 if (firstId > nextJournalId) {
-                    break;
+                    if (nextJournalId <= 1 && lastLoadedSegment == null) {
+                        // fresh start — jump to first available segment
+                        LOG.info("[Replication:S3Cursor] fresh start: jumping to first "
+                                + "available segment at journal_id={}", firstId);
+                        nextJournalId = firstId;
+                    } else {
+                        break; // genuine gap — wait for missing segments
+                    }
                 }
 
                 byte[] bytes = storage.get(segKey);

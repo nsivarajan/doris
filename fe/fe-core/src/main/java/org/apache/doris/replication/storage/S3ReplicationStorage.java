@@ -24,6 +24,7 @@ import org.apache.doris.replication.credentials.ReplicationCredentials;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 
+import software.amazon.awssdk.auth.credentials.AwsBasicCredentials;
 import software.amazon.awssdk.auth.credentials.AwsSessionCredentials;
 import software.amazon.awssdk.auth.credentials.StaticCredentialsProvider;
 import software.amazon.awssdk.core.exception.SdkServiceException;
@@ -137,9 +138,13 @@ public class S3ReplicationStorage implements ReplicationStorageBackend {
                     ReplicationStorageException.ErrorCode.PERMISSION_DENIED,
                     "Failed to get credentials: " + e.getMessage(), e);
         }
-        AwsSessionCredentials awsCreds = AwsSessionCredentials.create(
-                creds.accessKey, creds.secretKey,
-                creds.securityToken != null ? creds.securityToken : "");
+        // use AwsSessionCredentials only when we have a session token (STS)
+        // use AwsBasicCredentials for static AK/SK (no session token)
+        software.amazon.awssdk.auth.credentials.AwsCredentials awsCreds =
+                (creds.securityToken != null && !creds.securityToken.isEmpty())
+                ? AwsSessionCredentials.create(
+                        creds.accessKey, creds.secretKey, creds.securityToken)
+                : AwsBasicCredentials.create(creds.accessKey, creds.secretKey);
 
         return S3Client.builder()
                 .credentialsProvider(StaticCredentialsProvider.create(awsCreds))

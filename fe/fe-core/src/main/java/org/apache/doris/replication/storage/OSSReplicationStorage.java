@@ -24,9 +24,9 @@ import org.apache.doris.replication.credentials.ReplicationCredentials;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 
-import com.aliyun.oss.OSSClient;
+import com.aliyun.oss.OSS;
+import com.aliyun.oss.OSSClientBuilder;
 import com.aliyun.oss.OSSException;
-import com.aliyun.oss.common.auth.Credentials;
 import com.aliyun.oss.common.auth.DefaultCredentialProvider;
 import com.aliyun.oss.model.ListObjectsRequest;
 import com.aliyun.oss.model.OSSObjectSummary;
@@ -116,8 +116,8 @@ public class OSSReplicationStorage implements ReplicationStorageBackend {
         });
     }
 
-    /** Builds a fresh OSSClient with current credentials — picks up STS token rotation. */
-    private OSSClient buildClient() throws ReplicationStorageException {
+    /** Builds a fresh OSS client with current credentials — picks up STS token rotation. */
+    private OSS buildClient() throws ReplicationStorageException {
         ReplicationCredentials creds;
         try {
             creds = credentialProvider.getCredentials();
@@ -127,14 +127,15 @@ public class OSSReplicationStorage implements ReplicationStorageBackend {
                     "Failed to get credentials: " + e.getMessage(), e);
         }
         DefaultCredentialProvider ossCredProvider;
-        if (creds.securityToken != null) {
+        if (creds.securityToken != null && !creds.securityToken.isEmpty()) {
             ossCredProvider = new DefaultCredentialProvider(
                     creds.accessKey, creds.secretKey, creds.securityToken);
         } else {
             ossCredProvider = new DefaultCredentialProvider(
                     creds.accessKey, creds.secretKey);
         }
-        return new OSSClient(endpoint, ossCredProvider, null);
+        // use OSSClientBuilder (correct API for aliyun-sdk-oss 3.x)
+        return new OSSClientBuilder().build(endpoint, ossCredProvider, null);
     }
 
     /** Execute void operation with retry on transient errors. */

@@ -1973,8 +1973,9 @@ public class Env {
         checkpointer.start();
         LOG.info("checkpointer thread started. thread id is {}", checkpointThreadId);
 
-        // start replication group exporter when feature is enabled
-        if (Config.enable_replication_group) {
+        // start replication group exporter ONLY on the primary site
+        // dr_read_only_mode=true means this is the secondary — never export here
+        if (Config.enable_replication_group && !Config.dr_read_only_mode) {
             try {
                 org.apache.doris.replication.ReplicationConfig replConfig =
                         org.apache.doris.replication.ReplicationConfig.fromDorisConfig();
@@ -2129,7 +2130,17 @@ public class Env {
             // transfer from INIT/UNKNOWN to OBSERVER/FOLLOWER
 
             if (replayer == null) {
-                // in DR reader mode, use S3JournalCursor instead of BDB replayer
+                // auto-standby: if replication is enabled and recovery_mode=auto-standby,
+                // read replication-group.json to decide whether to enter DR reader mode
+                // automatically (handles Beijing restart after a failover to Shanghai)
+                if (Config.enable_replication_group
+                        && "auto-standby".equals(Config.replication_recovery_mode)
+                        && !"true".equals(System.getProperty(
+                                org.apache.doris.common.FeConstants.DR_READER_MODE_KEY))) {
+                    applyAutoStandbyIfNeeded();
+                }
+
+                // start DR replayer when flag is set (explicit --dr-reader-mode or auto-standby)
                 if ("true".equals(System.getProperty(
                         org.apache.doris.common.FeConstants.DR_READER_MODE_KEY))
                         && Config.enable_replication_group) {
@@ -3167,6 +3178,53 @@ public class Env {
                 ExecuteEnv.getInstance().refreshAndGetDiskInfo(true);
             }
         };
+    }
+
+    /**
+     * Checks replication-group.json in the bucket. If the current site is NOT the
+     * primary site, sets DR_READER_MODE_KEY so startDrReplayer() is used instead of
+     * the normal BDB replayer. This handles automatic standby entry when a site
+     * restarts after a failover (e.g. Beijing restarts while Shanghai is primary).
+     */
+    private void applyAutoStandbyIfNeeded() {
+        try {
+            org.apache.doris.replication.ReplicationConfig replConfig =
+                    org.apache.doris.replication.ReplicationConfig.fromDorisConfig();
+            org.apache.doris.replication.storage.ReplicationStorageBackend storage =
+                    org.apache.doris.replication.storage.ReplicationStorageFactory
+                            .create(replConfig);
+
+            // read group config from bucket
+            String groupConfigKey = replConfig.groupId + "/replication-group.json";
+            byte[] configBytes = storage.get(groupConfigKey);
+            if (configBytes == null) {
+                LOG.info("[Replication] auto-standby: no group config in bucket, starting normally");
+                return;
+            }
+
+            // parse primary_site field from JSON
+            String configJson = new String(configBytes, java.nio.charset.StandardCharsets.UTF_8);
+            com.google.gson.JsonObject obj =
+                    com.google.gson.JsonParser.parseString(configJson).getAsJsonObject();
+            String primarySite = obj.has("primary_site")
+                    ? obj.get("primary_site").getAsString() : "";
+
+            if (!primarySite.isEmpty() && !primarySite.equals(replConfig.siteName)) {
+                // this site is NOT the current primary — enter DR reader mode
+                System.setProperty(org.apache.doris.common.FeConstants.DR_READER_MODE_KEY, "true");
+                // also set dr_read_only_mode so write guard is active
+                Config.dr_read_only_mode = true;
+                LOG.info("[Replication] auto-standby: primary_site={} this_site={} "
+                        + "— automatically entering DR reader mode",
+                        primarySite, replConfig.siteName);
+            } else {
+                LOG.info("[Replication] auto-standby: this site ({}) is primary, starting normally",
+                        replConfig.siteName);
+            }
+        } catch (Exception e) {
+            LOG.warn("[Replication] auto-standby check failed, starting normally: {}",
+                    e.getMessage(), e);
+        }
     }
 
     /**

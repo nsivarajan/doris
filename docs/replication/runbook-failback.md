@@ -44,7 +44,7 @@ Bidirectional CRR should have already copied everything. Verify via `show-group`
 
 If any vault shows high CRR lag, wait and recheck before proceeding.
 
-### Step 3 — Execute failback
+### Step 3 — Execute failback command
 
 ```bash
 ./replication_manager.py failback --group-id bj_to_sh --to-site beijing
@@ -62,7 +62,9 @@ Step 3/9: Pause secondary (shanghai) export
 Step 4/9: Wait for beijing FE to reach journal_id=...
   Caught up ✓
 Step 5/9: FDB restore for beijing
-  ...
+  Run: fdbbackup restore --timestamp <oss_safe_before_ms>
+  Then reconfigure MS to point to beijing FDB cluster
+  [Manual step]
 Step 6/9: Remap 3 vault(s) back to beijing
   vault=primary_vault → doris-beijing-data ✓
   ...
@@ -72,11 +74,46 @@ Step 8/9: Secondary (shanghai) enters DR mode
   DR mode entered ✓
 Step 9/9: Update group config primary_site=beijing
   Updated ✓
-
-Failback complete! Primary is now beijing.
 ```
 
-### Step 4 — Verify Beijing is serving correctly
+### Step 4 — ⚠️ MANUAL: Switch Beijing MS to Beijing FDB
+
+**Required when `fdb_mode=fdbbackup`. Do not skip.**
+
+After fdbbackup restore, Beijing FDB has all of Shanghai's data.
+Switch Beijing Meta Service to use its local (restored) FDB:
+
+```bash
+# On ALL Beijing MS nodes — edit meta_service.conf
+vim /path/to/conf/meta_service.conf
+
+# Verify it already points to local Beijing FDB (should be unchanged):
+#   fdb_cluster_file_path = /etc/foundationdb/fdb.cluster
+
+# Restart MS to pick up the restored FDB state
+./bin/stop_ms.sh && ./bin/start_ms.sh --daemon
+
+# Verify MS is healthy
+curl -s http://bj-ms-host:5000/MetaService/version
+```
+
+### Step 5 — ⚠️ MANUAL: Switch Shanghai MS back to Beijing FDB
+
+Now that Beijing is primary again, Shanghai MS must read from Beijing FDB
+(the empty Shanghai FDB will not have current data):
+
+```bash
+# On ALL Shanghai MS nodes — edit meta_service.conf
+vim /path/to/conf/meta_service.conf
+
+# Change back to:
+#   fdb_cluster_file_path = /etc/foundationdb/beijing-fdb.cluster
+
+# Restart MS
+./bin/stop_ms.sh && ./bin/start_ms.sh --daemon
+```
+
+### Step 6 — Verify Beijing is serving correctly
 
 ```bash
 # Connect to Beijing and verify
@@ -85,13 +122,16 @@ mysql -h bj-fe-host -P 9030 -u root -p -e "SELECT count(*) FROM orders;"
 # Verify Shanghai is back in read-only DR mode
 curl -s http://sh-fe-host:8040/api/replication/status
 # dr_read_only_mode: true  ← correct
+
+# Verify Shanghai reads work (reads from local OSS via vault mapping)
+mysql -h sh-fe-host -P 9030 -u root -p -e "SELECT count(*) FROM orders;"
 ```
 
-### Step 5 — Update client connection strings
+### Step 7 — Update client connection strings
 
 Point application connections back to Beijing FE endpoint.
 
-### Step 6 — Monitor
+### Step 8 — Monitor
 
 ```bash
 watch -n 10 './replication_manager.py show-group --group-id bj_to_sh'
@@ -101,6 +141,16 @@ Within 5-10 minutes:
 - `Current primary` = beijing
 - `FE EditLog lag` < 10 seconds
 - All CRR lags nominal
+
+---
+
+## MS FDB Switch — Summary
+
+| Event | Beijing MS points to | Shanghai MS points to |
+|---|---|---|
+| Normal ops | Beijing FDB (local) | Beijing FDB (cross-region) |
+| After failover | — (Beijing is down) | Shanghai FDB (local, restored) |
+| After failback | Beijing FDB (local, restored) | Beijing FDB (cross-region) |
 
 ---
 
@@ -115,9 +165,15 @@ Large datasets may take longer. Consider scheduling during low-traffic hours.
 **Failback blocked: Beijing FE not caught up**
 ```
 Check Beijing FE logs:
-  tail -f bj-fe-host:/path/to/fe.log | grep "Replication"
+  tail -f /path/to/fe/log/fe.log | grep "Replication"
 If DR replayer is not running, restart Beijing FE:
-  ./bin/start_fe.sh  # auto-standby will detect Shanghai is primary
+  ./bin/start_fe.sh --daemon   # auto-standby detects Shanghai is primary
+```
+
+**Queries fail on Shanghai after failback**
+```
+Shanghai MS is probably still pointing to Shanghai FDB (which is now stale).
+Follow Step 5 above to switch Shanghai MS back to Beijing FDB.
 ```
 
 **FDB restore fails**

@@ -129,7 +129,8 @@ public class EditLogS3Exporter implements Runnable {
 
     private List<ReplicationJournalEntry> readBatch() throws Exception {
         List<ReplicationJournalEntry> batch = new ArrayList<>();
-        JournalCursor cursor = journal.read(lastExportedJournalId + 1);
+        // read up to Long.MAX_VALUE so we get everything available; stop when next() returns null
+        JournalCursor cursor = journal.read(lastExportedJournalId + 1, Long.MAX_VALUE);
         while (batch.size() < config.exportBatchSize) {
             Pair<Long, JournalEntity> entry = cursor.next();
             if (entry == null) {

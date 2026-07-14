@@ -72,7 +72,6 @@ public class ReplicationConfig {
 
     /** Build from Doris Config fields — called at FE startup. */
     public static ReplicationConfig fromDorisConfig() {
-        org.apache.doris.common.Config cfg = null; // resolved at runtime
         return new Builder()
                 .groupId(org.apache.doris.common.Config.replication_group_id)
                 .siteName(org.apache.doris.common.Config.replication_site_name)
