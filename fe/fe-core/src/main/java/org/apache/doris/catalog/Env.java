@@ -2129,8 +2129,15 @@ public class Env {
             // transfer from INIT/UNKNOWN to OBSERVER/FOLLOWER
 
             if (replayer == null) {
-                createReplayer();
-                replayer.start();
+                // in DR reader mode, use S3JournalCursor instead of BDB replayer
+                if ("true".equals(System.getProperty(
+                        org.apache.doris.common.FeConstants.DR_READER_MODE_KEY))
+                        && Config.enable_replication_group) {
+                    startDrReplayer();
+                } else {
+                    createReplayer();
+                    replayer.start();
+                }
             }
 
             // 'isReady' will be set to true in 'setCanRead()' method
@@ -3160,6 +3167,56 @@ public class Env {
                 ExecuteEnv.getInstance().refreshAndGetDiskInfo(true);
             }
         };
+    }
+
+    /**
+     * Starts a daemon thread that reads EditLog entries from the replication
+     * bucket via S3JournalCursor and applies them using EditLog.loadJournal().
+     * Used when --dr-reader-mode flag is set (secondary cluster).
+     */
+    private void startDrReplayer() {
+        LOG.info("[Replication] Starting DR replayer using S3JournalCursor");
+        try {
+            org.apache.doris.replication.ReplicationConfig replConfig =
+                    org.apache.doris.replication.ReplicationConfig.fromDorisConfig();
+            org.apache.doris.replication.storage.ReplicationStorageBackend storage =
+                    org.apache.doris.replication.storage.ReplicationStorageFactory
+                            .create(replConfig);
+            long startId = replayedJournalId.get() + 1;
+            org.apache.doris.replication.S3JournalCursor s3Cursor =
+                    new org.apache.doris.replication.S3JournalCursor(
+                            storage, replConfig.groupId, startId);
+
+            // DR replayer daemon: continuously reads from S3JournalCursor and applies
+            replayer = new Daemon("dr-replayer", 1000L) {
+                @Override
+                protected void runOneCycle() {
+                    try {
+                        org.apache.doris.common.Pair<Long, org.apache.doris.journal.JournalEntity> kv
+                                = s3Cursor.next();
+                        if (kv == null) {
+                            return;
+                        }
+                        long journalId = kv.first;
+                        org.apache.doris.journal.JournalEntity entity = kv.second;
+                        if (entity == null) return;
+                        EditLog.loadJournal(Env.this, journalId, entity);
+                        replayedJournalId.incrementAndGet();
+                        canRead.set(true);
+                        isReady.set(true);
+                        LOG.debug("[Replication:DR] applied journal_id={} opCode={}",
+                                journalId, entity.getOpCode());
+                    } catch (Exception e) {
+                        LOG.warn("[Replication:DR] replayer error: {}", e.getMessage(), e);
+                    }
+                }
+            };
+            replayer.setMetaContext(metaContext);
+            replayer.start();
+            LOG.info("[Replication] DR replayer started, reading from journal_id={}", startId);
+        } catch (Exception e) {
+            LOG.error("[Replication] Failed to start DR replayer: {}", e.getMessage(), e);
+        }
     }
 
     public void createReplayer() {

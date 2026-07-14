@@ -69,4 +69,6 @@ public class FeConstants {
     public static String METADATA_FAILURE_RECOVERY_KEY = "metadata_failure_recovery";
     public static String RECOVERY_JOURNAL_ID_KEY = "recovery_journal_id";
     public static String DROP_BACKENDS_KEY = "drop_backends";
+    // DR reader mode: FE reads EditLog from replication bucket, non-electable, rejects writes
+    public static String DR_READER_MODE_KEY = "dr_reader_mode";
 }

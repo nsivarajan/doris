@@ -382,6 +382,11 @@ public class DorisFE {
         options.addOption("c", "cluster_snapshot", true, "Specify the cluster snapshot json file");
         options.addOption(Option.builder().longOpt(FeConstants.DROP_BACKENDS_KEY)
                 .desc("When this FE becomes MASTER, drop all backends from cluster metadata (destructive)").build());
+        // DR reader mode: FE reads EditLog from S3 bucket instead of BDB network replication
+        options.addOption(Option.builder().longOpt(FeConstants.DR_READER_MODE_KEY)
+                .desc("Start FE in DR reader mode: reads EditLog from replication bucket, "
+                        + "non-electable, rejects write SQL")
+                .build());
 
         CommandLine cmd = null;
         try {
@@ -425,6 +430,17 @@ public class DorisFE {
                 System.exit(-1);
             }
             System.setProperty(FeConstants.RECOVERY_JOURNAL_ID_KEY, recoveryJournalId.trim());
+        }
+        // DR reader mode: set flag so Env.java starts S3JournalCursor replayer
+        if (cmd.hasOption(FeConstants.DR_READER_MODE_KEY)) {
+            System.setProperty(FeConstants.DR_READER_MODE_KEY, "true");
+            LOG.info("[Replication] --dr-reader-mode flag detected, FE will start as DR reader");
+        } else if (org.apache.doris.common.Config.enable_replication_group
+                && "auto-standby".equals(
+                        org.apache.doris.common.Config.replication_recovery_mode)) {
+            // auto-standby: check replication-group.json to decide if DR mode is needed
+            // (handled later in Env.startReplayer when storage is available)
+            LOG.info("[Replication] auto-standby mode enabled — will check group config at startup");
         }
         if (cmd.hasOption(FeConstants.DROP_BACKENDS_KEY)) {
             System.setProperty(FeConstants.DROP_BACKENDS_KEY, "true");
