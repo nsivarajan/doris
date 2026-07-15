@@ -2,9 +2,8 @@
 
 **Use when:** Beijing has recovered and should resume as primary.
 
-> **Port note:** FE API calls use port `8030` (HTTP) or `8050` (HTTPS).
-> Add `--use-https` to all `replication_manager.py` commands if your cluster
-> has `enable_https=true`. Add `--ca-cert /path/to/ca.crt` for internal CAs.
+> **How to run:** Connect to FE MySQL port `9030` from any host with `mysql` client.
+> All replication commands require ADMIN privilege.
 
 ---
 
@@ -13,10 +12,10 @@
 ```bash
 # 1. Beijing hardware confirmed healthy
 # 2. Beijing FE is running in DR reader mode and catching up
-./replication_manager.py show-group --group-id bj_to_sh
+mysql -h fe-host -P 9030 -u root -p -e "SHOW REPLICATION GROUP STATUS; SHOW REPLICATION GROUP LAG;"
 
 # 3. Run verify — all checks must pass
-./replication_manager.py verify --group-id bj_to_sh --max-lag-seconds 120
+mysql -h fe-host -P 9030 -u root -p -e "SHOW REPLICATION GROUP STATUS;"
 ```
 
 Wait until:
@@ -42,7 +41,7 @@ curl -s http://bj-fe-host:8030/api/replication/status | python3 -m json.tool
 Bidirectional CRR should have already copied everything. Verify via `show-group`:
 
 ```bash
-./replication_manager.py show-group --group-id bj_to_sh
+mysql -h fe-host -P 9030 -u root -p -e "SHOW REPLICATION GROUP STATUS; SHOW REPLICATION GROUP LAG;"
 # All vault CRR lags should be within crr_max_lag_seconds
 ```
 
@@ -51,7 +50,7 @@ If any vault shows high CRR lag, wait and recheck before proceeding.
 ### Step 3 — Execute failback command
 
 ```bash
-./replication_manager.py failback --group-id bj_to_sh --to-site beijing
+mysql -h bj-fe-host -P 9030 -u root -p -e "ALTER SYSTEM REPLICATION FAILBACK TO SITE 'beijing';"
 ```
 
 Expected output:
@@ -138,7 +137,7 @@ Point application connections back to Beijing FE endpoint.
 ### Step 8 — Monitor
 
 ```bash
-watch -n 10 './replication_manager.py show-group --group-id bj_to_sh'
+watch -n 10 'mysql -h fe-host -P 9030 -u root -p -e "SHOW REPLICATION GROUP LAG;"'
 ```
 
 Within 5-10 minutes:

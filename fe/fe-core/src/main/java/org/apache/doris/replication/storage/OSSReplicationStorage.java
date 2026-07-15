@@ -192,10 +192,14 @@ public class OSSReplicationStorage implements ReplicationStorageBackend {
                 "OSS " + op + " failed after " + MAX_RETRIES + " retries for key=" + key, last);
     }
 
-    /** Returns true for errors that are safe to retry. */
+    /** Returns true for errors that are safe to retry (throttle / server-side transient). */
     private boolean isTransient(OSSException e) {
-        int statusCode = e.getStatusCode();
-        return statusCode == 429 || statusCode == 500 || statusCode == 503;
+        String code = e.getErrorCode();
+        // OSS throttle errors and server-side transients that should be retried
+        return "RequestTimeout".equals(code)
+                || "SlowDown".equals(code)
+                || "ServiceUnavailable".equals(code)
+                || "InternalError".equals(code);
     }
 
     /** Maps OSS exception error codes to ReplicationStorageException. */

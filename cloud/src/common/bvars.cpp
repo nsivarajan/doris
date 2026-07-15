@@ -115,6 +115,7 @@ BvarLatencyRecorderWithTag g_bvar_ms_list_snapshot("ms", "list_snapshot");
 BvarLatencyRecorderWithTag g_bvar_ms_clone_instance("ms", "clone_instance");
 BvarLatencyRecorderWithTag g_bvar_ms_compact_snapshot("ms", "compact_snapshot");
 BvarLatencyRecorderWithTag g_bvar_ms_update_packed_file_info("ms", "update_packed_file_info");
+BvarLatencyRecorderWithTag g_bvar_ms_apply_vault_override("ms", "apply_vault_override");
 bvar::Adder<int64_t> g_bvar_update_delete_bitmap_fail_counter;
 bvar::Window<bvar::Adder<int64_t> > g_bvar_update_delete_bitmap_fail_counter_minute("ms", "update_delete_bitmap_fail", &g_bvar_update_delete_bitmap_fail_counter, 60);
 bvar::Adder<int64_t> g_bvar_get_delete_bitmap_fail_counter;
@@ -534,6 +535,7 @@ mBvarInt64Adder g_bvar_rpc_kv_clone_instance_del_counter("rpc_kv_clone_instance_
 // compact_snapshot
 mBvarInt64Adder g_bvar_rpc_kv_compact_snapshot_get_counter("rpc_kv_compact_snapshot_get_counter",{"instance_id"});
 mBvarInt64Adder g_bvar_rpc_kv_compact_snapshot_put_counter("rpc_kv_compact_snapshot_put_counter",{"instance_id"});
+mBvarInt64Adder g_bvar_rpc_kv_apply_vault_override_put_counter("rpc_kv_apply_vault_override_put_counter",{"instance_id"});
 
 // bytes
 // get_rowset
@@ -752,5 +754,6 @@ mBvarInt64Adder g_bvar_rpc_kv_clone_instance_del_bytes("rpc_kv_clone_instance_de
 // compact_snapshot
 mBvarInt64Adder g_bvar_rpc_kv_compact_snapshot_get_bytes("rpc_kv_compact_snapshot_get_bytes",{"instance_id"});
 mBvarInt64Adder g_bvar_rpc_kv_compact_snapshot_put_bytes("rpc_kv_compact_snapshot_put_bytes",{"instance_id"});
+mBvarInt64Adder g_bvar_rpc_kv_apply_vault_override_put_bytes("rpc_kv_apply_vault_override_put_bytes",{"instance_id"});
 
 // clang-format on

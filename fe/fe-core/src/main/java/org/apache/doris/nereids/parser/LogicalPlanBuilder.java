@@ -781,6 +781,7 @@ import org.apache.doris.nereids.trees.plans.commands.RecoverPartitionCommand;
 import org.apache.doris.nereids.trees.plans.commands.RecoverTableCommand;
 import org.apache.doris.nereids.trees.plans.commands.RefreshMTMVCommand;
 import org.apache.doris.nereids.trees.plans.commands.ReplayCommand;
+import org.apache.doris.nereids.trees.plans.commands.ReplicationGroupShowCommand;
 import org.apache.doris.nereids.trees.plans.commands.RestoreCommand;
 import org.apache.doris.nereids.trees.plans.commands.ResumeJobCommand;
 import org.apache.doris.nereids.trees.plans.commands.ResumeMTMVCommand;
@@ -8169,6 +8170,98 @@ public class LogicalPlanBuilder extends DorisParserBaseVisitor<Object> {
             alterSystemOp = new ModifyNodeHostNameOp(hostPort, hostName, ModifyOpType.Backend);
         }
         return new AlterSystemCommand(alterSystemOp, PlanType.ALTER_SYSTEM_MODIFY_FRONTEND_OR_BACKEND_HOSTNAME);
+    }
+
+    @Override
+    public LogicalPlan visitReplicationCreateGroupClause(
+            DorisParser.ReplicationCreateGroupClauseContext ctx) {
+        String groupId = stripQuotes(ctx.name.getText());
+        String primarySite = stripQuotes(ctx.primarySite.getText());
+        String secondarySite = stripQuotes(ctx.secondarySite.getText());
+        Map<String, String> props = visitPropertyClause(ctx.properties);
+        return new AlterSystemCommand(
+                new org.apache.doris.nereids.trees.plans.commands.info.ReplicationCreateGroupOp(
+                        groupId, primarySite, secondarySite, props),
+                PlanType.ALTER_SYSTEM_REPLICATION_CREATE_GROUP);
+    }
+
+    @Override
+    public LogicalPlan visitReplicationFailoverClause(DorisParser.ReplicationFailoverClauseContext ctx) {
+        String site = stripQuotes(ctx.site.getText());
+        return new AlterSystemCommand(
+                new org.apache.doris.nereids.trees.plans.commands.info.ReplicationFailoverOp(site),
+                PlanType.ALTER_SYSTEM_REPLICATION_FAILOVER);
+    }
+
+    @Override
+    public LogicalPlan visitReplicationFailbackClause(DorisParser.ReplicationFailbackClauseContext ctx) {
+        String site = stripQuotes(ctx.site.getText());
+        return new AlterSystemCommand(
+                new org.apache.doris.nereids.trees.plans.commands.info.ReplicationFailbackOp(site),
+                PlanType.ALTER_SYSTEM_REPLICATION_FAILBACK);
+    }
+
+    @Override
+    public LogicalPlan visitReplicationPauseExportClause(
+            DorisParser.ReplicationPauseExportClauseContext ctx) {
+        return new AlterSystemCommand(
+                new org.apache.doris.nereids.trees.plans.commands.info.ReplicationPauseExportOp(),
+                PlanType.ALTER_SYSTEM_REPLICATION_PAUSE_EXPORT);
+    }
+
+    @Override
+    public LogicalPlan visitReplicationPromoteMasterClause(
+            DorisParser.ReplicationPromoteMasterClauseContext ctx) {
+        return new AlterSystemCommand(
+                new org.apache.doris.nereids.trees.plans.commands.info.ReplicationPromoteMasterOp(),
+                PlanType.ALTER_SYSTEM_REPLICATION_PROMOTE_MASTER);
+    }
+
+    @Override
+    public LogicalPlan visitReplicationEnterDrModeClause(
+            DorisParser.ReplicationEnterDrModeClauseContext ctx) {
+        return new AlterSystemCommand(
+                new org.apache.doris.nereids.trees.plans.commands.info.ReplicationEnterDrModeOp(),
+                PlanType.ALTER_SYSTEM_REPLICATION_ENTER_DR_MODE);
+    }
+
+    @Override
+    public LogicalPlan visitReplicationEnterDrillModeClause(
+            DorisParser.ReplicationEnterDrillModeClauseContext ctx) {
+        return new AlterSystemCommand(
+                new org.apache.doris.nereids.trees.plans.commands.info.ReplicationDrillModeOp(true),
+                PlanType.ALTER_SYSTEM_REPLICATION_ENTER_DRILL_MODE);
+    }
+
+    @Override
+    public LogicalPlan visitReplicationExitDrillModeClause(
+            DorisParser.ReplicationExitDrillModeClauseContext ctx) {
+        return new AlterSystemCommand(
+                new org.apache.doris.nereids.trees.plans.commands.info.ReplicationDrillModeOp(false),
+                PlanType.ALTER_SYSTEM_REPLICATION_EXIT_DRILL_MODE);
+    }
+
+    @Override
+    public LogicalPlan visitReplicationAddVaultMappingClause(
+            DorisParser.ReplicationAddVaultMappingClauseContext ctx) {
+        String vaultName = ctx.vaultName.getText();
+        Map<String, String> props = visitPropertyClause(ctx.properties);
+        return new AlterSystemCommand(
+                new org.apache.doris.nereids.trees.plans.commands.info.ReplicationAddVaultMappingOp(
+                        vaultName, props),
+                PlanType.ALTER_SYSTEM_REPLICATION_ADD_VAULT_MAPPING);
+    }
+
+    @Override
+    public LogicalPlan visitShowReplicationGroupStatus(
+            DorisParser.ShowReplicationGroupStatusContext ctx) {
+        return new ReplicationGroupShowCommand(false);
+    }
+
+    @Override
+    public LogicalPlan visitShowReplicationGroupLag(
+            DorisParser.ShowReplicationGroupLagContext ctx) {
+        return new ReplicationGroupShowCommand(true);
     }
 
     @Override

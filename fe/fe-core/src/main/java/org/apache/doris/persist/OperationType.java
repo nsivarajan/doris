@@ -431,6 +431,7 @@ public class OperationType {
     @Deprecated
     public static final short OP_MODIFY_TTL_SECONDS = 1001;
     public static final short OP_MODIFY_CLOUD_WARM_UP_JOB = 1002;
+    public static final short OP_REPLICATION_GROUP_INFO = 1003;
 
     public static final short OP_BEGIN_SNAPSHOT = 1100;
     public static final short OP_META_SYNC_POINT = 1101;

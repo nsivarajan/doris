@@ -590,6 +590,12 @@ public class EditLog {
                     ((CloudEnv) env).getCacheHotspotMgr().replayCloudWarmUpJob(cloudWarmUpJob);
                     break;
                 }
+                case OperationType.OP_REPLICATION_GROUP_INFO: {
+                    org.apache.doris.replication.ReplicationGroupInfo info =
+                            (org.apache.doris.replication.ReplicationGroupInfo) journal.getData();
+                    env.replayReplicationGroupInfo(info);
+                    break;
+                }
                 case OperationType.OP_DELETE_REPLICA: {
                     ReplicaPersistInfo info = (ReplicaPersistInfo) journal.getData();
                     env.replayDeleteReplica(info);
@@ -2277,6 +2283,10 @@ public class EditLog {
 
     public void logModifyCloudWarmUpJob(CloudWarmUpJob cloudWarmUpJob) {
         logEdit(OperationType.OP_MODIFY_CLOUD_WARM_UP_JOB, cloudWarmUpJob);
+    }
+
+    public void logReplicationGroupInfo(org.apache.doris.replication.ReplicationGroupInfo info) {
+        logEdit(OperationType.OP_REPLICATION_GROUP_INFO, info);
     }
 
     private long logModifyTableProperty(short op, ModifyTablePropertyOperationLog info) {

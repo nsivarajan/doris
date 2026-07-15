@@ -90,6 +90,7 @@ MetaServiceImpl::MetaServiceImpl(std::shared_ptr<TxnKv> txn_kv,
           snapshot_manager_(std::move(snapshot_manager)) {
     rate_limiter_->init(this);
     delete_bitmap_lock_white_list_->init();
+    load_vault_overrides_from_fdb();
 }
 
 MetaServiceImpl::~MetaServiceImpl() = default;

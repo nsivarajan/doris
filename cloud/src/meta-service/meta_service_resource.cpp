@@ -24,7 +24,7 @@
 #include <cctype>
 #include <charconv>
 #include <chrono>
-#include <mutex>
+#include <shared_mutex>
 #include <numeric>
 #include <queue>
 #include <regex>
@@ -44,6 +44,7 @@
 #include "meta-service/meta_service.h"
 #include "meta-service/meta_service_helper.h"
 #include "meta-store/keys.h"
+#include "meta-store/codec.h"
 #include "meta-store/meta_reader.h"
 #include "meta-store/txn_kv.h"
 #include "meta-store/txn_kv_error.h"
@@ -51,6 +52,7 @@
 using namespace std::chrono;
 
 namespace {
+using namespace doris::cloud; // NOLINT — needed for encode_bytes, StorageVaultPB, config::
 constexpr char pattern_str[] = "^[a-zA-Z][0-9a-zA-Z_]*$";
 
 bool is_valid_storage_vault_name(const std::string& str) {
@@ -58,19 +60,53 @@ bool is_valid_storage_vault_name(const std::string& str) {
     return std::regex_match(str, pattern);
 }
 
-// Parses config::replication_vault_overrides once and caches the result.
-// Format: "vault1:endpoint1:bucket1,vault2:endpoint2:bucket2"
-// Returns a map: vault_name → {endpoint, bucket}
-static const std::unordered_map<std::string,
-        std::pair<std::string, std::string>>& get_vault_override_map() {
-    static std::once_flag init_flag;
-    static std::unordered_map<std::string, std::pair<std::string, std::string>> overrides;
-    std::call_once(init_flag, []() {
+// Runtime-mutable vault override map. Updated live by apply_vault_override RPC;
+// bootstrapped from config::replication_vault_overrides on first access for
+// backward compatibility with existing deployments.
+static std::shared_mutex g_vault_override_mutex;
+static std::unordered_map<std::string, std::pair<std::string, std::string>> g_vault_overrides;
+
+// ── FDB key helpers for vault overrides ─────────────────────────────────────
+// Key layout: 0x02 "system" "replication" "vault_override" <vault_name>
+// Value:      "<endpoint>|<bucket>"
+
+static std::string vault_override_key(const std::string& vault_name) {
+    std::string ret;
+    ret.push_back(CLOUD_SYS_KEY_SPACE02);
+    encode_bytes("system", &ret);
+    encode_bytes("replication", &ret);
+    encode_bytes("vault_override", &ret);
+    encode_bytes(vault_name, &ret);
+    return ret;
+}
+
+static std::string vault_override_prefix() {
+    std::string ret;
+    ret.push_back(CLOUD_SYS_KEY_SPACE02);
+    encode_bytes("system", &ret);
+    encode_bytes("replication", &ret);
+    encode_bytes("vault_override", &ret);
+    return ret;
+}
+
+// Parses "endpoint|bucket" value stored in FDB.
+static bool parse_vault_override_value(std::string_view val,
+                                       std::string* endpoint, std::string* bucket) {
+    auto sep = val.find('|');
+    if (sep == std::string_view::npos) return false;
+    *endpoint = std::string(val.substr(0, sep));
+    *bucket   = std::string(val.substr(sep + 1));
+    return !endpoint->empty() && !bucket->empty();
+}
+
+static void init_vault_overrides_from_config() {
+    static std::once_flag flag;
+    std::call_once(flag, []() {
         const std::string& raw = config::replication_vault_overrides;
         if (raw.empty()) return;
-        // split by comma, then each token by first two colons
         std::stringstream ss(raw);
         std::string token;
+        std::unique_lock lock(g_vault_override_mutex);
         while (std::getline(ss, token, ',')) {
             auto p1 = token.find(':');
             if (p1 == std::string::npos) continue;
@@ -80,39 +116,36 @@ static const std::unordered_map<std::string,
             std::string endpoint   = token.substr(p1 + 1, p2 - p1 - 1);
             std::string bucket     = token.substr(p2 + 1);
             if (!vault_name.empty() && !endpoint.empty() && !bucket.empty()) {
-                overrides[vault_name] = {endpoint, bucket};
-                LOG(INFO) << "[Replication] vault override registered: vault=" << vault_name
+                g_vault_overrides[vault_name] = {endpoint, bucket};
+                LOG(INFO) << "[Replication] vault override loaded from config: vault=" << vault_name
                           << " endpoint=" << endpoint << " bucket=" << bucket;
             }
         }
-        LOG(INFO) << "[Replication] loaded " << overrides.size() << " vault override(s)";
+        LOG(INFO) << "[Replication] loaded " << g_vault_overrides.size() << " vault override(s) from config";
     });
-    return overrides;
 }
 
 // Applies secondary vault endpoint/bucket when this MS is the standby site.
 // Called from get_obj_store_info() for each vault in the response.
 static void apply_replication_vault_override(StorageVaultPB& vault) {
-    const auto& overrides = get_vault_override_map();
-    auto it = overrides.find(vault.name());
-    if (it == overrides.end()) {
-        // no mapping for this vault — warn once per vault name
+    init_vault_overrides_from_config();
+    std::shared_lock lock(g_vault_override_mutex);
+    auto it = g_vault_overrides.find(vault.name());
+    if (it == g_vault_overrides.end()) {
         static std::unordered_set<std::string> warned;
         if (warned.find(vault.name()) == warned.end()) {
             LOG(WARNING) << "[Replication] vault '" << vault.name()
-                         << "' has no secondary mapping in replication_vault_overrides. "
-                         << "Add it with: replication-manager add-vault-mapping. "
-                         << "Falling back to primary endpoint (cross-region reads).";
+                         << "' has no secondary mapping. "
+                         << "Use: ALTER SYSTEM REPLICATION ADD VAULT MAPPING";
             warned.insert(vault.name());
         }
         return;
     }
-    // apply secondary endpoint and bucket
     if (vault.has_obj_info()) {
         auto* obj = vault.mutable_obj_info();
         obj->set_endpoint(it->second.first);
         obj->set_bucket(it->second.second);
-        LOG(DEBUG) << "[Replication] vault '" << vault.name()
+        VLOG(1) << "[Replication] vault '" << vault.name()
                    << "' remapped to secondary bucket=" << it->second.second;
     }
 }
@@ -5266,6 +5299,118 @@ void notify_refresh_instance(std::shared_ptr<TxnKv> txn_kv, const std::string& i
     } // for
     for (auto& i : btids) bthread_join(i, nullptr);
     LOG(INFO) << "finish notify_refresh_instance, num_items=" << reg.items_size();
+}
+
+} // namespace doris::cloud
+
+namespace doris::cloud {
+
+void MetaServiceImpl::load_vault_overrides_from_fdb() {
+    std::unique_ptr<Transaction> txn;
+    if (txn_kv_->create_txn(&txn) != TxnErrorCode::TXN_OK) {
+        LOG(WARNING) << "[Replication] failed to create txn for vault override FDB scan";
+        return;
+    }
+    std::string prefix = vault_override_prefix();
+    // end key: increment last byte of prefix.
+    // encode_bytes always terminates with \x01, so last byte is 0x01 → safe to increment to 0x02.
+    // Guard against the degenerate case defensively.
+    std::string prefix_end = prefix;
+    if (!prefix_end.empty() && static_cast<unsigned char>(prefix_end.back()) < 0xFF) {
+        prefix_end.back()++;
+    } else {
+        prefix_end += '\xff';
+    }
+
+    std::unique_ptr<RangeGetIterator> it;
+    TxnErrorCode err = txn->get(prefix, prefix_end, &it);
+    if (err != TxnErrorCode::TXN_OK && err != TxnErrorCode::TXN_KEY_NOT_FOUND) {
+        LOG(WARNING) << "[Replication] vault override FDB scan failed: " << err;
+        return;
+    }
+    if (!it) return;
+
+    int count = 0;
+    std::unique_lock lock(g_vault_override_mutex);
+    while (it->has_next()) {
+        auto [k, v] = it->next();
+        // decode vault_name: strip prefix, decode remaining bytes
+        std::string_view key_view(k);
+        key_view.remove_prefix(prefix.size());
+        std::string vault_name;
+        if (decode_bytes(&key_view, &vault_name) != 0) continue;
+        std::string endpoint, bucket;
+        if (!parse_vault_override_value(v, &endpoint, &bucket)) continue;
+        g_vault_overrides[vault_name] = {endpoint, bucket};
+        LOG(INFO) << "[Replication] vault override loaded from FDB: vault=" << vault_name
+                  << " endpoint=" << endpoint << " bucket=" << bucket;
+        ++count;
+    }
+    LOG(INFO) << "[Replication] loaded " << count << " vault override(s) from FDB";
+}
+
+void MetaServiceImpl::apply_vault_override(google::protobuf::RpcController* controller,
+                                           const ApplyVaultOverrideRequest* request,
+                                           ApplyVaultOverrideResponse* response,
+                                           ::google::protobuf::Closure* done) {
+    RPC_PREPROCESS(apply_vault_override, put);
+
+    if (!request->has_vault_name() || request->vault_name().empty()) {
+        code = MetaServiceCode::INVALID_ARGUMENT;
+        msg = "vault_name is required";
+        return;
+    }
+
+    const std::string& vault_name = request->vault_name();
+    bool clear = request->has_clear() && request->clear();
+    std::string fdb_key = vault_override_key(vault_name);
+
+    // Persist to FDB first — in-memory update follows only on successful commit
+    TxnErrorCode err = txn_kv_->create_txn(&txn);
+    if (err != TxnErrorCode::TXN_OK) {
+        code = MetaServiceCode::KV_TXN_CREATE_ERR;
+        msg = "failed to create txn for vault override";
+        return;
+    }
+
+    if (clear) {
+        txn->remove(fdb_key);
+    } else {
+        if (!request->has_endpoint() || request->endpoint().empty()) {
+            code = MetaServiceCode::INVALID_ARGUMENT;
+            msg = "endpoint is required";
+            return;
+        }
+        if (!request->has_bucket() || request->bucket().empty()) {
+            code = MetaServiceCode::INVALID_ARGUMENT;
+            msg = "bucket is required";
+            return;
+        }
+        std::string val = request->endpoint() + "|" + request->bucket();
+        txn->put(fdb_key, val);
+    }
+
+    err = txn->commit();
+    if (err != TxnErrorCode::TXN_OK) {
+        code = MetaServiceCode::KV_TXN_COMMIT_ERR;
+        msg = fmt::format("vault override FDB commit failed: {}", err);
+        LOG(WARNING) << "[Replication] " << msg;
+        return;
+    }
+
+    // FDB committed — now update in-memory map
+    if (clear) {
+        std::unique_lock lock(g_vault_override_mutex);
+        g_vault_overrides.erase(vault_name);
+        LOG(INFO) << "[Replication] vault override cleared: vault=" << vault_name;
+    } else {
+        std::unique_lock lock(g_vault_override_mutex);
+        g_vault_overrides[vault_name] = {request->endpoint(), request->bucket()};
+        LOG(INFO) << "[Replication] vault override applied: vault=" << vault_name
+                  << " endpoint=" << request->endpoint()
+                  << " bucket=" << request->bucket();
+    }
+    code = MetaServiceCode::OK;
 }
 
 } // namespace doris::cloud

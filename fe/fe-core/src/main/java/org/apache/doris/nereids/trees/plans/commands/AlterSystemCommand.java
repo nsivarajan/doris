@@ -37,6 +37,14 @@ import org.apache.doris.nereids.trees.plans.commands.info.DropFollowerOp;
 import org.apache.doris.nereids.trees.plans.commands.info.DropObserverOp;
 import org.apache.doris.nereids.trees.plans.commands.info.ModifyBackendOp;
 import org.apache.doris.nereids.trees.plans.commands.info.ModifyNodeHostNameOp;
+import org.apache.doris.nereids.trees.plans.commands.info.ReplicationAddVaultMappingOp;
+import org.apache.doris.nereids.trees.plans.commands.info.ReplicationCreateGroupOp;
+import org.apache.doris.nereids.trees.plans.commands.info.ReplicationDrillModeOp;
+import org.apache.doris.nereids.trees.plans.commands.info.ReplicationEnterDrModeOp;
+import org.apache.doris.nereids.trees.plans.commands.info.ReplicationFailbackOp;
+import org.apache.doris.nereids.trees.plans.commands.info.ReplicationFailoverOp;
+import org.apache.doris.nereids.trees.plans.commands.info.ReplicationPauseExportOp;
+import org.apache.doris.nereids.trees.plans.commands.info.ReplicationPromoteMasterOp;
 import org.apache.doris.nereids.trees.plans.visitor.PlanVisitor;
 import org.apache.doris.qe.ConnectContext;
 import org.apache.doris.qe.StmtExecutor;
@@ -84,7 +92,15 @@ public class AlterSystemCommand extends AlterCommand {
                 || alterSystemOp instanceof DropBrokerOp
                 || alterSystemOp instanceof ModifyBackendOp
                 || alterSystemOp instanceof ModifyNodeHostNameOp
-                || alterSystemOp instanceof AlterLoadErrorUrlOp)
+                || alterSystemOp instanceof AlterLoadErrorUrlOp
+                || alterSystemOp instanceof ReplicationFailoverOp
+                || alterSystemOp instanceof ReplicationFailbackOp
+                || alterSystemOp instanceof ReplicationCreateGroupOp
+                || alterSystemOp instanceof ReplicationPauseExportOp
+                || alterSystemOp instanceof ReplicationPromoteMasterOp
+                || alterSystemOp instanceof ReplicationEnterDrModeOp
+                || alterSystemOp instanceof ReplicationDrillModeOp
+                || alterSystemOp instanceof ReplicationAddVaultMappingOp)
         );
 
         alterSystemOp.validate(ctx);
@@ -93,6 +109,18 @@ public class AlterSystemCommand extends AlterCommand {
     @Override
     public void doRun(ConnectContext ctx, StmtExecutor executor) throws Exception {
         validate(ctx);
+        // replication group operations are handled by ReplicationCommandHandler, not Env.alterSystem()
+        if (alterSystemOp instanceof ReplicationFailoverOp
+                || alterSystemOp instanceof ReplicationFailbackOp
+                || alterSystemOp instanceof ReplicationCreateGroupOp
+                || alterSystemOp instanceof ReplicationPauseExportOp
+                || alterSystemOp instanceof ReplicationPromoteMasterOp
+                || alterSystemOp instanceof ReplicationEnterDrModeOp
+                || alterSystemOp instanceof ReplicationDrillModeOp
+                || alterSystemOp instanceof ReplicationAddVaultMappingOp) {
+            org.apache.doris.replication.ReplicationCommandHandler.handle(alterSystemOp);
+            return;
+        }
         ctx.getEnv().alterSystem(this);
     }
 

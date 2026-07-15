@@ -448,6 +448,9 @@ public class Env {
     private MetaIdGenerator idGenerator = new MetaIdGenerator(NEXT_ID_INIT_VALUE);
 
     private EditLog editLog;
+    // Replication group state persisted via BDB journal — survives FE restart.
+    protected volatile org.apache.doris.replication.ReplicationGroupInfo replicationGroupInfo
+            = new org.apache.doris.replication.ReplicationGroupInfo();
     protected int clusterId;
     protected String token;
     // For checkpoint and observer memory replayed marker
@@ -1984,7 +1987,7 @@ public class Env {
                                 .create(replConfig);
                 org.apache.doris.replication.EditLogS3Exporter exporter =
                         new org.apache.doris.replication.EditLogS3Exporter(
-                                editLog, replStorage, replConfig);
+                                editLog.getJournal(), replStorage, replConfig);
                 Thread exporterThread = new Thread(exporter, "edit-log-s3-exporter");
                 exporterThread.setDaemon(true);
                 exporterThread.start();
@@ -3225,6 +3228,22 @@ public class Env {
             LOG.warn("[Replication] auto-standby check failed, starting normally: {}",
                     e.getMessage(), e);
         }
+    }
+
+    // Replays persisted replication group state on FE restart.
+    public void replayReplicationGroupInfo(
+            org.apache.doris.replication.ReplicationGroupInfo info) {
+        this.replicationGroupInfo = info;
+        Config.dr_read_only_mode = info.drReadOnly;
+        if (info.drReadOnly) {
+            System.setProperty(org.apache.doris.common.FeConstants.DR_READER_MODE_KEY, "true");
+        }
+        LOG.info("[Replication] replayed group info: groupId={} primarySite={} drReadOnly={}",
+                info.groupId, info.primarySite, info.drReadOnly);
+    }
+
+    public org.apache.doris.replication.ReplicationGroupInfo getReplicationGroupInfo() {
+        return replicationGroupInfo;
     }
 
     /**

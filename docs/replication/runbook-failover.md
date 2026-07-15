@@ -2,16 +2,15 @@
 
 **Use when:** Beijing cluster is confirmed down and Shanghai must serve all traffic.
 
-> **Port note:** FE API calls use port `8030` (HTTP) or `8050` (HTTPS).
-> Add `--use-https` to all `replication_manager.py` commands if your cluster
-> has `enable_https=true`. Add `--ca-cert /path/to/ca.crt` for internal CAs.
+> **How to run:** Connect to FE MySQL port `9030` from any host with `mysql` client.
+> All replication commands require ADMIN privilege.
 
 ---
 
 ## Pre-flight checklist (run before declaring disaster)
 
 ```bash
-./replication_manager.py verify --group-id bj_to_sh --max-lag-seconds 120
+mysql -h fe-host -P 9030 -u root -p -e "SHOW REPLICATION GROUP STATUS;"
 ```
 
 All items must pass. If any fail, investigate before proceeding.
@@ -50,7 +49,7 @@ curl -s --cacert /path/to/ca.crt https://bj-fe-host:8050/api/replication/status
 ### Step 2 — Check DR state
 
 ```bash
-./replication_manager.py show-group --group-id bj_to_sh
+mysql -h fe-host -P 9030 -u root -p -e "SHOW REPLICATION GROUP STATUS; SHOW REPLICATION GROUP LAG;"
 ```
 
 Verify:
@@ -61,7 +60,7 @@ Verify:
 ### Step 3 — Execute failover command
 
 ```bash
-./replication_manager.py failover --group-id bj_to_sh --to-site shanghai
+mysql -h sh-fe-host -P 9030 -u root -p -e "ALTER SYSTEM REPLICATION FAILOVER TO SITE 'shanghai';"
 ```
 
 Expected output:
@@ -117,7 +116,7 @@ and queries will fail.
 ```bash
 # If the failover command was waiting, continue it now
 # OR re-run — it is idempotent from step 5 onward
-./replication_manager.py failover --group-id bj_to_sh --to-site shanghai
+mysql -h sh-fe-host -P 9030 -u root -p -e "ALTER SYSTEM REPLICATION FAILOVER TO SITE 'shanghai';"
 ```
 
 ### Step 6 — Verify Shanghai is serving correctly
@@ -140,7 +139,7 @@ Point all application connection strings to Shanghai FE endpoint.
 
 ```bash
 # Watch lag until stable
-watch -n 10 './replication_manager.py show-group --group-id bj_to_sh'
+watch -n 10 'mysql -h fe-host -P 9030 -u root -p -e "SHOW REPLICATION GROUP LAG;"'
 ```
 
 Prometheus alert to watch: `doris_replication_exporter_running{site="shanghai"}` should be 1.
@@ -155,5 +154,5 @@ If Shanghai was successfully promoted but you want to undo:
 3. Run the failback procedure immediately (before significant data is written to Shanghai)
 
 ```bash
-./replication_manager.py failback --group-id bj_to_sh --to-site beijing
+mysql -h bj-fe-host -P 9030 -u root -p -e "ALTER SYSTEM REPLICATION FAILBACK TO SITE 'beijing';"
 ```

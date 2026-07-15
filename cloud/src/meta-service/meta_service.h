@@ -447,6 +447,14 @@ public:
                           const CompactSnapshotRequest* request, CompactSnapshotResponse* response,
                           ::google::protobuf::Closure* done) override;
 
+    void apply_vault_override(::google::protobuf::RpcController* controller,
+                              const ApplyVaultOverrideRequest* request,
+                              ApplyVaultOverrideResponse* response,
+                              ::google::protobuf::Closure* done) override;
+
+    // Loads persisted vault overrides from FDB into the in-memory map at startup.
+    void load_vault_overrides_from_fdb();
+
 private:
     std::pair<MetaServiceCode, std::string> alter_instance(
             const AlterInstanceRequest* request,
@@ -1064,6 +1072,13 @@ public:
                           const CompactSnapshotRequest* request, CompactSnapshotResponse* response,
                           ::google::protobuf::Closure* done) override {
         call_impl(&cloud::MetaService::compact_snapshot, controller, request, response, done);
+    }
+
+    void apply_vault_override(::google::protobuf::RpcController* controller,
+                              const ApplyVaultOverrideRequest* request,
+                              ApplyVaultOverrideResponse* response,
+                              ::google::protobuf::Closure* done) override {
+        call_impl(&cloud::MetaService::apply_vault_override, controller, request, response, done);
     }
 
 private:

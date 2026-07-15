@@ -542,8 +542,8 @@ public class StmtExecutor {
     /** Returns true for Command types that modify data or schema — used by the DR write guard. */
     private static boolean isDrWriteCommand(
             org.apache.doris.nereids.trees.plans.logical.LogicalPlan plan) {
-        return plan instanceof org.apache.doris.nereids.trees.plans.commands.InsertIntoTableCommand
-            || plan instanceof org.apache.doris.nereids.trees.plans.commands.InsertOverwriteTableCommand
+        return plan instanceof org.apache.doris.nereids.trees.plans.commands.insert.InsertIntoTableCommand
+            || plan instanceof org.apache.doris.nereids.trees.plans.commands.insert.InsertOverwriteTableCommand
             || plan instanceof org.apache.doris.nereids.trees.plans.commands.UpdateCommand
             || plan instanceof org.apache.doris.nereids.trees.plans.commands.DeleteFromCommand
             || plan instanceof org.apache.doris.nereids.trees.plans.commands.DeleteFromUsingCommand
@@ -551,7 +551,7 @@ public class StmtExecutor {
             || plan instanceof org.apache.doris.nereids.trees.plans.commands.AlterTableCommand
             || plan instanceof org.apache.doris.nereids.trees.plans.commands.DropTableCommand
             || plan instanceof org.apache.doris.nereids.trees.plans.commands.TruncateTableCommand
-            || plan instanceof org.apache.doris.nereids.trees.plans.commands.MergeIntoCommand;
+            || plan instanceof org.apache.doris.nereids.trees.plans.commands.merge.MergeIntoCommand;
     }
 
     /**

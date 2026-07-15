@@ -330,6 +330,26 @@ under the License.
             <groupId>com.amazonaws</groupId>
             <artifactId>aws-java-sdk-sts</artifactId>
         </dependency>
+        <!-- Alibaba Cloud OSS SDK — com.aliyun.oss.* for OSSReplicationStorage -->
+        <dependency>
+            <groupId>com.aliyun.oss</groupId>
+            <artifactId>aliyun-sdk-oss</artifactId>
+            <version>${aliyun-sdk-oss.version}</version>
+        </dependency>
+        <!-- Alibaba Cloud SDK Core — com.aliyuncs.DefaultAcsClient, DefaultProfile, etc.
+             Transitive via aliyun-sdk-oss but declared explicitly for reliability -->
+        <dependency>
+            <groupId>com.aliyun</groupId>
+            <artifactId>aliyun-java-sdk-core</artifactId>
+            <version>4.7.6</version>
+        </dependency>
+        <!-- Alibaba Cloud STS — com.aliyuncs.auth.sts.AssumeRoleRequest/Response
+             NOT transitive via aliyun-sdk-oss; required by AssumeRoleCredentialProvider -->
+        <dependency>
+            <groupId>com.aliyun</groupId>
+            <artifactId>aliyun-java-sdk-sts</artifactId>
+            <version>3.1.3</version>
+        </dependency>
         <!-- hadoop-huaweicloud provides OBSFileSystem; loaded via reflection in OBSProperties
              with graceful S3A fallback — runtime only, not needed at compile time -->
         <dependency>

@@ -381,6 +381,12 @@ public class MetaServiceProxy {
                 (client) -> client.showTimeTravel(request));
     }
 
+    public Cloud.ApplyVaultOverrideResponse applyVaultOverride(
+            Cloud.ApplyVaultOverrideRequest request) throws RpcException {
+        return executeWithMetrics("applyVaultOverride",
+                (client) -> client.applyVaultOverride(request));
+    }
+
     public Cloud.CreateTabletsResponse createTablets(Cloud.CreateTabletsRequest request) throws RpcException {
         return executeWithMetrics("createTablets", (client) -> client.createTablets(request));
     }

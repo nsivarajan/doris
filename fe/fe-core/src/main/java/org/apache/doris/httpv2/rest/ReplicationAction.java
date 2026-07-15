@@ -36,19 +36,17 @@ import java.util.HashMap;
 import java.util.Map;
 
 /**
- * HTTP endpoints for the replication group feature.
- * Used by the replication-manager CLI tool to query status
- * and orchestrate failover/failback operations.
+ * Read-only HTTP endpoints for the replication group feature.
+ * Used for Prometheus metrics scraping and status monitoring.
  *
- * All endpoints return JSON and require admin authentication.
- * All endpoints are no-ops when enable_replication_group = false.
+ * Mutation operations (failover, failback, mode changes) are performed
+ * via SQL: ALTER SYSTEM REPLICATION ... / SHOW REPLICATION GROUP ...
  */
 @RestController
 public class ReplicationAction extends RestBaseController {
 
     private static final Logger LOG = LogManager.getLogger(ReplicationAction.class);
 
-    // shared exporter reference — set by Env.java when the thread is started
     private static volatile EditLogS3Exporter activeExporter = null;
     private static volatile Thread exporterThread = null;
 
@@ -58,9 +56,72 @@ public class ReplicationAction extends RestBaseController {
         exporterThread = thread;
     }
 
-    // ── GET /api/replication/status ──────────────────────────────────────────
+    /** Returns true if the EditLogS3Exporter thread is currently alive. */
+    public static boolean getExporterRunning() {
+        return activeExporter != null && exporterThread != null && exporterThread.isAlive();
+    }
 
-    /** Returns current exporter state: last exported journal_id, running flag, site name. */
+    /** Returns the last journal_id successfully exported, or -1 if not running. */
+    public static long getLastExportedJournalId() {
+        return activeExporter != null ? activeExporter.getLastExportedJournalId() : -1L;
+    }
+
+    // ── Static methods called by SQL command handlers (ReplicationCommandHandler) ─────
+
+    /** Called by ALTER SYSTEM REPLICATION PAUSE EXPORT */
+    public static void doPauseExport() {
+        if (activeExporter != null) {
+            activeExporter.stop();
+            LOG.info("[Replication] exporter paused");
+        }
+    }
+
+    /** Called by ALTER SYSTEM REPLICATION PROMOTE MASTER */
+    public static void doPromoteMaster() {
+        Config.dr_read_only_mode = false;
+        LOG.info("[Replication] dr_read_only_mode cleared — this FE is now primary");
+        if (activeExporter == null || (exporterThread != null && !exporterThread.isAlive())) {
+            try {
+                ReplicationConfig replConfig = ReplicationConfig.fromDorisConfig();
+                ReplicationStorageBackend storage = ReplicationStorageFactory.create(replConfig);
+                EditLogS3Exporter exporter = new EditLogS3Exporter(
+                        org.apache.doris.catalog.Env.getCurrentEnv().getEditLog().getJournal(),
+                        storage, replConfig);
+                Thread thread = new Thread(exporter, "edit-log-s3-exporter");
+                thread.setDaemon(true);
+                thread.start();
+                registerExporter(exporter, thread);
+                LOG.info("[Replication] exporter started on promoted master");
+            } catch (Exception e) {
+                LOG.error("[Replication] failed to start exporter after promote: {}", e.getMessage(), e);
+            }
+        }
+    }
+
+    /** Called by ALTER SYSTEM REPLICATION ENTER DR MODE */
+    public static void doEnterDrMode() {
+        if (activeExporter != null) {
+            activeExporter.stop();
+        }
+        Config.dr_read_only_mode = true;
+        LOG.info("[Replication] entered DR mode — writes rejected, exporter stopped");
+    }
+
+    /**
+     * Called by ALTER SYSTEM REPLICATION ENTER/EXIT DRILL MODE.
+     * enter=true lifts write guard without starting exporter (primary bucket safe).
+     * enter=false restores write guard.
+     */
+    public static void doDrillMode(boolean enter) {
+        Config.dr_read_only_mode = !enter;
+        LOG.info("[Replication] drill mode {}: write guard {}",
+                enter ? "activated" : "deactivated",
+                enter ? "lifted" : "restored");
+    }
+
+    // ── Read-only HTTP endpoints (Prometheus scraping / monitoring) ─────────────
+
+    /** Returns current replication state for monitoring. */
     @RequestMapping(path = "/api/replication/status", method = RequestMethod.GET)
     public Object status(HttpServletRequest request, HttpServletResponse response) {
         executeCheckPassword(request, response);
@@ -69,176 +130,29 @@ public class ReplicationAction extends RestBaseController {
         result.put("dr_read_only_mode", Config.dr_read_only_mode);
         result.put("site_name", Config.replication_site_name);
         result.put("group_id", Config.replication_group_id);
-        if (activeExporter != null && exporterThread != null) {
-            result.put("exporter_running", exporterThread.isAlive());
-            result.put("last_exported_journal_id", activeExporter.getLastExportedJournalId());
-        } else {
-            result.put("exporter_running", false);
-            result.put("last_exported_journal_id", -1);
-        }
+        result.put("exporter_running", getExporterRunning());
+        result.put("last_exported_journal_id", getLastExportedJournalId());
         return ResponseEntityBuilder.ok(result);
     }
 
-    // ── GET /api/replication/cursor ──────────────────────────────────────────
-
-    /** Returns the CURSOR value from the replication bucket — the DR FE's progress. */
+    /** Returns the current export cursor (journal_id + site). */
     @RequestMapping(path = "/api/replication/cursor", method = RequestMethod.GET)
     public Object cursor(HttpServletRequest request, HttpServletResponse response) {
         executeCheckPassword(request, response);
-        if (!Config.enable_replication_group) {
-            return ResponseEntityBuilder.ok(Map.of("last_exported_journal_id", -1));
-        }
-        long journalId = activeExporter != null ? activeExporter.getLastExportedJournalId() : -1;
         return ResponseEntityBuilder.ok(Map.of(
-                "last_exported_journal_id", journalId,
+                "last_exported_journal_id", getLastExportedJournalId(),
                 "site_name", Config.replication_site_name));
     }
 
-    // ── POST /api/replication/pause-export ───────────────────────────────────
-
-    /** Pauses the EditLogS3Exporter thread — called before failover to prevent split-brain. */
-    @RequestMapping(path = "/api/replication/pause-export", method = RequestMethod.POST)
-    public Object pauseExport(HttpServletRequest request, HttpServletResponse response) {
-        executeCheckPassword(request, response);
-        if (activeExporter != null) {
-            activeExporter.stop();
-            LOG.info("[Replication] EditLogS3Exporter paused via HTTP request");
-        }
-        return ResponseEntityBuilder.ok(Map.of("status", "paused"));
-    }
-
-    // ── POST /api/replication/promote-master ─────────────────────────────────
-
-    /**
-     * Promotes this DR FE to master:
-     *   1. Lifts dr_read_only_mode so writes are accepted
-     *   2. Starts EditLogS3Exporter on the now-primary FE
-     * The caller (failover command) must have already restored FDB and remapped vaults
-     * before invoking this endpoint.
-     */
-    @RequestMapping(path = "/api/replication/promote-master", method = RequestMethod.POST)
-    public Object promoteMaster(HttpServletRequest request, HttpServletResponse response) {
-        executeCheckPassword(request, response);
-        if (!Config.enable_replication_group) {
-            return ResponseEntityBuilder.badRequest("enable_replication_group is false");
-        }
-        // lift write guard — this FE is now primary
-        Config.dr_read_only_mode = false;
-        LOG.info("[Replication] dr_read_only_mode cleared — this FE is now primary");
-
-        // start exporter so this new primary exports its EditLog
-        if (activeExporter == null || (exporterThread != null && !exporterThread.isAlive())) {
-            try {
-                ReplicationConfig replConfig = ReplicationConfig.fromDorisConfig();
-                ReplicationStorageBackend storage = ReplicationStorageFactory.create(replConfig);
-                EditLogS3Exporter exporter = new EditLogS3Exporter(
-                        org.apache.doris.catalog.Env.getCurrentEnv().getEditLog(),
-                        storage, replConfig);
-                Thread thread = new Thread(exporter, "edit-log-s3-exporter");
-                thread.setDaemon(true);
-                thread.start();
-                registerExporter(exporter, thread);
-                LOG.info("[Replication] EditLogS3Exporter started on promoted master");
-            } catch (Exception e) {
-                LOG.error("[Replication] Failed to start exporter after promote: {}", e.getMessage(), e);
-                return ResponseEntityBuilder.internalError(e.getMessage());
-            }
-        }
-        return ResponseEntityBuilder.ok(Map.of("status", "promoted", "site", Config.replication_site_name));
-    }
-
-    // ── POST /api/replication/enter-dr-mode ──────────────────────────────────
-
-    /**
-     * Transitions this primary FE back to DR reader mode (used during failback).
-     * Stops the exporter and sets dr_read_only_mode = true.
-     */
-    @RequestMapping(path = "/api/replication/enter-dr-mode", method = RequestMethod.POST)
-    public Object enterDrMode(HttpServletRequest request, HttpServletResponse response) {
-        executeCheckPassword(request, response);
-        if (activeExporter != null) {
-            activeExporter.stop();
-        }
-        Config.dr_read_only_mode = true;
-        LOG.info("[Replication] Entered DR mode — writes rejected, exporter stopped");
-        return ResponseEntityBuilder.ok(Map.of("status", "dr-mode"));
-    }
-
-    // ── POST /api/replication/enter-drill-mode ───────────────────────────────
-
-    /**
-     * Lifts the write guard for a DR drill WITHOUT starting the EditLogS3Exporter.
-     * This allows writing to isolated test tables while keeping Beijing's replication
-     * bucket completely untouched. The secondary MS must have been re-pointed to its
-     * local FDB before calling this.
-     *
-     * Must be followed by exit-drill-mode to restore read-only state.
-     * Never use this as a substitute for a real failover.
-     */
-    @RequestMapping(path = "/api/replication/enter-drill-mode", method = RequestMethod.POST)
-    public Object enterDrillMode(HttpServletRequest request, HttpServletResponse response) {
-        executeCheckPassword(request, response);
-        if (!Config.enable_replication_group) {
-            return ResponseEntityBuilder.badRequest("enable_replication_group is false");
-        }
-        if (!Config.dr_read_only_mode) {
-            return ResponseEntityBuilder.badRequest(
-                    "FE is not in DR read-only mode — drill mode only valid on secondary");
-        }
-        Config.dr_read_only_mode = false;
-        // deliberately do NOT start EditLogS3Exporter — this is a drill,
-        // we must not write to Beijing's replication bucket
-        LOG.info("[Replication] DR drill mode activated: write guard lifted, exporter NOT started. "
-                + "group={} site={}", Config.replication_group_id, Config.replication_site_name);
-        return ResponseEntityBuilder.ok(Map.of(
-                "status", "drill-mode-active",
-                "site", Config.replication_site_name,
-                "warning", "MS must point to local FDB before running writes"));
-    }
-
-    // ── POST /api/replication/exit-drill-mode ────────────────────────────────
-
-    /**
-     * Restores the write guard after a DR drill.
-     * FE returns to read-only DR reader state. Exporter remains stopped.
-     * MS must be re-pointed back to primary FDB separately after this call.
-     */
-    @RequestMapping(path = "/api/replication/exit-drill-mode", method = RequestMethod.POST)
-    public Object exitDrillMode(HttpServletRequest request, HttpServletResponse response) {
-        executeCheckPassword(request, response);
-        if (!Config.enable_replication_group) {
-            return ResponseEntityBuilder.badRequest("enable_replication_group is false");
-        }
-        Config.dr_read_only_mode = true;
-        LOG.info("[Replication] DR drill mode deactivated: write guard restored. "
-                + "group={} site={}", Config.replication_group_id, Config.replication_site_name);
-        return ResponseEntityBuilder.ok(Map.of(
-                "status", "read-only-restored",
-                "site", Config.replication_site_name));
-    }
-
-    // ── GET /api/replication/metrics ─────────────────────────────────────────
-
     /**
      * Returns replication metrics in Prometheus text format.
-     * Scrape this endpoint from Prometheus with job="doris_replication".
-     *
-     * Metrics exported:
-     *   doris_replication_exporter_running{group,site}  1/0
-     *   doris_replication_last_journal_id{group,site}   long
-     *   doris_replication_dr_read_only{group,site}      1/0
-     *   doris_replication_feature_enabled{group,site}   1/0
+     * Scrape with: job="doris_replication", endpoint="/api/replication/metrics"
      */
     @RequestMapping(path = "/api/replication/metrics", method = RequestMethod.GET)
     public Object metrics(HttpServletRequest request, HttpServletResponse response) {
-        // no auth required for metrics scraping — Prometheus needs open access
         String group = Config.replication_group_id.isEmpty() ? "default" : Config.replication_group_id;
         String site  = Config.replication_site_name.isEmpty() ? "unknown" : Config.replication_site_name;
         String labels = String.format("{group=\"%s\",site=\"%s\"}", group, site);
-
-        boolean exporterRunning = activeExporter != null
-                && exporterThread != null && exporterThread.isAlive();
-        long lastJournalId = activeExporter != null ? activeExporter.getLastExportedJournalId() : -1;
 
         StringBuilder sb = new StringBuilder();
         sb.append("# HELP doris_replication_feature_enabled Whether the replication group feature is enabled\n");
@@ -249,12 +163,12 @@ public class ReplicationAction extends RestBaseController {
         sb.append("# HELP doris_replication_exporter_running Whether the EditLogS3Exporter thread is alive\n");
         sb.append("# TYPE doris_replication_exporter_running gauge\n");
         sb.append("doris_replication_exporter_running").append(labels)
-          .append(" ").append(exporterRunning ? 1 : 0).append("\n");
+          .append(" ").append(getExporterRunning() ? 1 : 0).append("\n");
 
-        sb.append("# HELP doris_replication_last_journal_id Last EditLog journal_id successfully exported to bucket\n");
+        sb.append("# HELP doris_replication_last_journal_id Last EditLog journal_id exported to bucket\n");
         sb.append("# TYPE doris_replication_last_journal_id gauge\n");
         sb.append("doris_replication_last_journal_id").append(labels)
-          .append(" ").append(lastJournalId).append("\n");
+          .append(" ").append(getLastExportedJournalId()).append("\n");
 
         sb.append("# HELP doris_replication_dr_read_only"
                 + " Whether this FE is in DR read-only mode (write guard active)\n");
@@ -270,6 +184,6 @@ public class ReplicationAction extends RestBaseController {
         } catch (Exception e) {
             LOG.warn("[Replication] failed to write metrics response: {}", e.getMessage());
         }
-        return null; // response written directly
+        return null;
     }
 }

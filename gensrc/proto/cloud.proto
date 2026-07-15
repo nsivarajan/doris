@@ -2454,6 +2454,22 @@ message UpdatePackedFileInfoResponse {
     optional MetaServiceResponseStatus status = 1;
 }
 
+// ── Replication Group: vault override RPC ───────────────────────────────────
+// FE calls this during FAILOVER / FAILBACK to remap a storage vault to the
+// secondary-site endpoint/bucket without restarting Meta Service.
+message ApplyVaultOverrideRequest {
+    optional string cloud_unique_id = 1;
+    optional string vault_name      = 2;
+    optional string endpoint        = 3;
+    optional string bucket          = 4;
+    optional bool   clear           = 5;
+    optional string request_ip      = 6;
+}
+
+message ApplyVaultOverrideResponse {
+    optional MetaServiceResponseStatus status = 1;
+}
+
 service MetaService {
     rpc begin_txn(BeginTxnRequest) returns (BeginTxnResponse);
     rpc precommit_txn(PrecommitTxnRequest) returns (PrecommitTxnResponse);
@@ -2557,6 +2573,8 @@ service MetaService {
     rpc compact_snapshot(CompactSnapshotRequest) returns (CompactSnapshotResponse);
 
     rpc update_packed_file_info(UpdatePackedFileInfoRequest) returns (UpdatePackedFileInfoResponse);
+
+    rpc apply_vault_override(ApplyVaultOverrideRequest) returns (ApplyVaultOverrideResponse);
 };
 
 service RecyclerService {

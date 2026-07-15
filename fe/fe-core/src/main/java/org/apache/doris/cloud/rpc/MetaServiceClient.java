@@ -195,6 +195,20 @@ public class MetaServiceClient {
                 TimeUnit.MILLISECONDS).showTimeTravel(request);
     }
 
+    public Cloud.ApplyVaultOverrideResponse applyVaultOverride(
+            Cloud.ApplyVaultOverrideRequest request) {
+        if (!request.hasCloudUniqueId()) {
+            Cloud.ApplyVaultOverrideRequest.Builder builder =
+                    Cloud.ApplyVaultOverrideRequest.newBuilder();
+            builder.mergeFrom(request);
+            return blockingStub.withDeadlineAfter(Config.meta_service_brpc_timeout_ms,
+                    TimeUnit.MILLISECONDS)
+                    .applyVaultOverride(builder.setCloudUniqueId(Config.cloud_unique_id).build());
+        }
+        return blockingStub.withDeadlineAfter(Config.meta_service_brpc_timeout_ms,
+                TimeUnit.MILLISECONDS).applyVaultOverride(request);
+    }
+
     public Cloud.CreateTabletsResponse createTablets(Cloud.CreateTabletsRequest request) {
         if (!request.hasCloudUniqueId()) {
             Cloud.CreateTabletsRequest.Builder builder = Cloud.CreateTabletsRequest.newBuilder();

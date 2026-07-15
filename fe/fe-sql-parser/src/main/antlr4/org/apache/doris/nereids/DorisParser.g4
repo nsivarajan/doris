@@ -468,7 +468,9 @@ supportedShowStatement
     | SHOW TABLE tableId=INTEGER_VALUE                                              #showTableId
     | SHOW TRASH (ON backend=STRING_LITERAL)?                                       #showTrash
     | SHOW TYPECAST ((FROM | IN) database=identifier)?                              #showTypeCast
-    | SHOW (CLUSTERS | (COMPUTE GROUPS))                                            #showClusters    
+    | SHOW (CLUSTERS | (COMPUTE GROUPS))                                            #showClusters
+    | SHOW REPLICATION GROUP STATUS                                                 #showReplicationGroupStatus
+    | SHOW REPLICATION GROUP LAG                                                    #showReplicationGroupLag
     | SHOW statementScope? STATUS                                                   #showStatus
     | SHOW WHITELIST                                                                #showWhitelist
     | SHOW TABLETS BELONG
@@ -760,6 +762,20 @@ alterSystemClause
         SET LEFT_PAREN propertyItemList RIGHT_PAREN                                 #modifyBackendClause
     | MODIFY (FRONTEND | BACKEND) hostPort=STRING_LITERAL
         HOSTNAME hostName=STRING_LITERAL                                            #modifyFrontendOrBackendHostNameClause
+    // ── Replication Group ────────────────────────────────────────────────────
+    | REPLICATION CREATE GROUP name=STRING_LITERAL
+        PRIMARY SITE primarySite=STRING_LITERAL
+        SECONDARY SITE secondarySite=STRING_LITERAL
+        properties=propertyClause?                                                  #replicationCreateGroupClause
+    | REPLICATION FAILOVER TO SITE site=STRING_LITERAL                              #replicationFailoverClause
+    | REPLICATION FAILBACK TO SITE site=STRING_LITERAL                              #replicationFailbackClause
+    | REPLICATION PAUSE EXPORT                                                      #replicationPauseExportClause
+    | REPLICATION PROMOTE MASTER                                                    #replicationPromoteMasterClause
+    | REPLICATION ENTER DR MODE                                                     #replicationEnterDrModeClause
+    | REPLICATION ENTER DRILL MODE                                                  #replicationEnterDrillModeClause
+    | REPLICATION EXIT DRILL MODE                                                   #replicationExitDrillModeClause
+    | REPLICATION ADD VAULT MAPPING vaultName=identifier
+        properties=propertyClause                                                   #replicationAddVaultMappingClause
     ;
 
 dropRollupClause
@@ -2107,6 +2123,8 @@ nonReserved
     | DOW
     | DOY
     | DUAL
+    | DR
+    | DRILL
     | DYNAMIC
     | E
     | ENABLE
@@ -2118,6 +2136,7 @@ nonReserved
     | ENGINE
     | ENGINES
     | ERRORS
+    | EXIT
     | ESCAPE
     | EVENTS
     | EVERY
@@ -2125,6 +2144,8 @@ nonReserved
     | EXPIRED
     | EXTERNAL
     | FAILED_LOGIN_ATTEMPTS
+    | FAILBACK
+    | FAILOVER
     | FAST
     | FEATURE
     | FIELDS
@@ -2181,6 +2202,7 @@ nonReserved
     | JSON
     | JSONB
     | LABEL
+    | LAG
     | LAST
     | LDAP
     | LDAP_ADMIN_PASSWORD
@@ -2198,7 +2220,9 @@ nonReserved
     | MANUAL
     | MAP
     | MAPPING
+    | MASTER
     | MATCHED
+    | MODE
     | MATCH_ALL
     | MATCH_ANY
     | MATCH_PHRASE
@@ -2255,6 +2279,7 @@ nonReserved
     | PAUSE
     | PERCENT
     | PERIOD
+    | PROMOTE
     | PERMISSIVE
     | PHYSICAL
     | PI
@@ -2285,6 +2310,7 @@ nonReserved
     | RECYCLE
     | REFRESH
     | REPEATABLE
+    | REPLICATION
     | REPLACE
     | REPLACE_IF_NOT_NULL
     | REPLAYER
@@ -2315,6 +2341,7 @@ nonReserved
     | SCHEDULER
     | SCHEMA
     | SECOND
+    | SECONDARY
     | SECOND_MICROSECOND
     | MICROSECOND
     | SEPARATOR
@@ -2335,6 +2362,7 @@ nonReserved
     | STARTS
     | STATS
     | STATUS
+    | SITE
     | STOP
     | STORAGE
     | STREAM
