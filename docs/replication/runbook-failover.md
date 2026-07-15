@@ -2,6 +2,10 @@
 
 **Use when:** Beijing cluster is confirmed down and Shanghai must serve all traffic.
 
+> **Port note:** FE API calls use port `8030` (HTTP) or `8050` (HTTPS).
+> Add `--use-https` to all `replication_manager.py` commands if your cluster
+> has `enable_https=true`. Add `--ca-cert /path/to/ca.crt` for internal CAs.
+
 ---
 
 ## Pre-flight checklist (run before declaring disaster)
@@ -34,7 +38,13 @@ DO failover for:
 
 ```bash
 # Try to reach Beijing FE — should fail
-curl -s http://bj-fe-host:8040/api/replication/status || echo "Beijing unreachable"
+# HTTP cluster (enable_https=false):
+curl -s http://bj-fe-host:8030/api/replication/status || echo "Beijing unreachable"
+
+# HTTPS cluster (enable_https=true):
+curl -s https://bj-fe-host:8050/api/replication/status || echo "Beijing unreachable"
+# With internal CA cert:
+curl -s --cacert /path/to/ca.crt https://bj-fe-host:8050/api/replication/status
 ```
 
 ### Step 2 — Check DR state

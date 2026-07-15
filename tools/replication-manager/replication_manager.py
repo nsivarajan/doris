@@ -57,14 +57,27 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--timeout", type=int, default=60,
                         help="HTTP request timeout in seconds (default: 60)")
 
+    # ── TLS / HTTPS options (global, apply to all FE HTTP calls) ─────────────
+    parser.add_argument("--use-https", action="store_true",
+                        help="Use HTTPS for FE API calls (FE https_port=8050 when enable_https=true)")
+    parser.add_argument("--ca-cert", default=None,
+                        help="Path to CA cert file for HTTPS with self-signed/internal-CA certs")
+    parser.add_argument("--no-verify-ssl", action="store_true",
+                        help="Disable SSL certificate verification (dev/test only, not for production)")
+    parser.add_argument("--fe-http-user", default="admin",
+                        help="FE HTTP Basic auth username (default: admin)")
+    parser.add_argument("--fe-http-password", default="",
+                        help="FE HTTP Basic auth password (default: empty)")
+
     sub = parser.add_subparsers(dest="command", required=True)
 
     # ── create-group ─────────────────────────────────────────────────────────
     cg = sub.add_parser("create-group", help="One-time replication group setup")
     cg.add_argument("--group-id",               required=True)
     cg.add_argument("--primary-site",           required=True)
-    cg.add_argument("--primary-fe",             required=True, help="host:http_port")
-    cg.add_argument("--primary-ms",             required=True, help="host:grpc_port")
+    cg.add_argument("--primary-fe",             required=True,
+                    help="host:port  (HTTP: host:8030, HTTPS: host:8050)")
+    cg.add_argument("--primary-ms",             required=True, help="host:5000 (MS brpc port)")
     cg.add_argument("--secondary-site",         required=True)
     cg.add_argument("--secondary-fe",           required=True, help="host:http_port")
     cg.add_argument("--secondary-ms",           required=True, help="host:grpc_port")

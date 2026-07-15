@@ -8,8 +8,8 @@
 #   - job_name: doris_replication
 #     static_configs:
 #       - targets:
-#           - bj-fe-host:8040
-#           - sh-fe-host:8040
+#           - bj-fe-host:8030
+#           - sh-fe-host:8030
 #     metrics_path: /api/replication/metrics
 
 groups:
@@ -29,7 +29,7 @@ groups:
           description: >
             The EditLogS3Exporter thread is not running on the primary FE.
             DR replication has stopped. Run:
-            curl -X POST http://bj-fe-host:8040/api/replication/promote-master
+            curl -X POST http://bj-fe-host:8030/api/replication/promote-master
             or restart the primary FE.
 
       # ── RPO warnings ────────────────────────────────────────────────────────

@@ -2,6 +2,10 @@
 
 **Use when:** Beijing has recovered and should resume as primary.
 
+> **Port note:** FE API calls use port `8030` (HTTP) or `8050` (HTTPS).
+> Add `--use-https` to all `replication_manager.py` commands if your cluster
+> has `enable_https=true`. Add `--ca-cert /path/to/ca.crt` for internal CAs.
+
 ---
 
 ## Pre-conditions (ALL must be true before starting)
@@ -28,7 +32,7 @@ Wait until:
 
 ```bash
 # Beijing FE should be in DR reader mode, catching up
-curl -s http://bj-fe-host:8040/api/replication/status | python3 -m json.tool
+curl -s http://bj-fe-host:8030/api/replication/status | python3 -m json.tool
 # exporter_running: false  ← correct, Beijing is DR reader not primary
 # dr_read_only_mode: true  ← correct
 ```
@@ -120,7 +124,7 @@ vim /path/to/conf/meta_service.conf
 mysql -h bj-fe-host -P 9030 -u root -p -e "SELECT count(*) FROM orders;"
 
 # Verify Shanghai is back in read-only DR mode
-curl -s http://sh-fe-host:8040/api/replication/status
+curl -s http://sh-fe-host:8030/api/replication/status
 # dr_read_only_mode: true  ← correct
 
 # Verify Shanghai reads work (reads from local OSS via vault mapping)

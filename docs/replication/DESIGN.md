@@ -964,8 +964,8 @@ Commands:
 # Setup — auto-discovers all vaults from primary MS, prompts for secondary config
 ./replication-manager create-group \
   --group-id       bj_to_sh \
-  --primary-site   beijing  --primary-fe bj-fe:9030  --primary-ms bj-ms:5000 \
-  --secondary-site shanghai --secondary-fe sh-fe:9030 --secondary-ms sh-ms:5000 \
+  --primary-site   beijing  --primary-fe bj-fe:8030  --primary-ms bj-ms:5000 \
+  --secondary-site shanghai --secondary-fe sh-fe:8030 --secondary-ms sh-ms:5000 \
   --storage-type   OSS \
   --replication-bucket  replication-data \
   --primary-endpoint    oss-cn-beijing-internal.aliyuncs.com \
@@ -1197,6 +1197,51 @@ git rebase upstream/master
 ```
 
 Expected effort per Doris release: **30–60 minutes** (only 4 modified files rebase).
+
+---
+
+## Port Reference
+
+All port numbers are Doris defaults from source code. Your deployment may differ.
+
+| Component | Port | Protocol | Source config | Notes |
+|---|---|---|---|---|
+| FE HTTP | `8030` | HTTP | `fe.conf: http_port` | When `enable_https=false` |
+| FE HTTPS | `8050` | HTTPS | `fe.conf: https_port` | When `enable_https=true` (http_port disabled) |
+| FE MySQL query | `9030` | MySQL | `fe.conf: query_port` | Always plaintext |
+| FE BDB edit log | `9010` | TCP | `fe.conf: edit_log_port` | Inter-FE replication |
+| BE HTTP | `8040` | HTTP | `be.conf: webserver_port` | NOT used by replication |
+| BE brpc | `8060` | brpc | `be.conf: brpc_port` | |
+| BE heartbeat | `9050` | TCP | `be.conf: heartbeat_service_port` | |
+| Meta Service brpc | `5000` | brpc | `meta_service.conf: brpc_listen_port` | |
+
+**Key rules:**
+- Replication endpoints (`/api/replication/*`) live on the **FE** — use `8030` (HTTP) or `8050` (HTTPS)
+- `--primary-fe` / `--secondary-fe`: `host:8030` for HTTP, `host:8050` for HTTPS
+- Add `--use-https` flag when `enable_https=true`; add `--ca-cert` for internal/self-signed certs
+- `--primary-ms` / `--secondary-ms`: always `host:5000` (MS brpc, no TLS)
+- MySQL queries always use `9030` regardless of HTTPS
+
+```bash
+# Plain HTTP cluster (enable_https=false)
+./replication_manager.py failover --group-id bj_to_sh --to-site shanghai
+
+# HTTPS cluster (enable_https=true, https_port=8050) — CA in system trust store
+./replication_manager.py --use-https \
+  failover --group-id bj_to_sh --to-site shanghai
+
+# HTTPS with internal/self-signed CA — export from FE keystore first:
+#   keytool -export -keystore $DORIS_HOME/conf/ssl/doris_keystore.jks \
+#           -alias doris_ssl_certificate -file /tmp/doris-ca.crt -rfc
+./replication_manager.py --use-https --ca-cert /tmp/doris-ca.crt \
+  show-group --group-id bj_to_sh
+```
+
+**How Doris HTTPS works (from `InternalHttpsUtils.java`):**
+- FE uses a **Java KeyStore (JKS)** (`key_store_path`, `key_store_password`, `key_store_type`)
+- Every cert in every chain of the keystore is trusted — CA cert validates all nodes it signed
+- **Hostname verification disabled** (`NoopHostnameVerifier`) — internal certs work regardless of CN/SAN
+- Python client mirrors this: `ctx.check_hostname = False`, loads CA from exported PEM
 
 ---
 
