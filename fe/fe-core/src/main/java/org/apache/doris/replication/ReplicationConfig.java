@@ -24,6 +24,7 @@ package org.apache.doris.replication;
 public class ReplicationConfig {
 
     public enum StorageType { S3, OSS, GCS }
+
     public enum CredentialType { INSTANCE_PROFILE, ASSUME_ROLE, WORKLOAD_IDENTITY, AK_SK }
 
     // ── identity ──────────────────────────────────────────────────────────
@@ -116,23 +117,85 @@ public class ReplicationConfig {
         private int crrMaxLagMs = 300000;
         private int credentialRefreshWindowSeconds = 300; // refresh 5 min before expiry
 
-        public Builder groupId(String v)             { this.groupId = v; return this; }
-        public Builder siteName(String v)            { this.siteName = v; return this; }
-        public Builder storageType(StorageType v)    { this.storageType = v; return this; }
-        public Builder bucket(String v)              { this.bucket = v; return this; }
-        public Builder endpoint(String v)            { this.endpoint = v; return this; }
-        public Builder credentialType(CredentialType v) { this.credentialType = v; return this; }
-        public Builder accessKey(String v)           { this.accessKey = v; return this; }
-        public Builder secretKey(String v)           { this.secretKey = v; return this; }
-        public Builder roleArn(String v)             { this.roleArn = v; return this; }
-        public Builder roleSessionName(String v)     { this.roleSessionName = v; return this; }
-        public Builder externalId(String v)          { this.externalId = v; return this; }
-        public Builder exportIntervalMs(int v)       { this.exportIntervalMs = v; return this; }
-        public Builder exportBatchSize(int v)        { this.exportBatchSize = v; return this; }
-        public Builder checkpointIntervalMs(int v)   { this.checkpointIntervalMs = v; return this; }
-        public Builder crrMaxLagMs(int v)            { this.crrMaxLagMs = v; return this; }
+        public Builder groupId(String v) {
+            this.groupId = v;
+            return this;
+        }
+
+        public Builder siteName(String v) {
+            this.siteName = v;
+            return this;
+        }
+
+        public Builder storageType(StorageType v) {
+            this.storageType = v;
+            return this;
+        }
+
+        public Builder bucket(String v) {
+            this.bucket = v;
+            return this;
+        }
+
+        public Builder endpoint(String v) {
+            this.endpoint = v;
+            return this;
+        }
+
+        public Builder credentialType(CredentialType v) {
+            this.credentialType = v;
+            return this;
+        }
+
+        public Builder accessKey(String v) {
+            this.accessKey = v;
+            return this;
+        }
+
+        public Builder secretKey(String v) {
+            this.secretKey = v;
+            return this;
+        }
+
+        public Builder roleArn(String v) {
+            this.roleArn = v;
+            return this;
+        }
+
+        public Builder roleSessionName(String v) {
+            this.roleSessionName = v;
+            return this;
+        }
+
+        public Builder externalId(String v) {
+            this.externalId = v;
+            return this;
+        }
+
+        public Builder exportIntervalMs(int v) {
+            this.exportIntervalMs = v;
+            return this;
+        }
+
+        public Builder exportBatchSize(int v) {
+            this.exportBatchSize = v;
+            return this;
+        }
+
+        public Builder checkpointIntervalMs(int v) {
+            this.checkpointIntervalMs = v;
+            return this;
+        }
+
+        public Builder crrMaxLagMs(int v) {
+            this.crrMaxLagMs = v;
+            return this;
+        }
+
         public Builder credentialRefreshWindowSeconds(int v) {
-            this.credentialRefreshWindowSeconds = v; return this; }
+            this.credentialRefreshWindowSeconds = v;
+            return this;
+        }
 
         public ReplicationConfig build() {
             return new ReplicationConfig(this);

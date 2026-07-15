@@ -22,6 +22,7 @@ import org.apache.doris.replication.credentials.AssumeRoleCredentialProvider;
 import org.apache.doris.replication.credentials.InstanceProfileCredentialProvider;
 import org.apache.doris.replication.credentials.ReplicationCredentialProvider;
 import org.apache.doris.replication.credentials.StaticCredentialProvider;
+
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 

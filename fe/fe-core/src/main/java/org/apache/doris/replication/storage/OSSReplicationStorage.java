@@ -21,8 +21,6 @@ import org.apache.doris.replication.ReplicationConfig;
 import org.apache.doris.replication.credentials.ReplicationCredentialException;
 import org.apache.doris.replication.credentials.ReplicationCredentialProvider;
 import org.apache.doris.replication.credentials.ReplicationCredentials;
-import org.apache.logging.log4j.LogManager;
-import org.apache.logging.log4j.Logger;
 
 import com.aliyun.oss.OSS;
 import com.aliyun.oss.OSSClientBuilder;
@@ -31,9 +29,10 @@ import com.aliyun.oss.common.auth.DefaultCredentialProvider;
 import com.aliyun.oss.model.ListObjectsRequest;
 import com.aliyun.oss.model.OSSObjectSummary;
 import com.aliyun.oss.model.ObjectListing;
+import org.apache.logging.log4j.LogManager;
+import org.apache.logging.log4j.Logger;
 
 import java.io.ByteArrayInputStream;
-import java.io.IOException;
 import java.util.ArrayList;
 import java.util.List;
 

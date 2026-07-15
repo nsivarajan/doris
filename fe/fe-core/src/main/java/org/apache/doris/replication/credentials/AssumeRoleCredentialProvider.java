@@ -18,10 +18,7 @@
 package org.apache.doris.replication.credentials;
 
 import org.apache.doris.replication.ReplicationConfig;
-import org.apache.logging.log4j.LogManager;
-import org.apache.logging.log4j.Logger;
 
-// Alibaba Cloud STS — fully qualified at use-site to avoid name conflict with AWS
 import com.aliyuncs.DefaultAcsClient;
 import com.aliyuncs.auth.sts.AssumeRoleResponse;
 import com.aliyuncs.exceptions.ClientException;
@@ -29,8 +26,9 @@ import com.aliyuncs.profile.DefaultProfile;
 import com.amazonaws.auth.InstanceProfileCredentialsProvider;
 import com.amazonaws.services.securitytoken.AWSSecurityTokenService;
 import com.amazonaws.services.securitytoken.AWSSecurityTokenServiceClientBuilder;
-// AWS AssumeRoleResult — AssumeRoleRequest used via FQN below to avoid clash
 import com.amazonaws.services.securitytoken.model.AssumeRoleResult;
+import org.apache.logging.log4j.LogManager;
+import org.apache.logging.log4j.Logger;
 
 import java.time.Instant;
 

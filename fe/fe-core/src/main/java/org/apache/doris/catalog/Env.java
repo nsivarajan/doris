@@ -3257,7 +3257,9 @@ public class Env {
                         }
                         long journalId = kv.first;
                         org.apache.doris.journal.JournalEntity entity = kv.second;
-                        if (entity == null) return;
+                        if (entity == null) {
+                            return;
+                        }
                         EditLog.loadJournal(Env.this, journalId, entity);
                         replayedJournalId.incrementAndGet();
                         canRead.set(true);

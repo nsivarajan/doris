@@ -256,7 +256,8 @@ public class ReplicationAction extends RestBaseController {
         sb.append("doris_replication_last_journal_id").append(labels)
           .append(" ").append(lastJournalId).append("\n");
 
-        sb.append("# HELP doris_replication_dr_read_only Whether this FE is in DR read-only mode (write guard active)\n");
+        sb.append("# HELP doris_replication_dr_read_only"
+                + " Whether this FE is in DR read-only mode (write guard active)\n");
         sb.append("# TYPE doris_replication_dr_read_only gauge\n");
         sb.append("doris_replication_dr_read_only").append(labels)
           .append(" ").append(Config.dr_read_only_mode ? 1 : 0).append("\n");
