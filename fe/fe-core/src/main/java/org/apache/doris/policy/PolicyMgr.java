@@ -30,6 +30,7 @@ import org.apache.doris.common.UserException;
 import org.apache.doris.common.io.Text;
 import org.apache.doris.common.io.Writable;
 import org.apache.doris.datasource.InternalCatalog;
+import org.apache.doris.info.TableNameInfo;
 import org.apache.doris.persist.gson.GsonUtils;
 import org.apache.doris.qe.ShowResultSet;
 import org.apache.doris.task.AgentBatchTask;
@@ -51,6 +52,7 @@ import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
+import java.util.Comparator;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -75,6 +77,11 @@ public class PolicyMgr implements Writable {
     // Any key can be "*" for wildcard scopes (db.*, catalog.*.*, *.*.*)
     // — looked up via O(1) map.get("*") in getUserPolicies.
     private Map<String, Map<String, Map<String, List<RowPolicy>>>> tablePolicies = Maps.newConcurrentMap();
+
+    // ctlName -> dbName -> tableName -> columnName -> List<ColumnMaskPolicy>. ctl/db/tableName
+    // can be "*" for wildcard scopes like tablePolicies above; columnName is always exact.
+    private Map<String, Map<String, Map<String, Map<String, List<ColumnMaskPolicy>>>>> columnMaskPolicies
+            = Maps.newConcurrentMap();
 
     private void writeLock() {
         lock.writeLock().lock();
@@ -304,6 +311,8 @@ public class PolicyMgr implements Writable {
         typeToPolicyMap.put(policy.getType(), dbPolicies);
         if (PolicyTypeEnum.ROW == policy.getType()) {
             addTablePolicies((RowPolicy) policy);
+        } else if (PolicyTypeEnum.MASK == policy.getType()) {
+            addColumnMaskPolicies((ColumnMaskPolicy) policy);
         }
 
     }
@@ -349,6 +358,9 @@ public class PolicyMgr implements Writable {
                 }
                 if (policy instanceof RowPolicy) {
                     dropTablePolicies((RowPolicy) policy);
+                }
+                if (policy instanceof ColumnMaskPolicy) {
+                    dropColumnMaskPolicies((ColumnMaskPolicy) policy);
                 }
                 return true;
             }
@@ -408,6 +420,77 @@ public class PolicyMgr implements Writable {
                 || (!StringUtils.isEmpty(rowPolicy.getRoleName()) && roles.contains(rowPolicy.getRoleName()));
     }
 
+    /**
+     * Resolve the single applicable ColumnMaskPolicy for (ctl, db, table, column, user), if any.
+     * Precedence: exact table > db-wildcard > catalog-wildcard > global-wildcard — unlike row
+     * policies, a mask expression can't compose across tiers, so exactly one must win. Within a
+     * tier, if any policy matches the user, mask (never fail open); ties broken by lowest policy
+     * id. A tier with policies that don't match this user falls through to the next tier.
+     */
+    public Optional<ColumnMaskPolicy> getUserMaskPolicy(String ctlName, String dbName, String tableName,
+            String columnName, UserIdentity user) {
+        if (columnMaskPolicies.isEmpty()) {
+            return Optional.empty();
+        }
+        String col = columnName.toLowerCase();
+        String[][] lookups = {
+            {ctlName, dbName, tableName},
+            {ctlName, dbName, "*"},
+            {ctlName, "*", "*"},
+            {"*", "*", "*"},
+        };
+        readLock();
+        try {
+            // Resolve roles lazily: most columns have no mask policy at any tier, so most calls
+            // never need this (and it can hit LDAP — see Auth#getRolesByUserWithLdap).
+            Set<String> roles = null;
+            for (String[] key : lookups) {
+                List<ColumnMaskPolicy> candidates = lookupColumnMaskPolicies(key[0], key[1], key[2], col);
+                if (candidates == null || candidates.isEmpty()) {
+                    continue;
+                }
+                if (roles == null) {
+                    roles = Env.getCurrentEnv().getAccessManager().getAuth().getRolesByUserWithLdap(user).stream()
+                            .map(role -> ClusterNamespace.getNameFromFullName(role.getRoleName()))
+                            .collect(Collectors.toSet());
+                }
+                final Set<String> rolesForFilter = roles;
+                Optional<ColumnMaskPolicy> matched = candidates.stream()
+                        .filter(p -> policyMatchesUser(p, user, rolesForFilter))
+                        .min(Comparator.comparingLong(Policy::getId));
+                if (matched.isPresent()) {
+                    return matched;
+                }
+            }
+            return Optional.empty();
+        } finally {
+            readUnlock();
+        }
+    }
+
+    private List<ColumnMaskPolicy> lookupColumnMaskPolicies(String ctlName, String dbName, String tableName,
+            String columnName) {
+        Map<String, Map<String, Map<String, List<ColumnMaskPolicy>>>> ctlMap = columnMaskPolicies.get(ctlName);
+        if (ctlMap == null) {
+            return null;
+        }
+        Map<String, Map<String, List<ColumnMaskPolicy>>> dbMap = ctlMap.get(dbName);
+        if (dbMap == null) {
+            return null;
+        }
+        Map<String, List<ColumnMaskPolicy>> tblMap = dbMap.get(tableName);
+        if (tblMap == null) {
+            return null;
+        }
+        return tblMap.get(columnName);
+    }
+
+    private boolean policyMatchesUser(ColumnMaskPolicy maskPolicy, UserIdentity user, Set<String> roles) {
+        return (maskPolicy.getUser() != null
+                && maskPolicy.getUser().getQualifiedUser().equals(user.getQualifiedUser()))
+                || (!StringUtils.isEmpty(maskPolicy.getRoleName()) && roles.contains(maskPolicy.getRoleName()));
+    }
+
     private ShowResultSet getShowPolicy(Policy finalCheckedPolicy, PolicyTypeEnum type) throws AnalysisException {
         List<List<String>> rows = Lists.newArrayList();
         readLock();
@@ -428,6 +511,9 @@ public class PolicyMgr implements Writable {
             }
             if (type == PolicyTypeEnum.STORAGE) {
                 return new ShowResultSet(StoragePolicy.STORAGE_META_DATA, rows);
+            }
+            if (type == PolicyTypeEnum.MASK) {
+                return new ShowResultSet(ColumnMaskPolicy.MASK_META_DATA, rows);
             }
             return new ShowResultSet(RowPolicy.ROW_META_DATA, rows);
         } finally {
@@ -451,6 +537,28 @@ public class PolicyMgr implements Writable {
 
         final Policy finalCheckedPolicy = rowPolicy;
         return getShowPolicy(finalCheckedPolicy, PolicyTypeEnum.ROW);
+    }
+
+    /**
+     * Show Masking Policy.
+     **/
+    public ShowResultSet showMaskPolicy(TableNameInfo tableNameInfo, UserIdentity user, String role)
+            throws AnalysisException {
+        ColumnMaskPolicy maskPolicy = new ColumnMaskPolicy();
+        if (tableNameInfo != null) {
+            maskPolicy.setCtlName(tableNameInfo.getCtl());
+            maskPolicy.setDbName(tableNameInfo.getDb());
+            maskPolicy.setTableName(tableNameInfo.getTbl());
+        }
+        if (user != null) {
+            maskPolicy.setUser(user);
+        }
+        if (!StringUtils.isEmpty(role)) {
+            maskPolicy.setRoleName(role);
+        }
+
+        final Policy finalCheckedPolicy = maskPolicy;
+        return getShowPolicy(finalCheckedPolicy, PolicyTypeEnum.MASK);
     }
 
     /**
@@ -612,6 +720,73 @@ public class PolicyMgr implements Writable {
         return tablePolicies.get(ctlName);
     }
 
+    private void addColumnMaskPolicies(ColumnMaskPolicy policy) {
+        if (policy.getUser() != null) {
+            policy.getUser().setIsAnalyzed();
+        }
+        List<ColumnMaskPolicy> policys = getOrCreateColMaskPolicies(policy.getCtlName(), policy.getDbName(),
+                policy.getTableName(), policy.getColumnName());
+        policys.add(policy);
+    }
+
+    private void dropColumnMaskPolicies(ColumnMaskPolicy policy) {
+        // Use get-only (not getOrCreate) to avoid leaving orphaned empty map entries
+        // when dropping a policy that was never created.
+        Map<String, Map<String, Map<String, List<ColumnMaskPolicy>>>> ctlMap =
+                columnMaskPolicies.get(policy.getCtlName());
+        if (ctlMap == null) {
+            return;
+        }
+        Map<String, Map<String, List<ColumnMaskPolicy>>> dbMap = ctlMap.get(policy.getDbName());
+        if (dbMap == null) {
+            return;
+        }
+        Map<String, List<ColumnMaskPolicy>> tblMap = dbMap.get(policy.getTableName());
+        if (tblMap == null) {
+            return;
+        }
+        List<ColumnMaskPolicy> policys = tblMap.get(policy.getColumnName());
+        if (policys != null) {
+            policys.removeIf(p -> p.matchPolicy(policy));
+        }
+    }
+
+    private List<ColumnMaskPolicy> getOrCreateColMaskPolicies(String ctlName, String dbName, String tableName,
+            String columnName) {
+        Map<String, List<ColumnMaskPolicy>> tblColMap = getOrCreateColMaskMap(ctlName, dbName, tableName);
+        if (!tblColMap.containsKey(columnName)) {
+            tblColMap.put(columnName, Lists.newArrayList());
+        }
+        return tblColMap.get(columnName);
+    }
+
+    private Map<String, List<ColumnMaskPolicy>> getOrCreateColMaskMap(String ctlName, String dbName,
+            String tableName) {
+        Map<String, Map<String, List<ColumnMaskPolicy>>> dbPolicyMap = getOrCreateMaskDbPolicyMap(ctlName, dbName);
+        if (!dbPolicyMap.containsKey(tableName)) {
+            dbPolicyMap.put(tableName, Maps.newConcurrentMap());
+        }
+        return dbPolicyMap.get(tableName);
+    }
+
+    private Map<String, Map<String, List<ColumnMaskPolicy>>> getOrCreateMaskDbPolicyMap(String ctlName,
+            String dbName) {
+        Map<String, Map<String, Map<String, List<ColumnMaskPolicy>>>> ctlPolicyMap =
+                getOrCreateMaskCtlPolicyMap(ctlName);
+        if (!ctlPolicyMap.containsKey(dbName)) {
+            ctlPolicyMap.put(dbName, Maps.newConcurrentMap());
+        }
+        return ctlPolicyMap.get(dbName);
+    }
+
+    private Map<String, Map<String, Map<String, List<ColumnMaskPolicy>>>> getOrCreateMaskCtlPolicyMap(
+            String ctlName) {
+        if (!columnMaskPolicies.containsKey(ctlName)) {
+            columnMaskPolicies.put(ctlName, Maps.newConcurrentMap());
+        }
+        return columnMaskPolicies.get(ctlName);
+    }
+
     private void compatible() {
         readLock();
         try {
@@ -664,6 +839,24 @@ public class PolicyMgr implements Writable {
         }
     }
 
+    /**
+     * The mask policy cache needs to be regenerated after the update.
+     **/
+    private void updateColumnMaskPolicies() {
+        readLock();
+        try {
+            if (!typeToPolicyMap.containsKey(PolicyTypeEnum.MASK)) {
+                return;
+            }
+            List<Policy> allPolicies = typeToPolicyMap.get(PolicyTypeEnum.MASK);
+            for (Policy policy : allPolicies) {
+                addColumnMaskPolicies((ColumnMaskPolicy) policy);
+            }
+        } finally {
+            readUnlock();
+        }
+    }
+
     @Override
     public void write(DataOutput out) throws IOException {
         Text.writeString(out, GsonUtils.GSON.toJson(this));
@@ -679,6 +872,7 @@ public class PolicyMgr implements Writable {
         policyMgr.compatible();
         // update merge policy cache and userPolicySet
         policyMgr.updateTablePolicies();
+        policyMgr.updateColumnMaskPolicies();
         return policyMgr;
     }
 
