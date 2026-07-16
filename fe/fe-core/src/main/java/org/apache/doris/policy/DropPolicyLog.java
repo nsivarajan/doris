@@ -66,6 +66,12 @@ public class DropPolicyLog implements Writable {
     @SerializedName(value = "roleName")
     private String roleName;
 
+    /**
+     * Only meaningful when type == MASK; null otherwise.
+     **/
+    @SerializedName(value = "columnName")
+    private String columnName;
+
     public DropPolicyLog(PolicyTypeEnum type, String policyName) {
         this.type = type;
         this.policyName = policyName;
@@ -76,6 +82,18 @@ public class DropPolicyLog implements Writable {
         this.ctlName = ctlName;
         this.dbName = dbName;
         this.tableName = tableName;
+        this.type = type;
+        this.policyName = policyName;
+        this.user = user;
+        this.roleName = roleName;
+    }
+
+    public DropPolicyLog(String ctlName, String dbName, String tableName, String columnName, PolicyTypeEnum type,
+            String policyName, UserIdentity user, String roleName) {
+        this.ctlName = ctlName;
+        this.dbName = dbName;
+        this.tableName = tableName;
+        this.columnName = columnName;
         this.type = type;
         this.policyName = policyName;
         this.user = user;

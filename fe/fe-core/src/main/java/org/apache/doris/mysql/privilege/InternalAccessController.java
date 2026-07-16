@@ -83,7 +83,8 @@ public class InternalAccessController implements CatalogAccessController {
     @Override
     public Optional<DataMaskPolicy> evalDataMaskPolicy(UserIdentity currentUser, String ctl, String db, String tbl,
             String col) {
-        return Optional.empty();
+        return Env.getCurrentEnv().getPolicyMgr().getUserMaskPolicy(ctl, db, tbl, col, currentUser)
+                .map(p -> (DataMaskPolicy) p);
     }
 
     @Override
