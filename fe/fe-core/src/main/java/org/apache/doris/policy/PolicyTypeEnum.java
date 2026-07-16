@@ -18,9 +18,9 @@
 package org.apache.doris.policy;
 
 /**
- * Policy type enum, currently only row.
+ * Policy type enum.
  **/
 public enum PolicyTypeEnum {
 
-    ROW, STORAGE
+    ROW, STORAGE, MASK
 }
