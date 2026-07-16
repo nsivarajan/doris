@@ -217,6 +217,7 @@ import org.apache.doris.mtmv.MTMVSnapshotIdSnapshot;
 import org.apache.doris.mtmv.MTMVSnapshotIf;
 import org.apache.doris.mtmv.MTMVTimestampSnapshot;
 import org.apache.doris.mtmv.MTMVVersionSnapshot;
+import org.apache.doris.policy.ColumnMaskPolicy;
 import org.apache.doris.policy.Policy;
 import org.apache.doris.policy.RowPolicy;
 import org.apache.doris.policy.StoragePolicy;
@@ -407,7 +408,8 @@ public class GsonUtils {
     // runtime adapter for class "Policy"
     private static RuntimeTypeAdapterFactory<Policy> policyTypeAdapterFactory = RuntimeTypeAdapterFactory.of(
                     Policy.class, "clazz").registerSubtype(RowPolicy.class, RowPolicy.class.getSimpleName())
-            .registerSubtype(StoragePolicy.class, StoragePolicy.class.getSimpleName());
+            .registerSubtype(StoragePolicy.class, StoragePolicy.class.getSimpleName())
+            .registerSubtype(ColumnMaskPolicy.class, ColumnMaskPolicy.class.getSimpleName());
 
     private static RuntimeTypeAdapterFactory<Constraint> constraintTypeAdapterFactory = RuntimeTypeAdapterFactory.of(
                     Constraint.class, "clazz")

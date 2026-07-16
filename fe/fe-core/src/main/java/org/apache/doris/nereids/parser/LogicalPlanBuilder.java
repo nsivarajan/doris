@@ -704,6 +704,7 @@ import org.apache.doris.nereids.trees.plans.commands.CreateIndexTokenFilterComma
 import org.apache.doris.nereids.trees.plans.commands.CreateIndexTokenizerCommand;
 import org.apache.doris.nereids.trees.plans.commands.CreateJobCommand;
 import org.apache.doris.nereids.trees.plans.commands.CreateMTMVCommand;
+import org.apache.doris.nereids.trees.plans.commands.CreateMaskPolicyCommand;
 import org.apache.doris.nereids.trees.plans.commands.CreateMaterializedViewCommand;
 import org.apache.doris.nereids.trees.plans.commands.CreatePolicyCommand;
 import org.apache.doris.nereids.trees.plans.commands.CreateProcedureCommand;
@@ -743,6 +744,7 @@ import org.apache.doris.nereids.trees.plans.commands.DropIndexTokenFilterCommand
 import org.apache.doris.nereids.trees.plans.commands.DropIndexTokenizerCommand;
 import org.apache.doris.nereids.trees.plans.commands.DropJobCommand;
 import org.apache.doris.nereids.trees.plans.commands.DropMTMVCommand;
+import org.apache.doris.nereids.trees.plans.commands.DropMaskPolicyCommand;
 import org.apache.doris.nereids.trees.plans.commands.DropMaterializedViewCommand;
 import org.apache.doris.nereids.trees.plans.commands.DropProcedureCommand;
 import org.apache.doris.nereids.trees.plans.commands.DropRepositoryCommand;
@@ -850,6 +852,7 @@ import org.apache.doris.nereids.trees.plans.commands.ShowLastInsertCommand;
 import org.apache.doris.nereids.trees.plans.commands.ShowLoadCommand;
 import org.apache.doris.nereids.trees.plans.commands.ShowLoadProfileCommand;
 import org.apache.doris.nereids.trees.plans.commands.ShowLoadWarningsCommand;
+import org.apache.doris.nereids.trees.plans.commands.ShowMaskPolicyCommand;
 import org.apache.doris.nereids.trees.plans.commands.ShowOpenTablesCommand;
 import org.apache.doris.nereids.trees.plans.commands.ShowPartitionIdCommand;
 import org.apache.doris.nereids.trees.plans.commands.ShowPartitionsCommand;
@@ -2508,11 +2511,11 @@ public class LogicalPlanBuilder extends DorisParserBaseVisitor<Object> {
 
     }
 
-    /** Converts a rowPolicyTablePattern to a list of strings.
+    /** Converts a policyTablePattern to a list of strings.
      *  Each part is an identifier or ASTERISK ("*"), enabling wildcard scopes like db.*, *.*.*
      */
     @Override
-    public List<String> visitRowPolicyTablePattern(DorisParser.RowPolicyTablePatternContext ctx) {
+    public List<String> visitPolicyTablePattern(DorisParser.PolicyTablePatternContext ctx) {
         return ctx.parts.stream()
                 .map(p -> p.ASTERISK() != null ? "*" : p.errorCapturingIdentifier().getText())
                 .collect(Collectors.toList());
@@ -2521,12 +2524,22 @@ public class LogicalPlanBuilder extends DorisParserBaseVisitor<Object> {
     @Override
     public Command visitCreateRowPolicy(CreateRowPolicyContext ctx) {
         FilterType filterType = FilterType.of(ctx.type.getText());
-        List<String> nameParts = visitRowPolicyTablePattern(ctx.table);
+        List<String> nameParts = visitPolicyTablePattern(ctx.table);
         return new CreatePolicyCommand(PolicyTypeEnum.ROW, ctx.name.getText(),
                 ctx.EXISTS() != null, new TableNameInfo(nameParts), Optional.of(filterType),
                 ctx.user == null ? null : visitUserIdentify(ctx.user),
                 ctx.roleName == null ? null : ctx.roleName.getText(),
                 Optional.of(getExpression(ctx.booleanExpression())), ImmutableMap.of());
+    }
+
+    @Override
+    public Command visitCreateMaskingPolicy(DorisParser.CreateMaskingPolicyContext ctx) {
+        List<String> nameParts = visitPolicyTablePattern(ctx.table);
+        return new CreateMaskPolicyCommand(ctx.name.getText(), ctx.EXISTS() != null,
+                new TableNameInfo(nameParts), ctx.colName.getText(),
+                ctx.user == null ? null : visitUserIdentify(ctx.user),
+                ctx.roleName == null ? null : ctx.roleName.getText(),
+                getExpression(ctx.maskExpr));
     }
 
     @Override
@@ -6027,6 +6040,20 @@ public class LogicalPlanBuilder extends DorisParserBaseVisitor<Object> {
     }
 
     @Override
+    public LogicalPlan visitShowMaskingPolicy(DorisParser.ShowMaskingPolicyContext ctx) {
+        UserIdentity user = null;
+        String role = null;
+        if (ctx.userIdentify() != null) {
+            user = visitUserIdentify(ctx.userIdentify());
+        } else if (ctx.role != null) {
+            role = ctx.role.getText();
+        }
+        TableNameInfo tableNameInfo = ctx.tableName == null ? null
+                : new TableNameInfo(visitPolicyTablePattern(ctx.tableName));
+        return new ShowMaskPolicyCommand(tableNameInfo, user, role);
+    }
+
+    @Override
     public LogicalPlan visitShowPartitionId(ShowPartitionIdContext ctx) {
         long partitionId = -1;
         if (ctx.partitionId != null) {
@@ -8967,10 +8994,21 @@ public class LogicalPlanBuilder extends DorisParserBaseVisitor<Object> {
     public LogicalPlan visitDropRowPolicy(DorisParser.DropRowPolicyContext ctx) {
         boolean ifExist = ctx.EXISTS() != null;
         String policyName = ctx.policyName.getText();
-        TableNameInfo tableNameInfo = new TableNameInfo(visitRowPolicyTablePattern(ctx.tableName));
+        TableNameInfo tableNameInfo = new TableNameInfo(visitPolicyTablePattern(ctx.tableName));
         UserIdentity userIdentity = ctx.userIdentify() != null ? visitUserIdentify(ctx.userIdentify()) : null;
         String roleName = ctx.roleName != null ? ctx.roleName.getText() : null;
         return new DropRowPolicyCommand(ifExist, policyName, tableNameInfo, userIdentity, roleName);
+    }
+
+    @Override
+    public LogicalPlan visitDropMaskingPolicy(DorisParser.DropMaskingPolicyContext ctx) {
+        boolean ifExist = ctx.EXISTS() != null;
+        String policyName = ctx.policyName.getText();
+        TableNameInfo tableNameInfo = new TableNameInfo(visitPolicyTablePattern(ctx.tableName));
+        String columnName = ctx.colName.getText();
+        UserIdentity userIdentity = ctx.userIdentify() != null ? visitUserIdentify(ctx.userIdentify()) : null;
+        String roleName = ctx.roleName != null ? ctx.roleName.getText() : null;
+        return new DropMaskPolicyCommand(ifExist, policyName, tableNameInfo, columnName, userIdentity, roleName);
     }
 
     @Override

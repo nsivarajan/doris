@@ -226,10 +226,14 @@ supportedCreateStatement
         (WITH RESOURCE resourceName=identifier)?
         (COMMENT STRING_LITERAL)? properties=propertyClause?                    #createCatalog
     | CREATE ROW POLICY (IF NOT EXISTS)? name=identifier
-        ON table=rowPolicyTablePattern
+        ON table=policyTablePattern
         AS type=(RESTRICTIVE | PERMISSIVE)
         TO (user=userIdentify | ROLE roleName=identifierOrText)
         USING LEFT_PAREN booleanExpression RIGHT_PAREN                    #createRowPolicy
+    | CREATE MASKING POLICY (IF NOT EXISTS)? name=identifier
+        ON table=policyTablePattern LEFT_PAREN colName=identifier RIGHT_PAREN
+        TO (user=userIdentify | ROLE roleName=identifierOrText)
+        USING LEFT_PAREN maskExpr=expression RIGHT_PAREN                  #createMaskingPolicy
     | CREATE STORAGE POLICY (IF NOT EXISTS)?
         name=identifier properties=propertyClause?                              #createStoragePolicy
     | BUILD INDEX (name=identifier)? ON tableName=multipartIdentifier
@@ -365,8 +369,11 @@ supportedDropStatement
     | DROP INDEX (IF EXISTS)? name=identifier ON tableName=multipartIdentifier  #dropIndex
     | DROP RESOURCE (IF EXISTS)? name=identifierOrText                          #dropResource
     | DROP ROW POLICY (IF EXISTS)? policyName=identifier
-        ON tableName=rowPolicyTablePattern
+        ON tableName=policyTablePattern
         (FOR (userIdentify | ROLE roleName=identifier))?                        #dropRowPolicy
+    | DROP MASKING POLICY (IF EXISTS)? policyName=identifier
+        ON tableName=policyTablePattern LEFT_PAREN colName=identifier RIGHT_PAREN
+        (FOR (userIdentify | ROLE roleName=identifier))?                        #dropMaskingPolicy
     | DROP DICTIONARY (IF EXISTS)? name=multipartIdentifier                     #dropDictionary
     | DROP STAGE (IF EXISTS)? name=identifier                                   #dropStage
     | DROP VIEW (IF EXISTS)? name=multipartIdentifier                           #dropView
@@ -434,6 +441,8 @@ supportedShowStatement
     | SHOW ALL PROPERTIES (LIKE STRING_LITERAL)?                                    #showAllProperties
     | SHOW COLLATION wildWhere?                                                     #showCollation
     | SHOW ROW POLICY (FOR (userIdentify | (ROLE role=identifier)))?                #showRowPolicy
+    | SHOW MASKING POLICY (ON tableName=policyTablePattern)?
+        (FOR (userIdentify | (ROLE role=identifier)))?                             #showMaskingPolicy
     | SHOW STORAGE POLICY (USING (FOR policy=identifierOrText)?)?                   #showStoragePolicy   
     | SHOW SQL_BLOCK_RULE (FOR ruleName=identifier)?                                #showSqlBlockRule
     | SHOW CREATE VIEW name=multipartIdentifier                                     #showCreateView
@@ -1524,13 +1533,13 @@ multipartIdentifier
     : parts+=errorCapturingIdentifier (DOT parts+=errorCapturingIdentifier)*
     ;
 
-// Row policy table pattern: same as multipartIdentifier but each part can also be ASTERISK
-// to support wildcard scopes: db.*, catalog.*.*, *.*.*
-rowPolicyTablePattern
-    : parts+=rowPolicyPatternPart (DOT parts+=rowPolicyPatternPart)*
+// Policy table pattern (row policy, masking policy): same as multipartIdentifier but each part
+// can also be ASTERISK to support wildcard scopes: db.*, catalog.*.*, *.*.*
+policyTablePattern
+    : parts+=policyPatternPart (DOT parts+=policyPatternPart)*
     ;
 
-rowPolicyPatternPart
+policyPatternPart
     : errorCapturingIdentifier
     | ASTERISK
     ;
@@ -2200,6 +2209,7 @@ nonReserved
     | MANUAL
     | MAP
     | MAPPING
+    | MASKING
     | MATCHED
     | MATCH_ALL
     | MATCH_ANY

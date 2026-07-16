@@ -87,6 +87,7 @@ import org.apache.doris.nereids.trees.plans.commands.CreateIndexTokenFilterComma
 import org.apache.doris.nereids.trees.plans.commands.CreateIndexTokenizerCommand;
 import org.apache.doris.nereids.trees.plans.commands.CreateJobCommand;
 import org.apache.doris.nereids.trees.plans.commands.CreateMTMVCommand;
+import org.apache.doris.nereids.trees.plans.commands.CreateMaskPolicyCommand;
 import org.apache.doris.nereids.trees.plans.commands.CreateMaterializedViewCommand;
 import org.apache.doris.nereids.trees.plans.commands.CreatePolicyCommand;
 import org.apache.doris.nereids.trees.plans.commands.CreateProcedureCommand;
@@ -125,6 +126,7 @@ import org.apache.doris.nereids.trees.plans.commands.DropIndexTokenFilterCommand
 import org.apache.doris.nereids.trees.plans.commands.DropIndexTokenizerCommand;
 import org.apache.doris.nereids.trees.plans.commands.DropJobCommand;
 import org.apache.doris.nereids.trees.plans.commands.DropMTMVCommand;
+import org.apache.doris.nereids.trees.plans.commands.DropMaskPolicyCommand;
 import org.apache.doris.nereids.trees.plans.commands.DropMaterializedViewCommand;
 import org.apache.doris.nereids.trees.plans.commands.DropProcedureCommand;
 import org.apache.doris.nereids.trees.plans.commands.DropRepositoryCommand;
@@ -232,6 +234,7 @@ import org.apache.doris.nereids.trees.plans.commands.ShowLastInsertCommand;
 import org.apache.doris.nereids.trees.plans.commands.ShowLoadCommand;
 import org.apache.doris.nereids.trees.plans.commands.ShowLoadProfileCommand;
 import org.apache.doris.nereids.trees.plans.commands.ShowLoadWarningsCommand;
+import org.apache.doris.nereids.trees.plans.commands.ShowMaskPolicyCommand;
 import org.apache.doris.nereids.trees.plans.commands.ShowOpenTablesCommand;
 import org.apache.doris.nereids.trees.plans.commands.ShowPartitionIdCommand;
 import org.apache.doris.nereids.trees.plans.commands.ShowPartitionsCommand;
@@ -335,6 +338,10 @@ public interface CommandVisitor<R, C> {
 
     default R visitCreatePolicyCommand(CreatePolicyCommand createPolicy, C context) {
         return visitCommand(createPolicy, context);
+    }
+
+    default R visitCreateMaskPolicyCommand(CreateMaskPolicyCommand createMaskPolicy, C context) {
+        return visitCommand(createMaskPolicy, context);
     }
 
     default R visitInsertIntoTableCommand(InsertIntoTableCommand insertIntoTableCommand,
@@ -1155,6 +1162,10 @@ public interface CommandVisitor<R, C> {
         return visitCommand(showRowPolicyCommand, context);
     }
 
+    default R visitShowMaskPolicyCommand(ShowMaskPolicyCommand showMaskPolicyCommand, C context) {
+        return visitCommand(showMaskPolicyCommand, context);
+    }
+
     default R visitShowAnalyzeCommand(ShowAnalyzeCommand showAnalyzeCommand, C context) {
         return visitCommand(showAnalyzeCommand, context);
     }
@@ -1307,6 +1318,10 @@ public interface CommandVisitor<R, C> {
 
     default R visitDropRowPolicyCommand(DropRowPolicyCommand dropRowPolicyCommand, C context) {
         return visitCommand(dropRowPolicyCommand, context);
+    }
+
+    default R visitDropMaskPolicyCommand(DropMaskPolicyCommand dropMaskPolicyCommand, C context) {
+        return visitCommand(dropMaskPolicyCommand, context);
     }
 
     default R visitTransactionBeginCommand(TransactionBeginCommand transactionBeginCommand, C context) {
