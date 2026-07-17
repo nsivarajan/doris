@@ -25,7 +25,6 @@ import org.apache.doris.analysis.TupleDescriptor;
 import org.apache.doris.catalog.Column;
 import org.apache.doris.catalog.Env;
 import org.apache.doris.catalog.TableIf;
-import org.apache.doris.common.DdlException;
 import org.apache.doris.common.UserException;
 import org.apache.doris.common.profile.SummaryProfile;
 import org.apache.doris.common.security.authentication.ExecutionAuthenticator;
@@ -271,6 +270,8 @@ public class IcebergScanNode extends FileQueryScanNode {
     private void setIcebergParams(TFileRangeDesc rangeDesc, IcebergSplit icebergSplit) {
         TTableFormatFileDesc tableFormatFileDesc = new TTableFormatFileDesc();
         tableFormatFileDesc.setTableFormatType(icebergSplit.getTableFormatType().value());
+        // update for every split file format
+        rangeDesc.setFormatType(toTFileFormatType(icebergSplit.getSplitFileFormat()));
         if (tableLevelPushDownCount) {
             tableFormatFileDesc.setTableLevelRowCount(icebergSplit.getTableLevelRowCount());
         } else {
@@ -394,6 +395,15 @@ public class IcebergScanNode extends FileQueryScanNode {
         } else if (fileFormat == FileFormat.ORC) {
             deleteFileDesc.setFileFormat(TFileFormatType.FORMAT_ORC);
         }
+    }
+
+    private TFileFormatType toTFileFormatType(FileFormat fileFormat) {
+        if (fileFormat == FileFormat.PARQUET) {
+            return TFileFormatType.FORMAT_PARQUET;
+        } else if (fileFormat == FileFormat.ORC) {
+            return TFileFormatType.FORMAT_ORC;
+        }
+        throw new UnsupportedOperationException("Unsupported Iceberg data file format: " + fileFormat);
     }
 
     private String getDeleteFileContentType(int content) {
@@ -813,6 +823,7 @@ public class IcebergScanNode extends FileQueryScanNode {
                 storagePropertiesMap,
                 new ArrayList<>(),
                 originalPath);
+        split.setSplitFileFormat(dataFile.format());
         if (formatVersion >= 3) {
             // -1 means that this table was just upgraded from v2 to v3.
             // _row_id and _last_updated_sequence_number column is NULL.
@@ -994,16 +1005,8 @@ public class IcebergScanNode extends FileQueryScanNode {
 
     @Override
     public TFileFormatType getFileFormatType() throws UserException {
-        TFileFormatType type;
-        String icebergFormat = source.getFileFormat();
-        if (icebergFormat.equalsIgnoreCase("parquet")) {
-            type = TFileFormatType.FORMAT_PARQUET;
-        } else if (icebergFormat.equalsIgnoreCase("orc")) {
-            type = TFileFormatType.FORMAT_ORC;
-        } else {
-            throw new DdlException(String.format("Unsupported format name: %s for iceberg table.", icebergFormat));
-        }
-        return type;
+        // for table level file format
+        return toTFileFormatType(IcebergUtils.getFileFormat(icebergTable));
     }
 
     @Override
