@@ -179,6 +179,14 @@ CONF_String(test_s3_region, "");
 CONF_String(test_s3_bucket, "");
 CONF_String(test_s3_prefix, "");
 
+// OSS integration test credentials (used by oss_accessor_test)
+CONF_String(test_oss_ak, "");
+CONF_String(test_oss_sk, "");
+CONF_String(test_oss_endpoint, "");
+CONF_String(test_oss_region, "");
+CONF_String(test_oss_bucket, "");
+CONF_String(test_oss_prefix, "");
+
 CONF_String(test_hdfs_prefix, "");
 CONF_String(test_hdfs_fs_name, "");
 // CONF_Int64(a, "1073741824");
@@ -477,4 +485,9 @@ CONF_mBool(wait_txn_lazy_commit_during_reads, "true");
 
 // Whether to enable recycler. If false, the recycler will skip scanning instances to pending queue.
 CONF_mBool(enable_recycler, "true");
+
+// Route OSS storage vaults to the native Alibaba Cloud OSS SDK accessor.
+// When false, OSS vaults fall back to the S3-compatible (AWS SDK) path.
+CONF_mBool(enable_oss_native_sdk, "false");
+CONF_mInt32(max_oss_client_retry, "10");
 } // namespace doris::cloud::config

@@ -59,6 +59,9 @@
 #ifdef ENABLE_HDFS_STORAGE_VAULT
 #include "recycler/hdfs_accessor.h"
 #endif
+#ifdef USE_OSS
+#include "recycler/oss_accessor.h"
+#endif
 #include "recycler/s3_accessor.h"
 #include "recycler/storage_vault_accessor.h"
 #ifdef UNIT_TEST
@@ -640,6 +643,26 @@ int InstanceRecycler::init_obj_store_accessors() {
 #ifdef UNIT_TEST
         auto accessor = std::make_shared<MockAccessor>();
 #else
+#ifdef USE_OSS
+        if (config::enable_oss_native_sdk &&
+            obj_info.provider() == ObjectStoreInfoPB_Provider_OSS) {
+            auto oss_conf = OSSConf::from_obj_store_info(obj_info);
+            if (!oss_conf) {
+                LOG(WARNING) << "failed to init OSS accessor, instance_id=" << instance_id_
+                             << " resource_id=" << obj_info.id();
+                return -1;
+            }
+            std::shared_ptr<OSSAccessor> accessor;
+            int ret = OSSAccessor::create(std::move(*oss_conf), &accessor);
+            if (ret != 0) {
+                LOG(WARNING) << "failed to init OSS accessor. instance_id=" << instance_id_
+                             << " resource_id=" << obj_info.id();
+                return ret;
+            }
+            accessor_map_.emplace(obj_info.id(), std::move(accessor));
+            continue;
+        }
+#endif
         auto s3_conf = S3Conf::from_obj_store_info(obj_info);
         if (!s3_conf) {
             LOG(WARNING) << "failed to init object accessor, instance_id=" << instance_id_;
@@ -717,10 +740,38 @@ int InstanceRecycler::init_storage_vault_accessors() {
                        << "but HDFS storage vaults were detected";
 #endif
         } else if (vault.has_obj_info()) {
-            auto s3_conf = S3Conf::from_obj_store_info(vault.obj_info());
+            const auto& obj_info = vault.obj_info();
+#ifdef USE_OSS
+            if (config::enable_oss_native_sdk &&
+                obj_info.provider() == ObjectStoreInfoPB_Provider_OSS) {
+                auto oss_conf = OSSConf::from_obj_store_info(obj_info);
+                if (!oss_conf) {
+                    LOG(WARNING) << "failed to init OSS accessor, invalid conf, instance_id="
+                                 << instance_id_ << " vault_id=" << vault.id()
+                                 << " oss_vault=" << encryt_sk(obj_info.ShortDebugString());
+                    continue;
+                }
+                std::shared_ptr<OSSAccessor> accessor;
+                int ret = OSSAccessor::create(*oss_conf, &accessor);
+                if (ret != 0) {
+                    LOG(WARNING) << "failed to init OSS accessor. instance_id=" << instance_id_
+                                 << " resource_id=" << vault.id() << " name=" << vault.name()
+                                 << " ret=" << ret
+                                 << " oss_vault=" << encryt_sk(obj_info.ShortDebugString());
+                    continue;
+                }
+                LOG(INFO) << "succeed to init OSS accessor. instance_id=" << instance_id_
+                          << " resource_id=" << vault.id() << " name=" << vault.name()
+                          << " ret=" << ret
+                          << " oss_vault=" << encryt_sk(obj_info.ShortDebugString());
+                accessor_map_.emplace(vault.id(), std::move(accessor));
+                continue;
+            }
+#endif
+            auto s3_conf = S3Conf::from_obj_store_info(obj_info);
             if (!s3_conf) {
                 LOG(WARNING) << "failed to init object accessor, invalid conf, instance_id="
-                             << instance_id_ << " s3_vault=" << vault.obj_info().ShortDebugString();
+                             << instance_id_ << " s3_vault=" << obj_info.ShortDebugString();
                 continue;
             }
 
@@ -730,12 +781,12 @@ int InstanceRecycler::init_storage_vault_accessors() {
                 LOG(WARNING) << "failed to init s3 accessor. instance_id=" << instance_id_
                              << " resource_id=" << vault.id() << " name=" << vault.name()
                              << " ret=" << ret
-                             << " s3_vault=" << encryt_sk(vault.obj_info().ShortDebugString());
+                             << " s3_vault=" << encryt_sk(obj_info.ShortDebugString());
                 continue;
             }
             LOG(INFO) << "succeed to init s3 accessor. instance_id=" << instance_id_
                       << " resource_id=" << vault.id() << " name=" << vault.name() << " ret=" << ret
-                      << " s3_vault=" << encryt_sk(vault.obj_info().ShortDebugString());
+                      << " s3_vault=" << encryt_sk(obj_info.ShortDebugString());
             accessor_map_.emplace(vault.id(), std::move(accessor));
         }
     }

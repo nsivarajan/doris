@@ -89,6 +89,11 @@ add_executable(s3_accessor_client_test s3_accessor_client_test.cpp)
 
 add_executable(s3_accessor_mock_test s3_accessor_mock_test.cpp)
 
+if(BUILD_OSS STREQUAL "ON")
+    add_executable(oss_accessor_test oss_accessor_test.cpp)
+    target_link_libraries(oss_accessor_test ${TEST_LINK_LIBS})
+endif()
+
 option(ENABLE_HDFS_STORAGE_VAULT "Enable HDFS storage support" ON)
 if (ENABLE_HDFS_STORAGE_VAULT)
     add_compile_definitions(ENABLE_HDFS_STORAGE_VAULT)
