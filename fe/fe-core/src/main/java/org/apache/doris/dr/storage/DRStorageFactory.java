@@ -29,6 +29,13 @@ public class DRStorageFactory {
     private DRStorageFactory() {}
 
     public static DRStorageBackend create(DRConfig config, DRCredentialProvider creds) {
+        // M6 fix: validate required fields before creating backend
+        if (config.relayBucket == null || config.relayBucket.isEmpty()) {
+            throw new IllegalArgumentException("dr.relay.bucket must be set");
+        }
+        if (config.relayEndpoint == null || config.relayEndpoint.isEmpty()) {
+            throw new IllegalArgumentException("dr.relay.endpoint must be set");
+        }
         switch (config.storageType) {
             case OSS:
                 return new OSSStorageBackend(

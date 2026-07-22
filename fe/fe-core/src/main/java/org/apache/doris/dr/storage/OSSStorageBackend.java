@@ -25,31 +25,54 @@ import com.aliyun.oss.OSSClientBuilder;
 import com.aliyun.oss.OSSException;
 import com.aliyun.oss.common.auth.DefaultCredentialProvider;
 import com.aliyun.oss.model.ListObjectsRequest;
+import com.aliyun.oss.model.OSSObject;
 import com.aliyun.oss.model.OSSObjectSummary;
 import com.aliyun.oss.model.ObjectListing;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 
 import java.io.ByteArrayInputStream;
+import java.io.ByteArrayOutputStream;
+import java.io.IOException;
+import java.io.InputStream;
 import java.util.ArrayList;
 import java.util.List;
 
 /**
  * Alibaba Cloud OSS implementation of DRStorageBackend.
- * Builds a fresh OSSClient per operation so STS-rotated credentials are always current.
- * Retries transient errors (throttle, server-side transients) up to MAX_RETRIES times.
+ *
+ * H5 fix: OSS client is cached and rebuilt only when STS token changes,
+ * avoiding per-operation connection pool creation and file descriptor leak.
+ *
+ * H6 fix: list() paginates using isTruncated + nextMarker so it returns
+ * all segment keys beyond the 1000-object per-request limit.
+ *
+ * H7 fix: ClientException (auth failure, invalid config) is not retried —
+ * only transient server-side errors are retried.
+ *
+ * M5 fix: OSSObject content stream is closed in try-with-resources.
  */
 public class OSSStorageBackend implements DRStorageBackend {
 
     private static final Logger LOG = LogManager.getLogger(OSSStorageBackend.class);
     private static final int MAX_RETRIES = 3;
+    // backoff base in ms — doubles on each retry with jitter (M8 fix)
+    private static final long BACKOFF_BASE_MS = 200;
 
     private final String bucket;
     private final String endpoint;
     private final DRCredentialProvider credentialProvider;
 
+    // cached client — rebuilt when credentials change (H5 fix)
+    private volatile OSS cachedClient;
+    private volatile String cachedTokenHash;
+
     public OSSStorageBackend(String bucket, String endpoint,
             DRCredentialProvider credentialProvider) {
+        if (bucket == null || bucket.isEmpty() || endpoint == null || endpoint.isEmpty()) {
+            throw new IllegalArgumentException(
+                    "DR relay bucket and endpoint must be non-empty");
+        }
         this.bucket = bucket;
         this.endpoint = endpoint;
         this.credentialProvider = credentialProvider;
@@ -68,31 +91,51 @@ public class OSSStorageBackend implements DRStorageBackend {
     public byte[] get(String key) throws DRStorageException {
         return withRetryResult("get", key, () -> {
             try {
-                com.aliyun.oss.model.OSSObject obj = buildClient().getObject(bucket, key);
-                byte[] result = obj.getObjectContent().readAllBytes();
-                obj.getObjectContent().close();
-                LOG.debug("[DR:OSS] get key={} bytes={}", key, result.length);
-                return result;
+                OSSObject obj = buildClient().getObject(bucket, key);
+                // M5 fix: close stream in try-with-resources
+                try (InputStream in = obj.getObjectContent()) {
+                    ByteArrayOutputStream baos = new ByteArrayOutputStream();
+                    byte[] buf = new byte[8192];
+                    int n;
+                    while ((n = in.read(buf)) != -1) {
+                        baos.write(buf, 0, n);
+                    }
+                    byte[] result = baos.toByteArray();
+                    LOG.debug("[DR:OSS] get key={} bytes={}", key, result.length);
+                    return result;
+                }
             } catch (OSSException e) {
                 if ("NoSuchKey".equals(e.getErrorCode())) {
                     return null;
                 }
                 throw e;
+            } catch (IOException e) {
+                throw new DRStorageException("OSS get stream read failed key=" + key, e);
             }
         });
     }
 
+    /**
+     * H6 fix: paginates using isTruncated + nextMarker to handle > 1000 objects.
+     */
     @Override
     public List<String> list(String prefix) throws DRStorageException {
         return withRetryResult("list", prefix, () -> {
-            ListObjectsRequest req = new ListObjectsRequest(bucket)
-                    .withPrefix(prefix)
-                    .withMaxKeys(1000);
-            ObjectListing listing = buildClient().listObjects(req);
             List<String> keys = new ArrayList<>();
-            for (OSSObjectSummary s : listing.getObjectSummaries()) {
-                keys.add(s.getKey());
-            }
+            String marker = null;
+            do {
+                ListObjectsRequest req = new ListObjectsRequest(bucket)
+                        .withPrefix(prefix)
+                        .withMaxKeys(1000);
+                if (marker != null) {
+                    req.setMarker(marker);
+                }
+                ObjectListing listing = buildClient().listObjects(req);
+                for (OSSObjectSummary s : listing.getObjectSummaries()) {
+                    keys.add(s.getKey());
+                }
+                marker = listing.isTruncated() ? listing.getNextMarker() : null;
+            } while (marker != null);
             LOG.debug("[DR:OSS] list prefix={} count={}", prefix, keys.size());
             return keys;
         });
@@ -112,23 +155,23 @@ public class OSSStorageBackend implements DRStorageBackend {
         });
     }
 
-    // ── client builder ────────────────────────────────────────────────────
+    // ── client builder (H5 fix: cache client, rebuild on credential rotation) ──
 
-    /** Builds a fresh OSSClient with current credentials (picks up STS token rotation). */
     private OSS buildClient() throws DRStorageException {
         DRCredentials creds = credentialProvider.getCredentials();
-        DefaultCredentialProvider ossCredProvider;
-        if (creds.hasStsToken()) {
-            ossCredProvider = new DefaultCredentialProvider(
-                    creds.accessKey, creds.secretKey, creds.securityToken);
-        } else {
-            ossCredProvider = new DefaultCredentialProvider(
-                    creds.accessKey, creds.secretKey);
+        String tokenHash = creds.hasStsToken() ? creds.securityToken : "static";
+        if (cachedClient == null || !tokenHash.equals(cachedTokenHash)) {
+            DefaultCredentialProvider ossCredProvider = creds.hasStsToken()
+                    ? new DefaultCredentialProvider(
+                            creds.accessKey, creds.secretKey, creds.securityToken)
+                    : new DefaultCredentialProvider(creds.accessKey, creds.secretKey);
+            cachedClient = new OSSClientBuilder().build(endpoint, ossCredProvider, null);
+            cachedTokenHash = tokenHash;
         }
-        return new OSSClientBuilder().build(endpoint, ossCredProvider, null);
+        return cachedClient;
     }
 
-    // ── retry helpers ─────────────────────────────────────────────────────
+    // ── retry helpers (H7: auth errors are not retried; M8: backoff) ──────
 
     private void withRetry(String op, String key, OSSOperation action)
             throws DRStorageException {
@@ -138,21 +181,25 @@ public class OSSStorageBackend implements DRStorageBackend {
                 action.execute();
                 return;
             } catch (OSSException e) {
+                if (isAuthError(e)) {
+                    // H7: auth/config errors — fail fast, do not retry
+                    throw new DRStorageException(
+                            "OSS " + op + " auth error key=" + key
+                            + " code=" + e.getErrorCode(), e);
+                }
                 if (isTransient(e)) {
                     last = e;
-                    LOG.warn("[DR:OSS] {} transient attempt {}/{} key={}: {}",
-                            op, i, MAX_RETRIES, key, e.getMessage());
+                    sleepBackoff(i);
                 } else {
                     throw new DRStorageException(
                             "OSS " + op + " failed key=" + key
-                            + " errorCode=" + e.getErrorCode(), e);
+                            + " code=" + e.getErrorCode(), e);
                 }
             } catch (DRStorageException e) {
                 throw e;
             } catch (Exception e) {
                 last = e;
-                LOG.warn("[DR:OSS] {} attempt {}/{} error key={}: {}",
-                        op, i, MAX_RETRIES, key, e.getMessage());
+                sleepBackoff(i);
             }
         }
         throw new DRStorageException(
@@ -166,25 +213,37 @@ public class OSSStorageBackend implements DRStorageBackend {
             try {
                 return action.execute();
             } catch (OSSException e) {
+                if (isAuthError(e)) {
+                    throw new DRStorageException(
+                            "OSS " + op + " auth error key=" + key
+                            + " code=" + e.getErrorCode(), e);
+                }
                 if (isTransient(e)) {
                     last = e;
-                    LOG.warn("[DR:OSS] {} transient attempt {}/{} key={}: {}",
-                            op, i, MAX_RETRIES, key, e.getMessage());
+                    sleepBackoff(i);
                 } else {
                     throw new DRStorageException(
                             "OSS " + op + " failed key=" + key
-                            + " errorCode=" + e.getErrorCode(), e);
+                            + " code=" + e.getErrorCode(), e);
                 }
             } catch (DRStorageException e) {
                 throw e;
             } catch (Exception e) {
                 last = e;
-                LOG.warn("[DR:OSS] {} attempt {}/{} error key={}: {}",
-                        op, i, MAX_RETRIES, key, e.getMessage());
+                sleepBackoff(i);
             }
         }
         throw new DRStorageException(
                 "OSS " + op + " failed after " + MAX_RETRIES + " retries key=" + key, last);
+    }
+
+    // H7: auth errors — fail immediately, retrying makes no sense
+    private boolean isAuthError(OSSException e) {
+        String code = e.getErrorCode();
+        return "AccessDenied".equals(code)
+                || "InvalidAccessKeyId".equals(code)
+                || "SignatureDoesNotMatch".equals(code)
+                || "SecurityTokenExpired".equals(code);
     }
 
     private boolean isTransient(OSSException e) {
@@ -195,9 +254,17 @@ public class OSSStorageBackend implements DRStorageBackend {
                 || "InternalError".equals(code);
     }
 
-    @FunctionalInterface
-    interface OSSOperation { void execute() throws Exception; }
+    // M8: exponential backoff with jitter
+    private void sleepBackoff(int attempt) {
+        long delay = BACKOFF_BASE_MS * (1L << (attempt - 1));
+        delay = delay + (long) (Math.random() * delay);
+        try {
+            Thread.sleep(Math.min(delay, 8000));
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+        }
+    }
 
-    @FunctionalInterface
-    interface OSSResultOperation<T> { T execute() throws Exception; }
+    @FunctionalInterface interface OSSOperation { void execute() throws Exception; }
+    @FunctionalInterface interface OSSResultOperation<T> { T execute() throws Exception; }
 }

@@ -661,8 +661,6 @@ public class StmtExecutor {
             }
         }
         if (logicalPlan instanceof Command) {
-            // DR write guard: reject DML/DDL on STANDBY clusters
-            DRManager.checkWrite(logicalPlan, context);
             if (logicalPlan instanceof Redirect) {
                 OlapGroupCommitInsertExecutor.analyzeGroupCommit(context, logicalPlan);
                 redirectStatus = ((Redirect) logicalPlan).toRedirectStatus();
@@ -689,6 +687,10 @@ public class StmtExecutor {
                     return;
                 }
             }
+
+            // DR write guard: placed after redirect resolution so forwarded writes
+            // on STANDBY followers are not incorrectly rejected before forwarding.
+            DRManager.checkWrite(logicalPlan, context);
 
             // Query following createting table would throw table not exist error.
             // For example.

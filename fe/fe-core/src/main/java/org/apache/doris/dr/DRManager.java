@@ -33,29 +33,28 @@ import java.util.concurrent.atomic.AtomicReference;
 /**
  * Central coordinator for the DR feature.
  *
- * Lifecycle:
- *   1. DorisFE.java calls onStartup() after FE is ready.
- *   2. Env.java calls register(env) once the catalog is initialized.
- *   3. If dr.enabled=false, the instance stays in INACTIVE state and
- *      all methods are no-ops — zero overhead for non-DR clusters.
- *
- * Thread safety: state transitions are serialized via synchronized methods.
- * The exporter and consumer threads are started/stopped here.
+ * Lifecycle (H1 fix — env is wired before applyState):
+ *   1. DorisFE.java calls onStartup() after waitForReady().
+ *      onStartup() captures Env.getCurrentEnv() directly — EditLog is ready
+ *      at that point because waitForReady() guarantees it.
+ *   2. Env.java calls register(env) — kept for safety but threads already
+ *      started in onStartup() with the captured env reference.
+ *   3. If dr.enabled=false the instance stays INACTIVE — zero overhead.
  */
 public class DRManager {
 
     private static final Logger LOG = LogManager.getLogger(DRManager.class);
 
-    // singleton — initialized once at startup, never replaced
     private static volatile DRManager instance;
 
     private final DRConfig config;
     private final AtomicReference<DRState> state;
 
-    private Env env;                        // wired by register()
-    private DRStorageBackend storage;       // relay OSS/S3 backend
-    private DRExporter exporter;            // runs on ACTIVE FE
-    private DRConsumer consumer;            // runs on STANDBY FE
+    // volatile so register() and getStatus() see the latest value (M1 fix)
+    private volatile Env env;
+    private DRStorageBackend storage;
+    private DRExporter exporter;
+    private DRConsumer consumer;
 
     private DRManager(DRConfig config) {
         this.config = config;
@@ -63,19 +62,15 @@ public class DRManager {
                 config.enabled ? config.initialMode : DRState.INACTIVE);
     }
 
-    // ── singleton ─────────────────────────────────────────────────────────
-
-    /** Returns the singleton instance. Always non-null after onStartup(). */
     public static DRManager get() {
         return instance;
     }
 
-    // ── startup hooks (called from upstream files) ────────────────────────
+    // ── startup hooks ─────────────────────────────────────────────────────
 
     /**
-     * Called from DorisFE.java after Env.getCurrentEnv().waitForReady().
-     * Initializes the singleton, creates the storage backend, and starts
-     * the appropriate thread based on dr.mode.
+     * Called from DorisFE.java after waitForReady().
+     * H1 fix: wire Env immediately before applyState() so threads can start.
      */
     public static void onStartup() {
         DRConfig cfg = DRConfig.load();
@@ -92,20 +87,18 @@ public class DRManager {
         DRCredentialProvider creds = buildCredentialProvider(cfg);
         instance.storage = DRStorageFactory.create(cfg, creds);
 
-        // start the correct thread based on configured mode
+        // wire Env before starting threads — EditLog is ready after waitForReady()
+        instance.env = Env.getCurrentEnv();
+
         instance.applyState(cfg.initialMode);
     }
 
-    /**
-     * Called from Env.java at the end of initialize().
-     * Wires the Env reference so the exporter/consumer can access the EditLog.
-     */
+    /** Called from Env.java — secondary registration for post-init state changes. */
     public static void register(Env env) {
         if (instance == null || !instance.config.enabled) {
             return;
         }
         instance.env = env;
-        LOG.debug("[DR] Env registered");
     }
 
     // ── state management ──────────────────────────────────────────────────
@@ -114,27 +107,23 @@ public class DRManager {
         return state.get();
     }
 
-    /**
-     * Transitions to the new state, stopping/starting threads as needed.
-     * Called by DrAction HTTP handlers (promote, demote, drill).
-     */
     public synchronized void setState(DRState newState) {
         DRState current = state.get();
         if (current == newState) {
             return;
         }
-        LOG.info("[DR] state transition {} → {}", current, newState);
-
+        LOG.info("[DR] state {} → {}", current, newState);
         stopThreads();
         state.set(newState);
         applyState(newState);
     }
 
-    // ── write guard (called from StmtExecutor) ────────────────────────────
+    // ── write guard (called from StmtExecutor AFTER redirect check) ───────
 
     /**
-     * Throws UserException if this cluster is not allowed to accept writes.
-     * Called once per statement execution — must be fast.
+     * H2/H3 fix: guard is intentionally allow-on-null (before onStartup).
+     * Must be called AFTER redirect resolution in StmtExecutor so forwarded
+     * writes are not rejected on STANDBY followers.
      */
     public static void checkWrite(
             org.apache.doris.nereids.trees.plans.logical.LogicalPlan plan,
@@ -151,7 +140,7 @@ public class DRManager {
                 + "Connect to the primary cluster for write operations.");
     }
 
-    // ── status (called by DrAction HTTP handler) ──────────────────────────
+    // ── status ────────────────────────────────────────────────────────────
 
     public DRStatus getStatus() {
         DRStatus s = new DRStatus();
@@ -160,14 +149,17 @@ public class DRManager {
         s.state = state.get().name();
         s.drillMode = (state.get() == DRState.DRILL);
 
-        if (exporter != null) {
-            s.lastExportedJournalId = exporter.getLastExportedJournalId();
-            s.primaryLeaseFreshMs = exporter.getLeaseFreshMs();
+        // M1 fix: capture local references to avoid null race with stopThreads()
+        DRExporter exp = exporter;
+        DRConsumer con = consumer;
+        if (exp != null) {
+            s.lastExportedJournalId = exp.getLastExportedJournalId();
+            s.primaryLeaseFreshMs = exp.getLeaseFreshMs();
         }
-        if (consumer != null) {
-            s.lagMs = consumer.getLagMs();
-            s.lagEntries = consumer.getLagEntries();
-            s.lastAppliedJournalId = consumer.getLastAppliedJournalId();
+        if (con != null) {
+            s.lagMs = con.getLagMs();
+            s.lagEntries = con.getLagEntries();
+            s.lastAppliedJournalId = con.getLastAppliedJournalId();
         }
         return s;
     }
@@ -175,16 +167,16 @@ public class DRManager {
     // ── private helpers ───────────────────────────────────────────────────
 
     private synchronized void applyState(DRState newState) {
-        if (newState.shouldExport() && env != null) {
-            exporter = new DRExporter(env.getEditLog(), storage, config);
+        Env localEnv = this.env;
+        if (newState.shouldExport() && localEnv != null) {
+            exporter = new DRExporter(localEnv.getEditLog(), storage, config);
             Thread t = new Thread(exporter, "dr-exporter");
             t.setDaemon(true);
             t.start();
             LOG.info("[DR] exporter thread started");
         }
-
-        if (newState.shouldConsume() && env != null) {
-            consumer = new DRConsumer(env, storage, config);
+        if (newState.shouldConsume() && localEnv != null) {
+            consumer = new DRConsumer(localEnv, storage, config);
             Thread t = new Thread(consumer, "dr-consumer");
             t.setDaemon(true);
             t.start();
@@ -210,25 +202,14 @@ public class DRManager {
             case INSTANCE_PROFILE:
                 return new InstanceProfileCredentialProvider();
             case ASSUME_ROLE:
-                return new AssumeRoleCredentialProvider(
-                        cfg.roleArn, cfg.roleSessionName);
+                return new AssumeRoleCredentialProvider(cfg.roleArn, cfg.roleSessionName);
             default:
                 throw new IllegalArgumentException(
                         "Unknown credential type: " + cfg.credentialType);
         }
     }
 
-    // ── accessors for DR tool HTTP API ────────────────────────────────────
-
-    public DRConfig getConfig() {
-        return config;
-    }
-
-    public DRExporter getExporter() {
-        return exporter;
-    }
-
-    public DRConsumer getConsumer() {
-        return consumer;
-    }
+    public DRConfig getConfig() { return config; }
+    public DRExporter getExporter() { return exporter; }
+    public DRConsumer getConsumer() { return consumer; }
 }

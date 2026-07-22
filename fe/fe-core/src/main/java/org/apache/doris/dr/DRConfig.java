@@ -127,12 +127,12 @@ public class DRConfig {
                 .initialMode(parseMode(Config.dr_mode))
                 .groupId(Config.dr_group_id)
                 .siteName(Config.dr_site_name)
-                .storageType(StorageType.valueOf(Config.dr_relay_type.toUpperCase()))
+                .storageType(StorageType.valueOf(Config.dr_relay_type.trim().toUpperCase()))
                 .relayEndpoint(Config.dr_relay_endpoint)
                 .relayBucket(Config.dr_relay_bucket)
                 .relayPrefix(Config.dr_relay_prefix)
                 .credentialType(CredentialType.valueOf(
-                        Config.dr_relay_credential_type.toUpperCase()))
+                        Config.dr_relay_credential_type.trim().toUpperCase()))
                 .accessKey(Config.dr_relay_access_key)
                 .secretKey(Config.dr_relay_secret_key)
                 .roleArn(Config.dr_relay_role_arn)
@@ -151,19 +151,22 @@ public class DRConfig {
     }
 
     private static DRState parseMode(String mode) {
-        switch (mode.toUpperCase()) {
+        // H11 fix: trim() before toUpperCase() so trailing whitespace in fe.conf doesn't crash FE
+        switch (mode.trim().toUpperCase()) {
             case "ACTIVE":  return DRState.ACTIVE;
             case "STANDBY": return DRState.STANDBY;
             default:
                 throw new IllegalArgumentException(
-                        "dr.mode must be ACTIVE or STANDBY, got: " + mode);
+                        "dr.mode must be ACTIVE or STANDBY, got: '" + mode + "'");
         }
     }
 
     /**
-     * Parse vault mappings from a comma-separated config string.
-     * Format: vaultName:primaryEndpoint:primaryBucket:drEndpoint:drBucket,...
-     * Example: default_vault:oss-cn-hz.aliyuncs.com:prod-bucket:oss-cn-bj.aliyuncs.com:dr-bucket
+     * M4 fix: use pipe '|' as the inner delimiter between name, endpoints, and buckets
+     * so that endpoint URLs containing ':' (e.g. https://host:port) are parsed correctly.
+     *
+     * Format: vaultName|primaryEndpoint|primaryBucket|drEndpoint|drBucket,...
+     * Example: default_vault|oss-cn-hz.aliyuncs.com|prod-bucket|oss-cn-bj.aliyuncs.com|dr-bucket
      */
     private static List<VaultMapping> parseVaultMappings(String raw) {
         List<VaultMapping> result = new ArrayList<>();
@@ -171,11 +174,11 @@ public class DRConfig {
             return result;
         }
         for (String entry : raw.split(",")) {
-            String[] parts = entry.trim().split(":");
+            String[] parts = entry.trim().split("\\|", 5);
             if (parts.length != 5) {
                 throw new IllegalArgumentException(
-                        "Invalid dr.vault_mappings entry (expected 5 colon-separated fields): "
-                                + entry);
+                        "Invalid dr.vault_mappings entry (expected 5 pipe-separated fields): '"
+                                + entry + "'. Format: name|primaryEndpoint|primaryBucket|drEndpoint|drBucket");
             }
             result.add(new VaultMapping(
                     parts[0].trim(), parts[1].trim(), parts[2].trim(),

@@ -100,11 +100,13 @@ public class DRCheckpoint {
 
     // ── persistence ───────────────────────────────────────────────────────
 
-    /** Write this checkpoint to relay storage (latest + timestamped history copy). */
+    /** Write this checkpoint to relay storage.
+     * M9 fix: history key written first — if latest write fails, history still exists. */
     public void write(DRStorageBackend storage) throws DRStorageException {
         byte[] bytes = GSON.toJson(this).getBytes(StandardCharsets.UTF_8);
-        storage.put(latestKey(groupId), bytes);
+        // write history first so a latest-write failure leaves an auditable record
         storage.put(historyKey(groupId, sampledAtMs), bytes);
+        storage.put(latestKey(groupId), bytes);
         LOG.debug("[DR] checkpoint written fe_journal_id={} fdb_vs={}",
                 feJournalId, fdbVersionstamp);
     }

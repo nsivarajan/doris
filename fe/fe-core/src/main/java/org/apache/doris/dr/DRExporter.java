@@ -259,7 +259,7 @@ public class DRExporter implements Runnable {
 
     // ── cursor recovery ───────────────────────────────────────────────────
 
-    /** On startup, read the CURSOR file to resume from the last confirmed journal_id. */
+    /** H8 fix: throw on storage exception so cursor is not silently reset to 0. */
     private void recoverCursor() {
         try {
             byte[] cursorBytes = storage.get(DRCheckpoint.cursorKey(config.groupId));
@@ -271,8 +271,10 @@ public class DRExporter implements Runnable {
                         lastExportedJournalId);
             }
         } catch (Exception e) {
-            LOG.warn("[DR:Exporter] could not recover cursor, starting from 0: {}",
-                    e.getMessage());
+            // Storage error at startup is fatal — do not silently re-export from 0.
+            throw new RuntimeException(
+                    "[DR:Exporter] failed to recover cursor from relay storage. "
+                    + "Cannot start exporter safely: " + e.getMessage(), e);
         }
     }
 

@@ -247,10 +247,13 @@ cmd_failback() {
     read -r -p "[dr-tool] Is ${DR_PRIMARY_FE_HOST} running in STANDBY mode and caught up? [yes/no]: " confirm
     [[ "${confirm}" == "yes" ]] || die "Failback cancelled. Start the original primary in STANDBY mode first."
 
-    # swap hosts and run switchover
-    local tmp="${DR_PRIMARY_FE_HOST}"
+    # swap ALL hosts (FE + FDB) for the reverse switchover (H9 fix)
+    local tmp_fe="${DR_PRIMARY_FE_HOST}"
+    local tmp_fdb="${DR_FDB_HOST}"
     DR_PRIMARY_FE_HOST="${DR_STANDBY_FE_HOST}"
-    DR_STANDBY_FE_HOST="${tmp}"
+    DR_STANDBY_FE_HOST="${tmp_fe}"
+    DR_FDB_HOST="${DR_FDB_DR_HOST}"
+    DR_FDB_DR_HOST="${tmp_fdb}"
     cmd_switchover
 }
 
