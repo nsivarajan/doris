@@ -1214,6 +1214,8 @@ public class Env {
         queryCancelWorker.start();
 
         StmtExecutor.initBlockSqlAstNames();
+        // DR: register Env with DRManager so exporter/consumer can access the EditLog
+        org.apache.doris.dr.DRManager.register(this);
     }
 
     // wait until FE is ready.

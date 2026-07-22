@@ -226,6 +226,8 @@ public class DorisFE {
             // init catalog and wait it be ready
             Env.getCurrentEnv().initialize(args);
             Env.getCurrentEnv().waitForReady();
+            // DR: initialize DRManager after FE is ready (starts exporter or consumer thread)
+            org.apache.doris.dr.DRManager.onStartup();
 
             if (Config.enable_file_cache_admission_control) {
                 FileCacheAdmissionManager.getInstance().loadOnStartup();

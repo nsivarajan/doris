@@ -60,6 +60,7 @@ import org.apache.doris.common.util.DebugUtil;
 import org.apache.doris.common.util.NetUtils;
 import org.apache.doris.common.util.TimeUtils;
 import org.apache.doris.common.util.Util;
+import org.apache.doris.dr.DRManager;
 import org.apache.doris.datasource.FileScanNode;
 import org.apache.doris.datasource.tvf.source.TVFScanNode;
 import org.apache.doris.foundation.format.FormatOptions;
@@ -660,6 +661,8 @@ public class StmtExecutor {
             }
         }
         if (logicalPlan instanceof Command) {
+            // DR write guard: reject DML/DDL on STANDBY clusters
+            DRManager.checkWrite(logicalPlan, context);
             if (logicalPlan instanceof Redirect) {
                 OlapGroupCommitInsertExecutor.analyzeGroupCommit(context, logicalPlan);
                 redirectStatus = ((Redirect) logicalPlan).toRedirectStatus();
