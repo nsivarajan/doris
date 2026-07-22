@@ -209,7 +209,15 @@ public class DRManager {
         }
     }
 
-    public DRConfig getConfig() { return config; }
-    public DRExporter getExporter() { return exporter; }
-    public DRConsumer getConsumer() { return consumer; }
+    public DRConfig getConfig() {
+        return config;
+    }
+
+    public DRExporter getExporter() {
+        return exporter;
+    }
+
+    public DRConsumer getConsumer() {
+        return consumer;
+    }
 }

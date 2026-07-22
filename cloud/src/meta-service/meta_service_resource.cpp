@@ -66,7 +66,7 @@ static const std::unordered_map<std::string,
     static std::once_flag init_flag;
     static std::unordered_map<std::string, std::pair<std::string, std::string>> overrides;
     std::call_once(init_flag, []() {
-        const std::string& raw = config::replication_vault_overrides;
+        const std::string& raw = doris::cloud::config::replication_vault_overrides;
         if (raw.empty()) return;
         // split by comma, then each token by first two colons
         std::stringstream ss(raw);
@@ -92,7 +92,7 @@ static const std::unordered_map<std::string,
 
 // Applies secondary vault endpoint/bucket when this MS is the standby site.
 // Called from get_obj_store_info() for each vault in the response.
-static void apply_replication_vault_override(StorageVaultPB& vault) {
+static void apply_replication_vault_override(doris::cloud::StorageVaultPB& vault) {
     const auto& overrides = get_vault_override_map();
     auto it = overrides.find(vault.name());
     if (it == overrides.end()) {
@@ -112,8 +112,8 @@ static void apply_replication_vault_override(StorageVaultPB& vault) {
         auto* obj = vault.mutable_obj_info();
         obj->set_endpoint(it->second.first);
         obj->set_bucket(it->second.second);
-        LOG(DEBUG) << "[Replication] vault '" << vault.name()
-                   << "' remapped to secondary bucket=" << it->second.second;
+        VLOG(1) << "[Replication] vault '" << vault.name()
+                << "' remapped to secondary bucket=" << it->second.second;
     }
 }
 

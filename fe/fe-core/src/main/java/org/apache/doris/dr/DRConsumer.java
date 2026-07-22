@@ -18,10 +18,9 @@
 package org.apache.doris.dr;
 
 import org.apache.doris.catalog.Env;
-import org.apache.doris.common.Pair;
 import org.apache.doris.dr.storage.DRStorageBackend;
-import org.apache.doris.journal.EditLog;
 import org.apache.doris.journal.JournalEntity;
+import org.apache.doris.persist.EditLog;
 
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
@@ -93,9 +92,17 @@ public class DRConsumer implements Runnable {
         running = false;
     }
 
-    public long getLagMs() { return lagMs; }
-    public long getLagEntries() { return lagEntries; }
-    public long getLastAppliedJournalId() { return lastAppliedJournalId; }
+    public long getLagMs() {
+        return lagMs;
+    }
+
+    public long getLagEntries() {
+        return lagEntries;
+    }
+
+    public long getLastAppliedJournalId() {
+        return lastAppliedJournalId;
+    }
 
     /**
      * Blocks until all segments up to targetJournalId are applied.

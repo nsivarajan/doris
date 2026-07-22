@@ -4063,12 +4063,16 @@ public class Config extends ConfigBase {
     @ConfField(mutable = true, description = {"Alert if BDBJE replication lag exceeds this threshold (ms)."})
     public static int dr_lag_alert_ms = 300000;
 
-    @ConfField(description = {"Path to fdb.cluster file for DRFDBBackup CLI calls."})
-    public static String dr_fdb_cluster_file = "/etc/foundationdb/fdb.cluster";
+    @ConfField(description = {
+            "Absolute path to the FDB cluster file used by DRFdbBackup CLI calls.",
+            "Must be set explicitly when dr.enabled=true. "
+                    + "Example: /etc/foundationdb/fdb.cluster"
+    })
+    public static String dr_fdb_cluster_file = "";
 
     @ConfField(description = {
-            "Comma-separated vault mappings: vaultName:primaryEndpoint:primaryBucket:drEndpoint:drBucket,...",
-            "Example: default_vault:oss-cn-hz-internal.aliyuncs.com:prod-bucket:oss-cn-bj-internal.aliyuncs.com:dr-bucket"
+            "Comma-separated vault mappings for DR site bucket remapping.",
+            "Format: vaultName|primaryEndpoint|primaryBucket|drEndpoint|drBucket"
     })
     public static String dr_vault_mappings = "";
 }

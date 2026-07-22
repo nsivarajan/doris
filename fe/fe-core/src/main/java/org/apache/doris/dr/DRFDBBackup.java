@@ -23,8 +23,6 @@ import org.apache.logging.log4j.Logger;
 import java.io.BufferedReader;
 import java.io.IOException;
 import java.io.InputStreamReader;
-import java.util.ArrayList;
-import java.util.List;
 import java.util.concurrent.TimeUnit;
 
 /**
@@ -32,17 +30,14 @@ import java.util.concurrent.TimeUnit;
  *
  * FDB is not a managed service here — we drive it via subprocess calls.
  * All methods are synchronous and block until the CLI exits, except
- * waitForComplete() which polls the status until completion or timeout.
+ * waitForRestoreComplete() which polls until completion or timeout.
  *
  * The destUrl follows the fdbbackup blobstore URL format:
- *   blobstore://<endpoint>/<path>?bucket=<bucket>&region=<region>
- *
- * Example:
- *   blobstore://oss-cn-hangzhou.aliyuncs.com/dr-group/fdb-backup?bucket=doris-dr-relay
+ *   blobstore://endpoint/path?bucket=bucket
  */
-public class DRFDBBackup {
+public class DrFdbBackup {
 
-    private static final Logger LOG = LogManager.getLogger(DRFDBBackup.class);
+    private static final Logger LOG = LogManager.getLogger(DrFdbBackup.class);
 
     private static final int PROC_TIMEOUT_SECONDS = 120;
     private static final int RESTORE_POLL_INTERVAL_MS = 5000;
@@ -50,7 +45,7 @@ public class DRFDBBackup {
     private final String clusterFile;   // path to fdb.cluster
     private final String destUrl;       // blobstore URL for the backup destination
 
-    public DRFDBBackup(String clusterFile, String destUrl) {
+    public DrFdbBackup(String clusterFile, String destUrl) {
         this.clusterFile = clusterFile;
         this.destUrl = destUrl;
     }

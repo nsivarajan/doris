@@ -17,6 +17,7 @@
 
 package org.apache.doris.httpv2.rest;
 
+import org.apache.doris.dr.DRConsumer;
 import org.apache.doris.dr.DRManager;
 import org.apache.doris.dr.DRState;
 import org.apache.doris.dr.DRStatus;
@@ -224,15 +225,9 @@ public class DrAction extends RestBaseController {
             if (consumer == null || mgr.getConfig() == null) {
                 return null;
             }
-            // Read the lease key via the consumer's storage — re-use the relay backend
-            // by going through the manager's internal state indirectly via HTTP status.
-            // Full lease read requires access to DRStorageBackend; for now surface the
-            // last-known lease age from DRStatus and block if it is fresh.
-            DRStatus status = mgr.getStatus();
-            // primaryLeaseFreshMs is set by the exporter on the active side.
-            // On the standby side it is 0 (exporter not running), so we rely on
-            // dr-tool.sh to have already verified primary is unreachable before
-            // calling this endpoint. Document this explicitly.
+            // Split-brain prevention is the responsibility of dr-tool.sh which
+            // verifies primary is unreachable (HTTP health check + lease age)
+            // before calling this endpoint. Document this contract explicitly.
             LOG.info("[DR] promote requested — dr-tool.sh must verify primary "
                     + "is unreachable before calling this endpoint");
             return null;

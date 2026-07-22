@@ -41,7 +41,8 @@ DR_FE_USER="${DR_FE_USER:-admin}"
 DR_FE_PASSWORD="${DR_FE_PASSWORD:-}"
 DR_FDB_HOST="${DR_FDB_HOST:-}"
 DR_FDB_DR_HOST="${DR_FDB_DR_HOST:-}"
-DR_FDB_CLUSTER_FILE="${DR_FDB_CLUSTER_FILE:-/etc/foundationdb/fdb.cluster}"
+# No default — must be set explicitly in dr-tool.conf (path is deployment-specific)
+DR_FDB_CLUSTER_FILE="${DR_FDB_CLUSTER_FILE:-}"
 
 # ── helpers ───────────────────────────────────────────────────────────────
 
@@ -126,7 +127,8 @@ cmd_status() {
 }
 
 cmd_switchover() {
-    require_vars DR_PRIMARY_FE_HOST DR_STANDBY_FE_HOST DR_FDB_HOST DR_FDB_DR_HOST
+    require_vars DR_PRIMARY_FE_HOST DR_STANDBY_FE_HOST DR_FDB_HOST DR_FDB_DR_HOST \
+                DR_FDB_CLUSTER_FILE DR_FDB_DEST_URL
 
     info "=== PLANNED SWITCHOVER ==="
     info "Primary: ${DR_PRIMARY_FE_HOST}  →  DR: ${DR_STANDBY_FE_HOST}"

@@ -20,9 +20,9 @@ package org.apache.doris.dr;
 import org.apache.doris.cloud.persist.CloudMetaSyncPoint;
 import org.apache.doris.common.Pair;
 import org.apache.doris.dr.storage.DRStorageBackend;
-import org.apache.doris.journal.Journal;
 import org.apache.doris.journal.JournalCursor;
 import org.apache.doris.journal.JournalEntity;
+import org.apache.doris.persist.EditLog;
 import org.apache.doris.persist.OperationType;
 
 import com.google.gson.Gson;
@@ -62,7 +62,7 @@ public class DRExporter implements Runnable {
     // lease renewal interval — must be shorter than DRConfig.leaseTtlMs
     private static final long LEASE_RENEWAL_INTERVAL_MS = 30_000;
 
-    private final Journal journal;
+    private final EditLog editLog;
     private final DRStorageBackend storage;
     private final DRConfig config;
 
@@ -75,8 +75,8 @@ public class DRExporter implements Runnable {
     // latest CloudMetaSyncPoint seen — links BDBJE position to FDB versionstamp
     private volatile CloudMetaSyncPoint latestSyncPoint = null;
 
-    public DRExporter(Journal journal, DRStorageBackend storage, DRConfig config) {
-        this.journal = journal;
+    public DRExporter(EditLog editLog, DRStorageBackend storage, DRConfig config) {
+        this.editLog = editLog;
         this.storage = storage;
         this.config = config;
     }
@@ -140,7 +140,7 @@ public class DRExporter implements Runnable {
 
     private List<DRJournalEntry> readBatch() throws Exception {
         List<DRJournalEntry> batch = new ArrayList<>();
-        JournalCursor cursor = journal.read(lastExportedJournalId + 1, Long.MAX_VALUE);
+        JournalCursor cursor = editLog.read(lastExportedJournalId + 1, Long.MAX_VALUE);
         while (batch.size() < config.exportBatchSize) {
             Pair<Long, JournalEntity> entry = cursor.next();
             if (entry == null) {

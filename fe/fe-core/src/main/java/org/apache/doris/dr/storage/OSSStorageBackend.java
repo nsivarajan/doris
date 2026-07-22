@@ -266,5 +266,6 @@ public class OSSStorageBackend implements DRStorageBackend {
     }
 
     @FunctionalInterface interface OSSOperation { void execute() throws Exception; }
+
     @FunctionalInterface interface OSSResultOperation<T> { T execute() throws Exception; }
 }

@@ -147,7 +147,30 @@ public class DRConfig {
                 .fdbClusterFile(Config.dr_fdb_cluster_file)
                 .vaultMappings(parseVaultMappings(Config.dr_vault_mappings));
 
-        return b.build();
+        DRConfig cfg = b.build();
+        cfg.validate();
+        return cfg;
+    }
+
+    /** Validates required fields are present when DR is enabled. */
+    private void validate() {
+        if (Strings.isNullOrEmpty(groupId)) {
+            throw new IllegalArgumentException("dr.group_id must be set when dr.enabled=true");
+        }
+        if (Strings.isNullOrEmpty(siteName)) {
+            throw new IllegalArgumentException("dr.site_name must be set when dr.enabled=true");
+        }
+        if (Strings.isNullOrEmpty(relayEndpoint)) {
+            throw new IllegalArgumentException("dr.relay.endpoint must be set when dr.enabled=true");
+        }
+        if (Strings.isNullOrEmpty(relayBucket)) {
+            throw new IllegalArgumentException("dr.relay.bucket must be set when dr.enabled=true");
+        }
+        if (Strings.isNullOrEmpty(fdbClusterFile)) {
+            throw new IllegalArgumentException(
+                    "dr.fdb.cluster_file must be set when dr.enabled=true. "
+                    + "Example: /etc/foundationdb/fdb.cluster");
+        }
     }
 
     private static DRState parseMode(String mode) {
@@ -217,28 +240,115 @@ public class DRConfig {
         String fdbClusterFile = "/etc/foundationdb/fdb.cluster";
         List<VaultMapping> vaultMappings = new ArrayList<>();
 
-        public Builder enabled(boolean v) { this.enabled = v; return this; }
-        public Builder initialMode(DRState v) { this.initialMode = v; return this; }
-        public Builder groupId(String v) { this.groupId = v; return this; }
-        public Builder siteName(String v) { this.siteName = v; return this; }
-        public Builder storageType(StorageType v) { this.storageType = v; return this; }
-        public Builder relayEndpoint(String v) { this.relayEndpoint = v; return this; }
-        public Builder relayBucket(String v) { this.relayBucket = v; return this; }
-        public Builder relayPrefix(String v) { this.relayPrefix = v; return this; }
-        public Builder credentialType(CredentialType v) { this.credentialType = v; return this; }
-        public Builder accessKey(String v) { this.accessKey = v; return this; }
-        public Builder secretKey(String v) { this.secretKey = v; return this; }
-        public Builder roleArn(String v) { this.roleArn = v; return this; }
-        public Builder roleSessionName(String v) { this.roleSessionName = v; return this; }
-        public Builder exportBatchSize(int v) { this.exportBatchSize = v; return this; }
-        public Builder exportIntervalMs(int v) { this.exportIntervalMs = v; return this; }
-        public Builder checkpointIntervalMs(int v) { this.checkpointIntervalMs = v; return this; }
-        public Builder leaseTtlMs(int v) { this.leaseTtlMs = v; return this; }
-        public Builder crrMaxLagMs(int v) { this.crrMaxLagMs = v; return this; }
-        public Builder consumePollIntervalMs(int v) { this.consumePollIntervalMs = v; return this; }
-        public Builder lagAlertMs(int v) { this.lagAlertMs = v; return this; }
-        public Builder fdbClusterFile(String v) { this.fdbClusterFile = v; return this; }
-        public Builder vaultMappings(List<VaultMapping> v) { this.vaultMappings = v; return this; }
+        public Builder enabled(boolean v) {
+            this.enabled = v;
+            return this;
+        }
+
+        public Builder initialMode(DRState v) {
+            this.initialMode = v;
+            return this;
+        }
+
+        public Builder groupId(String v) {
+            this.groupId = v;
+            return this;
+        }
+
+        public Builder siteName(String v) {
+            this.siteName = v;
+            return this;
+        }
+
+        public Builder storageType(StorageType v) {
+            this.storageType = v;
+            return this;
+        }
+
+        public Builder relayEndpoint(String v) {
+            this.relayEndpoint = v;
+            return this;
+        }
+
+        public Builder relayBucket(String v) {
+            this.relayBucket = v;
+            return this;
+        }
+
+        public Builder relayPrefix(String v) {
+            this.relayPrefix = v;
+            return this;
+        }
+
+        public Builder credentialType(CredentialType v) {
+            this.credentialType = v;
+            return this;
+        }
+
+        public Builder accessKey(String v) {
+            this.accessKey = v;
+            return this;
+        }
+
+        public Builder secretKey(String v) {
+            this.secretKey = v;
+            return this;
+        }
+
+        public Builder roleArn(String v) {
+            this.roleArn = v;
+            return this;
+        }
+
+        public Builder roleSessionName(String v) {
+            this.roleSessionName = v;
+            return this;
+        }
+
+        public Builder exportBatchSize(int v) {
+            this.exportBatchSize = v;
+            return this;
+        }
+
+        public Builder exportIntervalMs(int v) {
+            this.exportIntervalMs = v;
+            return this;
+        }
+
+        public Builder checkpointIntervalMs(int v) {
+            this.checkpointIntervalMs = v;
+            return this;
+        }
+
+        public Builder leaseTtlMs(int v) {
+            this.leaseTtlMs = v;
+            return this;
+        }
+
+        public Builder crrMaxLagMs(int v) {
+            this.crrMaxLagMs = v;
+            return this;
+        }
+
+        public Builder consumePollIntervalMs(int v) {
+            this.consumePollIntervalMs = v;
+            return this;
+        }
+
+        public Builder lagAlertMs(int v) {
+            this.lagAlertMs = v;
+            return this;
+        }
+
+        public Builder fdbClusterFile(String v) {
+            this.fdbClusterFile = v;
+            return this;
+        }
+
+        public Builder vaultMappings(List<VaultMapping> v) {
+            this.vaultMappings = v;
+            return this;
+        }
 
         public DRConfig build() {
             return new DRConfig(this);
