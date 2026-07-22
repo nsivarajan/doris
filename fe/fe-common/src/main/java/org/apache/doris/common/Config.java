@@ -3999,4 +3999,76 @@ public class Config extends ConfigBase {
                     + "by default"
     })
     public static boolean calc_delete_bitmap_get_versions_waiting_for_pending_txns = true;
+
+    // ── Disaster Recovery (DR) ────────────────────────────────────────────
+    // All dr.* properties are internal-only and not part of upstream Doris.
+
+    @ConfField(description = {"Enable DR feature. Default false — zero overhead when disabled."})
+    public static boolean dr_enabled = false;
+
+    @ConfField(description = {"DR cluster role: ACTIVE (primary) or STANDBY (DR replica)."})
+    public static String dr_mode = "STANDBY";
+
+    @ConfField(description = {"DR group identifier — must match on both sites."})
+    public static String dr_group_id = "";
+
+    @ConfField(description = {"Name of this site (e.g. cn-hangzhou, cn-beijing)."})
+    public static String dr_site_name = "";
+
+    @ConfField(description = {"Relay bucket storage type: OSS or S3."})
+    public static String dr_relay_type = "OSS";
+
+    @ConfField(description = {"Relay bucket endpoint (e.g. oss-cn-hangzhou.aliyuncs.com)."})
+    public static String dr_relay_endpoint = "";
+
+    @ConfField(description = {"Relay bucket name."})
+    public static String dr_relay_bucket = "";
+
+    @ConfField(description = {"Key prefix inside the relay bucket."})
+    public static String dr_relay_prefix = "";
+
+    @ConfField(description = {"Credential type for relay bucket: AK_SK, INSTANCE_PROFILE, ASSUME_ROLE."})
+    public static String dr_relay_credential_type = "INSTANCE_PROFILE";
+
+    @ConfField(description = {"AK for relay bucket (dr_relay_credential_type=AK_SK only)."})
+    public static String dr_relay_access_key = "";
+
+    @ConfField(description = {"SK for relay bucket (dr_relay_credential_type=AK_SK only)."})
+    public static String dr_relay_secret_key = "";
+
+    @ConfField(description = {"RAM role ARN for relay bucket (dr_relay_credential_type=ASSUME_ROLE only)."})
+    public static String dr_relay_role_arn = "";
+
+    @ConfField(description = {"Role session name for STS AssumeRole."})
+    public static String dr_relay_role_session_name = "doris-dr";
+
+    @ConfField(description = {"Max journal entries per exported segment file."})
+    public static int dr_export_batch_size = 500;
+
+    @ConfField(description = {"How often to flush a batch to relay OSS (ms)."})
+    public static int dr_export_interval_ms = 5000;
+
+    @ConfField(description = {"How often to write checkpoint.json (ms)."})
+    public static int dr_checkpoint_interval_ms = 30000;
+
+    @ConfField(description = {"primary.lease TTL in ms — DR site refuses to promote if lease is fresher than this."})
+    public static int dr_lease_ttl_ms = 60000;
+
+    @ConfField(description = {"Assumed max OSS CRR lag in ms — used to compute ossSafeBeforeMs in checkpoint."})
+    public static int dr_crr_max_lag_ms = 900000;
+
+    @ConfField(description = {"How often the DR consumer polls relay OSS for new segments (ms)."})
+    public static int dr_consume_poll_interval_ms = 1000;
+
+    @ConfField(mutable = true, description = {"Alert if BDBJE replication lag exceeds this threshold (ms)."})
+    public static int dr_lag_alert_ms = 300000;
+
+    @ConfField(description = {"Path to fdb.cluster file for DRFDBBackup CLI calls."})
+    public static String dr_fdb_cluster_file = "/etc/foundationdb/fdb.cluster";
+
+    @ConfField(description = {
+            "Comma-separated vault mappings: vaultName:primaryEndpoint:primaryBucket:drEndpoint:drBucket,...",
+            "Example: default_vault:oss-cn-hz-internal.aliyuncs.com:prod-bucket:oss-cn-bj-internal.aliyuncs.com:dr-bucket"
+    })
+    public static String dr_vault_mappings = "";
 }
