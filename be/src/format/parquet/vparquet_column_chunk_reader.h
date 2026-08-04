@@ -276,6 +276,8 @@ private:
     bool _dict_checked = false;
     bool _has_dict = false;
     Decoder* _page_decoder = nullptr;
+    // Substituted for _page_decoder when the data payload is empty (all-null DataPageV2).
+    std::unique_ptr<Decoder> _empty_value_decoder;
     // Map: encoding -> Decoder
     // Plain or Dictionary encoding. If the dictionary grows too big, the encoding will fall back to the plain encoding
     std::unordered_map<int, std::unique_ptr<Decoder>> _decoders;
