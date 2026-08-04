@@ -69,50 +69,70 @@ bool ECSMetadataCredentialsProvider::_is_expired() const {
 }
 
 AlibabaCloud::OSS::Credentials ECSMetadataCredentialsProvider::getCredentials() {
-    {
-        std::lock_guard<std::mutex> lock(_mtx);
-        if (_cached_credentials && !_is_expired()) {
-            VLOG(2) << "Returning cached ECS metadata credentials";
-            return *_cached_credentials;
-        }
-        if (_cached_credentials) {
-            auto t = std::chrono::system_clock::to_time_t(_expiration);
-            struct tm tm_buf;
-            LOG(INFO) << "ECS metadata credentials expiring ("
-                      << std::put_time(localtime_r(&t, &tm_buf), "%Y-%m-%d %H:%M:%S")
-                      << "), refreshing";
-        } else {
-            LOG(INFO) << "Fetching ECS metadata credentials (first time)";
-        }
+    std::unique_lock<std::mutex> lock(_mtx);
+
+    if (_cached_credentials && !_is_expired()) {
+        VLOG(2) << "Returning cached ECS metadata credentials";
+        return *_cached_credentials;
     }
 
-    std::unique_ptr<AlibabaCloud::OSS::Credentials> new_credentials;
-    std::chrono::system_clock::time_point new_expiration;
-
-    if (_fetch_credentials_outside_lock(new_credentials, new_expiration) != 0) {
-        std::lock_guard<std::mutex> lock(_mtx);
+    // Another thread is already refreshing — wait for its result rather than
+    // issuing a concurrent metadata request (stampede prevention).
+    if (_refreshing) {
+        _refresh_cv.wait(lock, [this] { return !_refreshing; });
         if (_cached_credentials) {
-            LOG(WARNING) << "Using expired ECS metadata credentials as fallback";
             return *_cached_credentials;
         }
-        LOG(ERROR) << "Failed to fetch credentials from ECS metadata service and no cached "
-                      "fallback available";
         return AlibabaCloud::OSS::Credentials("", "", "");
     }
 
-    {
-        std::lock_guard<std::mutex> lock(_mtx);
-        if (_cached_credentials && !_is_expired()) {
-            return *_cached_credentials;
-        }
+    _refreshing = true;
+    if (_cached_credentials) {
+        auto t = std::chrono::system_clock::to_time_t(_expiration);
+        struct tm tm_buf;
+        LOG(INFO) << "ECS metadata credentials expiring ("
+                  << std::put_time(localtime_r(&t, &tm_buf), "%Y-%m-%d %H:%M:%S")
+                  << "), refreshing";
+    } else {
+        LOG(INFO) << "Fetching ECS metadata credentials (first time)";
+    }
+    lock.unlock();
+
+    std::unique_ptr<AlibabaCloud::OSS::Credentials> new_credentials;
+    std::chrono::system_clock::time_point new_expiration;
+    int result;
+    try {
+        result = _fetch_credentials_outside_lock(new_credentials, new_expiration);
+    } catch (...) {
+        lock.lock();
+        _refreshing = false;
+        _refresh_cv.notify_all();
+        throw;
+    }
+
+    lock.lock();
+    _refreshing = false;
+
+    if (result == 0) {
         _cached_credentials = std::move(new_credentials);
         _expiration = new_expiration;
         auto t = std::chrono::system_clock::to_time_t(_expiration);
         struct tm tm_buf;
         LOG(INFO) << "ECS metadata credentials refreshed, expiry: "
                   << std::put_time(localtime_r(&t, &tm_buf), "%Y-%m-%d %H:%M:%S");
+    } else if (_cached_credentials) {
+        LOG(WARNING) << "Using expired ECS metadata credentials as fallback";
+    } else {
+        LOG(ERROR) << "Failed to fetch credentials from ECS metadata service and no cached "
+                      "fallback available";
+    }
+
+    _refresh_cv.notify_all();
+
+    if (_cached_credentials) {
         return *_cached_credentials;
     }
+    return AlibabaCloud::OSS::Credentials("", "", "");
 }
 
 int ECSMetadataCredentialsProvider::_http_get(const std::string& url, std::string& response) {
@@ -267,49 +287,69 @@ bool OSSSTSCredentialProvider::_is_expired() const {
 }
 
 AlibabaCloud::OSS::Credentials OSSSTSCredentialProvider::getCredentials() {
-    {
-        std::lock_guard<std::mutex> lock(_mtx);
-        if (_cached_credentials && !_is_expired()) {
-            VLOG(2) << "Returning cached STS AssumeRole credentials";
-            return *_cached_credentials;
-        }
-        if (_cached_credentials) {
-            auto t = std::chrono::system_clock::to_time_t(_expiration);
-            struct tm tm_buf;
-            LOG(INFO) << "STS credentials expiring ("
-                      << std::put_time(localtime_r(&t, &tm_buf), "%Y-%m-%d %H:%M:%S")
-                      << "), refreshing";
-        } else {
-            LOG(INFO) << "Fetching STS AssumeRole credentials (first time)";
-        }
+    std::unique_lock<std::mutex> lock(_mtx);
+
+    if (_cached_credentials && !_is_expired()) {
+        VLOG(2) << "Returning cached STS AssumeRole credentials";
+        return *_cached_credentials;
     }
 
-    std::unique_ptr<AlibabaCloud::OSS::Credentials> new_credentials;
-    std::chrono::system_clock::time_point new_expiration;
-
-    if (_fetch_credentials_from_sts(new_credentials, new_expiration) != 0) {
-        std::lock_guard<std::mutex> lock(_mtx);
+    // Another thread is already refreshing — wait for its result rather than
+    // issuing concurrent AssumeRole calls that AliCloud will throttle.
+    if (_refreshing) {
+        _refresh_cv.wait(lock, [this] { return !_refreshing; });
         if (_cached_credentials) {
-            LOG(WARNING) << "Using expired STS credentials as fallback";
             return *_cached_credentials;
         }
-        LOG(ERROR) << "Failed to fetch STS AssumeRole credentials and no cached fallback available";
         return AlibabaCloud::OSS::Credentials("", "", "");
     }
 
-    {
-        std::lock_guard<std::mutex> lock(_mtx);
-        if (_cached_credentials && !_is_expired()) {
-            return *_cached_credentials;
-        }
+    _refreshing = true;
+    if (_cached_credentials) {
+        auto t = std::chrono::system_clock::to_time_t(_expiration);
+        struct tm tm_buf;
+        LOG(INFO) << "STS credentials expiring ("
+                  << std::put_time(localtime_r(&t, &tm_buf), "%Y-%m-%d %H:%M:%S")
+                  << "), refreshing";
+    } else {
+        LOG(INFO) << "Fetching STS AssumeRole credentials (first time)";
+    }
+    lock.unlock();
+
+    std::unique_ptr<AlibabaCloud::OSS::Credentials> new_credentials;
+    std::chrono::system_clock::time_point new_expiration;
+    int result;
+    try {
+        result = _fetch_credentials_from_sts(new_credentials, new_expiration);
+    } catch (...) {
+        lock.lock();
+        _refreshing = false;
+        _refresh_cv.notify_all();
+        throw;
+    }
+
+    lock.lock();
+    _refreshing = false;
+
+    if (result == 0) {
         _cached_credentials = std::move(new_credentials);
         _expiration = new_expiration;
         auto t = std::chrono::system_clock::to_time_t(_expiration);
         struct tm tm_buf;
         LOG(INFO) << "STS AssumeRole credentials refreshed, expiry: "
                   << std::put_time(localtime_r(&t, &tm_buf), "%Y-%m-%d %H:%M:%S");
+    } else if (_cached_credentials) {
+        LOG(WARNING) << "Using expired STS credentials as fallback";
+    } else {
+        LOG(ERROR) << "Failed to fetch STS AssumeRole credentials and no cached fallback available";
+    }
+
+    _refresh_cv.notify_all();
+
+    if (_cached_credentials) {
         return *_cached_credentials;
     }
+    return AlibabaCloud::OSS::Credentials("", "", "");
 }
 
 int OSSSTSCredentialProvider::_fetch_credentials_from_sts(
