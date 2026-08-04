@@ -18,6 +18,7 @@
 #pragma once
 
 #include <chrono>
+#include <condition_variable>
 #include <memory>
 #include <mutex>
 #include <string>
@@ -47,6 +48,8 @@ private:
     int _http_get(const std::string& url, std::string& response);
 
     mutable std::mutex _mtx;
+    std::condition_variable _refresh_cv;
+    bool _refreshing = false;
     std::unique_ptr<OSSCredentials> _cached_credentials;
     std::chrono::system_clock::time_point _expiration;
 
@@ -74,6 +77,8 @@ private:
     bool _is_expired() const;
 
     mutable std::mutex _mtx;
+    std::condition_variable _refresh_cv;
+    bool _refreshing = false;
     std::unique_ptr<OSSCredentials> _cached_credentials;
     std::chrono::system_clock::time_point _expiration;
     std::string _role_arn;
