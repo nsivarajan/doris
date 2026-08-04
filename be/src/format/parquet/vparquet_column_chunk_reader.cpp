@@ -51,6 +51,46 @@ struct IOContext;
 namespace doris {
 #include "common/compile_check_begin.h"
 
+// Substituted for the real page decoder when a DataPageV2 has an empty data section
+// (e.g. an all-null nullable column). Succeeds when no physical values are requested
+// and returns Status::Corruption if definition levels claim non-null values that cannot
+// exist in a zero-byte payload.
+class EmptyValueSectionDecoder final : public Decoder {
+public:
+    Status set_data(Slice*) override { return Status::OK(); }
+
+    Status decode_values(MutableColumnPtr& doris_column, DataTypePtr&,
+                         ColumnSelectVector& select_vector, bool) override {
+        ColumnSelectVector::DataReadType read_type;
+        while (size_t run_length = select_vector.get_next_run<false>(&read_type)) {
+            switch (read_type) {
+            case ColumnSelectVector::NULL_DATA:
+                doris_column->insert_many_defaults(run_length);
+                break;
+            case ColumnSelectVector::FILTERED_NULL:
+                break;
+            case ColumnSelectVector::CONTENT:
+            case ColumnSelectVector::FILTERED_CONTENT:
+                return Status::Corruption(
+                        "Parquet DataPageV2 has empty value section but definition levels "
+                        "require {} physical values",
+                        run_length);
+            }
+        }
+        return Status::OK();
+    }
+
+    Status skip_values(size_t num_values) override {
+        if (UNLIKELY(num_values != 0)) {
+            return Status::Corruption(
+                    "Parquet DataPageV2 has empty value section but definition levels "
+                    "require {} physical values",
+                    num_values);
+        }
+        return Status::OK();
+    }
+};
+
 template <bool IN_COLLECTION, bool OFFSET_INDEX>
 ColumnChunkReader<IN_COLLECTION, OFFSET_INDEX>::ColumnChunkReader(
         io::BufferedStreamReader* reader, tparquet::ColumnChunk* column_chunk,
@@ -212,11 +252,15 @@ Status ColumnChunkReader<IN_COLLECTION, OFFSET_INDEX>::load_page_data() {
                         header->__isset.data_page_header_v2
                                 ? static_cast<size_t>(header->uncompressed_page_size) - levels_size
                                 : static_cast<size_t>(header->uncompressed_page_size);
-                _reserve_decompress_buf(uncompressed_payload_size);
-                _page_data = Slice(_decompress_buf.get(), uncompressed_payload_size);
-                SCOPED_RAW_TIMER(&_chunk_statistics.decompress_time);
-                _chunk_statistics.decompress_cnt++;
-                RETURN_IF_ERROR(_block_compress_codec->decompress(payload_slice, &_page_data));
+                // DataPageV2 with all-null values has zero data bytes after level bytes;
+                // skip decompression rather than passing a zero-size payload to the codec.
+                if (uncompressed_payload_size > 0) {
+                    _reserve_decompress_buf(uncompressed_payload_size);
+                    _page_data = Slice(_decompress_buf.get(), uncompressed_payload_size);
+                    SCOPED_RAW_TIMER(&_chunk_statistics.decompress_time);
+                    _chunk_statistics.decompress_cnt++;
+                    RETURN_IF_ERROR(_block_compress_codec->decompress(payload_slice, &_page_data));
+                }
             }
             // page cache counters were incremented when PageReader did the header-only
             // cache lookup. Do not increment again to avoid double-counting.
@@ -251,12 +295,16 @@ Status ColumnChunkReader<IN_COLLECTION, OFFSET_INDEX>::load_page_data() {
             bool page_has_compression = header->__isset.data_page_header || is_v2_compressed;
 
             if (page_has_compression) {
-                // Decompress payload for immediate decoding
-                _reserve_decompress_buf(uncompressed_size);
-                _page_data = Slice(_decompress_buf.get(), uncompressed_size);
-                SCOPED_RAW_TIMER(&_chunk_statistics.decompress_time);
-                _chunk_statistics.decompress_cnt++;
-                RETURN_IF_ERROR(_block_compress_codec->decompress(compressed_data, &_page_data));
+                // DataPageV2 with all-null values has zero data bytes after level bytes;
+                // skip decompression rather than passing a zero-size payload to the codec.
+                if (uncompressed_size > 0) {
+                    _reserve_decompress_buf(uncompressed_size);
+                    _page_data = Slice(_decompress_buf.get(), uncompressed_size);
+                    SCOPED_RAW_TIMER(&_chunk_statistics.decompress_time);
+                    _chunk_statistics.decompress_cnt++;
+                    RETURN_IF_ERROR(
+                            _block_compress_codec->decompress(compressed_data, &_page_data));
+                }
 
                 // Decide whether to cache decompressed payload or compressed payload based on threshold
                 bool cache_payload_decompressed = should_cache_decompressed(header, _metadata);
@@ -355,7 +403,18 @@ Status ColumnChunkReader<IN_COLLECTION, OFFSET_INDEX>::load_page_data() {
         _decoders[static_cast<int>(encoding)] = std::move(page_decoder);
         _page_decoder = _decoders[static_cast<int>(encoding)].get();
     }
-    RETURN_IF_ERROR(_page_decoder->set_data(&_page_data));
+    // A DataPageV2 whose value section is empty (size == 0) and whose column is nullable
+    // (_max_def_level > 0) legally contains only definition levels (all-null page).
+    // Use EmptyValueSectionDecoder: it succeeds when no physical values are requested and
+    // returns Status::Corruption if definition levels claim any non-null value.
+    if (_page_data.size == 0 && _max_def_level > 0) {
+        if (_empty_value_decoder == nullptr) {
+            _empty_value_decoder = std::make_unique<EmptyValueSectionDecoder>();
+        }
+        _page_decoder = _empty_value_decoder.get();
+    } else {
+        RETURN_IF_ERROR(_page_decoder->set_data(&_page_data));
+    }
 
     _state = DATA_LOADED;
     return Status::OK();
