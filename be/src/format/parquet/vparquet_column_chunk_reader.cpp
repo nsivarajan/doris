@@ -405,13 +405,30 @@ Status ColumnChunkReader<IN_COLLECTION, OFFSET_INDEX>::load_page_data() {
     }
     // A DataPageV2 whose value section is empty (size == 0) and whose column is nullable
     // (_max_def_level > 0) legally contains only definition levels (all-null page).
-    // Use EmptyValueSectionDecoder: it succeeds when no physical values are requested and
-    // returns Status::Corruption if definition levels claim any non-null value.
     if (_page_data.size == 0 && _max_def_level > 0) {
-        if (_empty_value_decoder == nullptr) {
-            _empty_value_decoder = std::make_unique<EmptyValueSectionDecoder>();
+        if (_metadata.type == tparquet::Type::FIXED_LEN_BYTE_ARRAY ||
+            _metadata.type == tparquet::Type::INT96) {
+            // FIXED_LEN_BYTE_ARRAY and INT96 both use ColumnUInt8 as the physical backing
+            // column where each logical row occupies type_length bytes (12 for INT96, N for
+            // FIXED_LEN_BYTE_ARRAY). EmptyValueSectionDecoder would call
+            // insert_many_defaults(N) inserting N bytes instead of N*type_length bytes,
+            // causing the downstream converter to compute rows = N/type_length (truncated).
+            // Passing an empty Slice directly is correct: the bounds check passes when
+            // non_null_size==0, and resize(num_values * type_length) produces the right
+            // column size for the converter to produce the expected row count.
+            static const uint8_t _fixed_empty_byte = 0;
+            Slice empty_fixed(&_fixed_empty_byte, 0);
+            RETURN_IF_ERROR(_page_decoder->set_data(&empty_fixed));
+        } else {
+            // For all other physical types (BOOL, BYTE_ARRAY, INT32, INT64, etc.) the
+            // physical backing column has a 1:1 row mapping so EmptyValueSectionDecoder
+            // correctly inserts one default per null row, and returns Corruption if
+            // definition levels claim any non-null value from the empty data section.
+            if (_empty_value_decoder == nullptr) {
+                _empty_value_decoder = std::make_unique<EmptyValueSectionDecoder>();
+            }
+            _page_decoder = _empty_value_decoder.get();
         }
-        _page_decoder = _empty_value_decoder.get();
     } else {
         RETURN_IF_ERROR(_page_decoder->set_data(&_page_data));
     }
