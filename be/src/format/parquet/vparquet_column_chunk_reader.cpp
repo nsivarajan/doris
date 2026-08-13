@@ -413,12 +413,11 @@ Status ColumnChunkReader<IN_COLLECTION, OFFSET_INDEX>::load_page_data() {
             // FIXED_LEN_BYTE_ARRAY). EmptyValueSectionDecoder would call
             // insert_many_defaults(N) inserting N bytes instead of N*type_length bytes,
             // causing the downstream converter to compute rows = N/type_length (truncated).
-            // Passing an empty Slice directly is correct: the bounds check passes when
-            // non_null_size==0, and resize(num_values * type_length) produces the right
-            // column size for the converter to produce the expected row count.
-            static const uint8_t _fixed_empty_byte = 0;
-            Slice empty_fixed(&_fixed_empty_byte, 0);
-            RETURN_IF_ERROR(_page_decoder->set_data(&empty_fixed));
+            // Pass &_page_data (Slice{nullptr,0}) directly — it is a member and outlives
+            // decode_values. FixLengthPlainDecoder handles this correctly: the bounds check
+            // passes for non_null_size==0, and for any non-null claim it returns IOError
+            // before dereferencing _data->data.
+            RETURN_IF_ERROR(_page_decoder->set_data(&_page_data));
         } else {
             // For all other physical types (BOOL, BYTE_ARRAY, INT32, INT64, etc.) the
             // physical backing column has a 1:1 row mapping so EmptyValueSectionDecoder
