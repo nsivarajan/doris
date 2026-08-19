@@ -228,6 +228,59 @@ class AuthenticationIntegrationRuntimeTest {
     }
 
     @Test
+    void testRequireRoleMatchDeniesWhenNoGroupsMatch() throws Exception {
+        AuthenticationPluginManager pluginManager = new AuthenticationPluginManager();
+        pluginManager.registerFactory(new ChainTestPluginFactory());
+        AuthenticationIntegrationRuntime runtime = new AuthenticationIntegrationRuntime(pluginManager,
+                (integration, principal) -> Collections.emptySet()); // role mapping returns nothing
+
+        AuthenticationIntegrationMeta integration = meta("idms_oidc", "chain_test",
+                map("result", "SUCCESS", "require_role_match", "true"));
+        runtime.activatePreparedAuthenticationIntegration(runtime.prepareAuthenticationIntegration(integration));
+
+        AuthenticationOutcome outcome = runtime.authenticate(Collections.singletonList(integration), request());
+
+        Assertions.assertTrue(outcome.isFailure());
+        Assertions.assertEquals(AuthenticationFailureType.ACCESS_DENIED,
+                outcome.getAuthResult().getException().getFailureType());
+        Assertions.assertTrue(outcome.getAuthResult().getException().getMessage()
+                .contains("no authorized groups"));
+    }
+
+    @Test
+    void testRequireRoleMatchAllowsWhenGroupsMatch() throws Exception {
+        AuthenticationPluginManager pluginManager = new AuthenticationPluginManager();
+        pluginManager.registerFactory(new ChainTestPluginFactory());
+        AuthenticationIntegrationRuntime runtime = new AuthenticationIntegrationRuntime(pluginManager,
+                (integration, principal) -> Collections.singleton("analyst")); // role mapping returns a role
+
+        AuthenticationIntegrationMeta integration = meta("idms_oidc", "chain_test",
+                map("result", "SUCCESS", "require_role_match", "true"));
+        runtime.activatePreparedAuthenticationIntegration(runtime.prepareAuthenticationIntegration(integration));
+
+        AuthenticationOutcome outcome = runtime.authenticate(Collections.singletonList(integration), request());
+
+        Assertions.assertTrue(outcome.isSuccess());
+        Assertions.assertTrue(outcome.getGrantedRoles().contains("analyst"));
+    }
+
+    @Test
+    void testRequireRoleMatchFalseAllowsNoGroupMatch() throws Exception {
+        AuthenticationPluginManager pluginManager = new AuthenticationPluginManager();
+        pluginManager.registerFactory(new ChainTestPluginFactory());
+        AuthenticationIntegrationRuntime runtime = new AuthenticationIntegrationRuntime(pluginManager,
+                (integration, principal) -> Collections.emptySet());
+
+        AuthenticationIntegrationMeta integration = meta("idms_oidc", "chain_test",
+                map("result", "SUCCESS")); // no require_role_match → defaults false → connects with no data roles
+        runtime.activatePreparedAuthenticationIntegration(runtime.prepareAuthenticationIntegration(integration));
+
+        AuthenticationOutcome outcome = runtime.authenticate(Collections.singletonList(integration), request());
+
+        Assertions.assertTrue(outcome.isSuccess());
+    }
+
+    @Test
     void testRebuildKeepsPluginInstancesLazy() throws Exception {
         List<String> initializedMarkers = new ArrayList<>();
         AuthenticationPluginManager pluginManager = new AuthenticationPluginManager();

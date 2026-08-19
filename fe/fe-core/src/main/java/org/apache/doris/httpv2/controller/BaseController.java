@@ -21,6 +21,11 @@ import org.apache.doris.analysis.UserIdentity;
 import org.apache.doris.auth.certificate.CertificateAuthDecision;
 import org.apache.doris.auth.certificate.CertificateRuntimeAuthFactory;
 import org.apache.doris.auth.certificate.CertificateRuntimeAuthService;
+import org.apache.doris.authentication.AuthenticationIntegrationMeta;
+import org.apache.doris.authentication.AuthenticationRequest;
+import org.apache.doris.authentication.CredentialType;
+import org.apache.doris.authentication.Principal;
+import org.apache.doris.authentication.handler.AuthenticationOutcome;
 import org.apache.doris.catalog.Env;
 import org.apache.doris.cloud.proto.Cloud;
 import org.apache.doris.cloud.system.CloudSystemInfoService;
@@ -28,10 +33,12 @@ import org.apache.doris.cluster.ClusterNamespace;
 import org.apache.doris.common.AuthenticationException;
 import org.apache.doris.common.Config;
 import org.apache.doris.common.util.NetUtils;
+import org.apache.doris.common.util.TokenMasker;
 import org.apache.doris.datasource.InternalCatalog;
 import org.apache.doris.httpv2.HttpAuthManager;
 import org.apache.doris.httpv2.HttpAuthManager.SessionValue;
 import org.apache.doris.httpv2.exception.UnauthorizedException;
+import org.apache.doris.mysql.authenticate.integration.AuthenticationIntegrationAuthenticator;
 import org.apache.doris.mysql.privilege.PrivPredicate;
 import org.apache.doris.qe.ConnectContext;
 import org.apache.doris.service.FrontendOptions;
@@ -50,8 +57,11 @@ import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 
 import java.nio.ByteBuffer;
+import java.nio.charset.StandardCharsets;
 import java.security.cert.X509Certificate;
+import java.util.Collections;
 import java.util.List;
+import java.util.Set;
 import java.util.UUID;
 
 
@@ -75,7 +85,25 @@ public class BaseController {
         if (encodedAuthString != null) {
             // If has Authorization header, check auth info
             ActionAuthorizationInfo authInfo = getAuthorizationInfo(request);
-            UserIdentity currentUser = checkPassword(authInfo, request);
+
+            ConnectContext ctx = new ConnectContext();
+            ctx.setRemoteIP(authInfo.remoteIp);
+            ctx.setEnv(Env.getCurrentEnv());
+
+            UserIdentity currentUser;
+            Set<String> authenticatedRoles = Collections.emptySet();
+            if (looksLikeJwt(authInfo.password)) {
+                // OIDC path: JWT token in Basic Auth password field.
+                // Routes through authentication_chain — same plugins as MySQL protocol.
+                OidcAuthResult oidcResult = checkOidcToken(authInfo);
+                currentUser = oidcResult.userIdentity;
+                authenticatedRoles = oidcResult.authenticatedRoles;
+                ctx.setAuthenticatedRoles(authenticatedRoles);
+            } else {
+                currentUser = checkPassword(authInfo);
+            }
+            // Carry the resolved identity back to callers that do privilege checks on authInfo.
+            authInfo.userIdentity = currentUser;
 
             if (Config.isCloudMode() && checkAuth) {
                 checkInstanceOverdue(currentUser);
@@ -85,12 +113,10 @@ public class BaseController {
             SessionValue value = new SessionValue();
             value.currentUser = currentUser;
             value.password = authInfo.password;
+            value.authenticatedRoles = authenticatedRoles;
             addSession(request, response, value);
 
-            ConnectContext ctx = new ConnectContext();
-            ctx.setRemoteIP(authInfo.remoteIp);
             ctx.setCurrentUserIdentity(currentUser);
-            ctx.setEnv(Env.getCurrentEnv());
             ctx.setThreadLocalInfo();
             if (LOG.isDebugEnabled()) {
                 LOG.debug("check auth without cookie success for user: {}, thread: {}",
@@ -156,6 +182,7 @@ public class BaseController {
         ConnectContext ctx = new ConnectContext();
         ctx.setRemoteIP(request.getRemoteHost());
         ctx.setCurrentUserIdentity(sessionValue.currentUser);
+        ctx.setAuthenticatedRoles(sessionValue.authenticatedRoles);
         ctx.setEnv(Env.getCurrentEnv());
         ctx.setThreadLocalInfo();
         if (LOG.isDebugEnabled()) {
@@ -256,6 +283,109 @@ public class BaseController {
         }
     }
 
+    /**
+     * Holds both the UserIdentity and the OIDC-mapped roles from a successful chain authentication.
+     */
+    private static class OidcAuthResult {
+        final UserIdentity userIdentity;
+        final Set<String> authenticatedRoles;
+
+        OidcAuthResult(UserIdentity userIdentity, Set<String> authenticatedRoles) {
+            this.userIdentity = userIdentity;
+            this.authenticatedRoles = authenticatedRoles;
+        }
+    }
+
+    /**
+     * Detects a compact JWT by the standard "eyJ" prefix and exactly two dot separators.
+     * Used to distinguish OIDC access tokens from plain passwords in HTTP Basic Auth.
+     */
+    private static boolean looksLikeJwt(String token) {
+        if (Strings.isNullOrEmpty(token) || !token.startsWith("eyJ")) {
+            return false;
+        }
+        int dots = 0;
+        for (int i = 0; i < token.length(); i++) {
+            if (token.charAt(i) == '.') {
+                dots++;
+            }
+        }
+        return dots == 2;
+    }
+
+    /**
+     * Authenticates an OIDC access token (passed as Basic Auth password) through the
+     * {@code authentication_chain}. This is the HTTP equivalent of the MySQL protocol's
+     * chain fallback path — the same plugins run, including group-to-role mapping.
+     */
+    private OidcAuthResult checkOidcToken(ActionAuthorizationInfo authInfo)
+            throws UnauthorizedException {
+        if (Strings.isNullOrEmpty(Config.authentication_chain)) {
+            throw new UnauthorizedException("OIDC token received but authentication_chain is not configured");
+        }
+
+        List<AuthenticationIntegrationMeta> chain;
+        try {
+            List<String> names = AuthenticationIntegrationAuthenticator.parseAuthenticationChain(
+                    Config.authentication_chain);
+            chain = Lists.newArrayList();
+            for (String name : names) {
+                AuthenticationIntegrationMeta meta = Env.getCurrentEnv()
+                        .getAuthenticationIntegrationMgr()
+                        .getAuthenticationIntegration(name);
+                if (meta == null) {
+                    throw new UnauthorizedException("Authentication integration not found: " + name);
+                }
+                chain.add(meta);
+            }
+        } catch (UnauthorizedException e) {
+            throw e;
+        } catch (Exception e) {
+            throw new UnauthorizedException("Failed to resolve authentication_chain: " + e.getMessage());
+        }
+
+        AuthenticationRequest authRequest = AuthenticationRequest.builder()
+                        .username(authInfo.fullUserName)
+                        .credentialType(CredentialType.CLEAR_TEXT_PASSWORD)
+                        .credential(authInfo.password.getBytes(StandardCharsets.UTF_8))
+                        .remoteHost(authInfo.remoteIp)
+                        .clientType("http")
+                        .build();
+
+        AuthenticationOutcome outcome;
+        try {
+            outcome = Env.getCurrentEnv()
+                    .getAuthenticationIntegrationRuntime()
+                    .authenticate(chain, authRequest);
+        } catch (org.apache.doris.authentication.AuthenticationException e) {
+            throw new UnauthorizedException("OIDC authentication failed: " + e.getMessage());
+        }
+
+        if (!outcome.isSuccess()) {
+            String msg = outcome.getAuthResult().getException() != null
+                    ? outcome.getAuthResult().getException().getMessage()
+                    : "OIDC authentication failed";
+            throw new UnauthorizedException(msg);
+        }
+
+        Principal principal = outcome.getPrincipal().orElseThrow(() ->
+                        new UnauthorizedException("OIDC outcome missing principal"));
+
+        Set<String> roles = outcome.getGrantedRoles();
+
+        // User must be pre-created via CREATE USER — no JIT in the HTTP path.
+        List<UserIdentity> identities = Env.getCurrentEnv().getAuth()
+                .getUserIdentityForExternalAuth(principal.getName(), authInfo.remoteIp);
+        if (identities.isEmpty()) {
+            throw new UnauthorizedException("User '" + principal.getName()
+                    + "' authenticated via OIDC but is not pre-created in Doris."
+                    + " Run: CREATE USER '" + principal.getName() + "'@'%'");
+        }
+
+        LOG.info("OIDC HTTP auth OK for user={} roles={}", principal.getName(), roles.size());
+        return new OidcAuthResult(identities.get(0), roles);
+    }
+
     // return currentUserIdentity from Doris auth
     protected UserIdentity checkPassword(ActionAuthorizationInfo authInfo, HttpServletRequest request)
             throws UnauthorizedException {
@@ -285,7 +415,7 @@ public class BaseController {
         ActionAuthorizationInfo authInfo = new ActionAuthorizationInfo();
         if (!parseAuthInfo(request, authInfo)) {
             LOG.info("parse auth info failed, Authorization header {}, url {}",
-                    request.getHeader("Authorization"), request.getRequestURI());
+                    TokenMasker.maskPrefix(request.getHeader("Authorization")), request.getRequestURI());
             throw new UnauthorizedException("Need auth information.");
         }
         if (LOG.isDebugEnabled()) {
