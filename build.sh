@@ -715,6 +715,11 @@ modules=()
 if [[ "${BUILD_FE}" -eq 1 ]]; then
     modules+=("fe-common")
     modules+=("fe-core")
+    modules+=("fe-authentication")
+    modules+=("fe-authentication/fe-authentication-plugins/fe-authentication-plugin-oidc")
+    if [[ "${WITH_TDE_DIR}" != "" ]]; then
+        modules+=("fe-${WITH_TDE_DIR}")
+    fi
     for extra_module_path in "${FE_EXTRA_MODULE_PATHS[@]}"; do
         modules+=("${extra_module_path}")
     done
@@ -1023,6 +1028,9 @@ if [[ "${BUILD_FE}" -eq 1 ]]; then
     mkdir -p "${DORIS_OUTPUT}/fe/plugins/connectors/"
     mkdir -p "${DORIS_OUTPUT}/fe/plugins/hadoop_conf/"
     mkdir -p "${DORIS_OUTPUT}/fe/plugins/java_extensions/"
+    mkdir -p "${DORIS_OUTPUT}/fe/plugins/authentication/oidc/"
+    cp -p "${DORIS_HOME}/fe/fe-authentication/fe-authentication-plugins/fe-authentication-plugin-oidc/target/fe-authentication-plugin-oidc-"*".jar" \
+        "${DORIS_OUTPUT}/fe/plugins/authentication/oidc/"
 
     if [ "${TARGET_SYSTEM}" = "Darwin" ] || [ "${TARGET_SYSTEM}" = "Linux" ]; then
       mkdir -p "${DORIS_OUTPUT}/fe/arthas"

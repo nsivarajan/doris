@@ -25,7 +25,9 @@ import com.google.common.cache.CacheBuilder;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 
+import java.util.Collections;
 import java.util.List;
+import java.util.Set;
 import java.util.concurrent.TimeUnit;
 
 // We simulate a simplified session here: only store user-name of clients who already logged in,
@@ -41,6 +43,8 @@ public final class HttpAuthManager {
     public static class SessionValue {
         public UserIdentity currentUser;
         public String password;
+        // Roles granted by external auth (OIDC, LDAP) — restored on each cookie request.
+        public Set<String> authenticatedRoles = Collections.emptySet();
     }
 
     // session_id => session value

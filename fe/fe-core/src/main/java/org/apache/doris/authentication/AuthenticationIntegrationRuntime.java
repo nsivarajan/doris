@@ -246,6 +246,16 @@ public class AuthenticationIntegrationRuntime {
         Principal principal = Objects.requireNonNull(result.getPrincipal(), "principal is required for success");
         Set<String> mappedRoles = roleMappingEvaluator.evaluate(integration, principal);
         if (mappedRoles.isEmpty()) {
+            // If require_role_match=true, deny at login when no group rules matched.
+            // Without this, a pre-created user with no matching groups connects with only
+            // their default_role_rbac_* (information_schema read) — silent, no data access.
+            if (Boolean.parseBoolean(integration.getProperty("require_role_match", "false"))) {
+                return AuthenticationOutcome.of(integration, AuthenticationResult.failure(
+                        new AuthenticationException(
+                                "Access denied: no authorized groups found for this user. "
+                                        + "Contact your administrator.",
+                                AuthenticationFailureType.ACCESS_DENIED)));
+            }
             return AuthenticationOutcome.of(integration, result);
         }
 
