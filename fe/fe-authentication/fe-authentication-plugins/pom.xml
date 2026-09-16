@@ -35,5 +35,6 @@ under the License.
         <module>fe-authentication-plugin-ldap</module>
         <module>fe-authentication-plugin-password</module>
         <module>fe-authentication-plugin-oidc</module>
+        <module>fe-authentication-plugin-mtls</module>
     </modules>
 </project>
