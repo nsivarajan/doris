@@ -92,7 +92,30 @@ public class BaseController {
 
             UserIdentity currentUser;
             Set<String> authenticatedRoles = Collections.emptySet();
-            if (looksLikeJwt(authInfo.password)) {
+
+            X509Certificate clientCert = getClientCertificate(request);
+            if (clientCert != null && !Strings.isNullOrEmpty(Config.authentication_chain)
+                    && chainSupportsX509(Config.authentication_chain)) {
+                // mTLS path: client certificate present AND chain has an mTLS plugin.
+                // The TLS layer has already verified the chain cryptographically; the plugin
+                // validates the issuer and extracts identity (username + groups for role mapping).
+                MtlsAuthResult mtlsResult = checkMtlsCert(clientCert, authInfo.remoteIp);
+                currentUser = mtlsResult.userIdentity;
+                authenticatedRoles = mtlsResult.authenticatedRoles;
+                ctx.setAuthenticatedRoles(authenticatedRoles);
+            } else if (clientCert != null && !Strings.isNullOrEmpty(Config.authentication_chain)) {
+                // Cert present but chain has no mTLS plugin — fall through to password auth
+                // so OIDC-only chains are not disrupted by a transport-level cert.
+                LOG.debug("Client certificate present but no mTLS plugin in authentication_chain — "
+                        + "continuing to password/OIDC auth.");
+                currentUser = checkPassword(authInfo, request);
+            } else if (clientCert != null) {
+                // Cert present but no chain configured — warn and use cert-aware password path
+                // so CertificateRuntimeAuthService still runs.
+                LOG.warn("Client certificate presented but authentication_chain is not configured. "
+                        + "Set authentication_chain to enable mTLS. Falling through to cert-aware auth.");
+                currentUser = checkPassword(authInfo, request);
+            } else if (looksLikeJwt(authInfo.password)) {
                 // OIDC path: JWT token in Basic Auth password field.
                 // Routes through authentication_chain — same plugins as MySQL protocol.
                 OidcAuthResult oidcResult = checkOidcToken(authInfo);
@@ -286,7 +309,7 @@ public class BaseController {
     /**
      * Holds both the UserIdentity and the OIDC-mapped roles from a successful chain authentication.
      */
-    private static class OidcAuthResult {
+    protected static class OidcAuthResult {
         final UserIdentity userIdentity;
         final Set<String> authenticatedRoles;
 
@@ -296,11 +319,51 @@ public class BaseController {
         }
     }
 
+    protected static class MtlsAuthResult {
+        final UserIdentity userIdentity;
+        final Set<String> authenticatedRoles;
+
+        MtlsAuthResult(UserIdentity userIdentity, Set<String> authenticatedRoles) {
+            this.userIdentity = userIdentity;
+            this.authenticatedRoles = authenticatedRoles;
+        }
+    }
+
+    /**
+     * Authenticates a client certificate through the {@code authentication_chain}.
+     * Passes the DER-encoded cert as X509_CERTIFICATE credential so any mTLS plugin
+     * in the chain can extract identity (username + group-based roles).
+     */
+    protected MtlsAuthResult checkMtlsCert(X509Certificate clientCert, String remoteIp)
+            throws UnauthorizedException {
+        List<AuthenticationIntegrationMeta> chain = resolveChain(Config.authentication_chain);
+
+        byte[] certDer;
+        try {
+            certDer = clientCert.getEncoded();
+        } catch (Exception e) {
+            throw new UnauthorizedException("Failed to encode client certificate: " + e.getMessage());
+        }
+
+        AuthenticationRequest authRequest = AuthenticationRequest.builder()
+                .username("(cert)")  // placeholder — mTLS plugin derives username from the cert itself
+                .credentialType(CredentialType.X509_CERTIFICATE)
+                .credential(certDer)
+                .remoteHost(remoteIp)
+                .clientType("http")
+                .build();
+
+        AuthenticationOutcome outcome = invokeChain(chain, authRequest, "mTLS");
+        ChainAuthResult result = finishChainAuth(outcome, remoteIp, "mTLS");
+        LOG.info("mTLS HTTP auth OK for user={} roles={}", result.principal.getName(), result.roles.size());
+        return new MtlsAuthResult(result.identity, result.roles);
+    }
+
     /**
      * Detects a compact JWT by the standard "eyJ" prefix and exactly two dot separators.
      * Used to distinguish OIDC access tokens from plain passwords in HTTP Basic Auth.
      */
-    private static boolean looksLikeJwt(String token) {
+    protected static boolean looksLikeJwt(String token) {
         if (Strings.isNullOrEmpty(token) || !token.startsWith("eyJ")) {
             return false;
         }
@@ -318,31 +381,13 @@ public class BaseController {
      * {@code authentication_chain}. This is the HTTP equivalent of the MySQL protocol's
      * chain fallback path — the same plugins run, including group-to-role mapping.
      */
-    private OidcAuthResult checkOidcToken(ActionAuthorizationInfo authInfo)
+    protected OidcAuthResult checkOidcToken(ActionAuthorizationInfo authInfo)
             throws UnauthorizedException {
         if (Strings.isNullOrEmpty(Config.authentication_chain)) {
             throw new UnauthorizedException("OIDC token received but authentication_chain is not configured");
         }
 
-        List<AuthenticationIntegrationMeta> chain;
-        try {
-            List<String> names = AuthenticationIntegrationAuthenticator.parseAuthenticationChain(
-                    Config.authentication_chain);
-            chain = Lists.newArrayList();
-            for (String name : names) {
-                AuthenticationIntegrationMeta meta = Env.getCurrentEnv()
-                        .getAuthenticationIntegrationMgr()
-                        .getAuthenticationIntegration(name);
-                if (meta == null) {
-                    throw new UnauthorizedException("Authentication integration not found: " + name);
-                }
-                chain.add(meta);
-            }
-        } catch (UnauthorizedException e) {
-            throw e;
-        } catch (Exception e) {
-            throw new UnauthorizedException("Failed to resolve authentication_chain: " + e.getMessage());
-        }
+        List<AuthenticationIntegrationMeta> chain = resolveChain(Config.authentication_chain);
 
         AuthenticationRequest authRequest = AuthenticationRequest.builder()
                         .username(authInfo.fullUserName)
@@ -352,38 +397,116 @@ public class BaseController {
                         .clientType("http")
                         .build();
 
-        AuthenticationOutcome outcome;
+        AuthenticationOutcome outcome = invokeChain(chain, authRequest, "OIDC");
+        ChainAuthResult result = finishChainAuth(outcome, authInfo.remoteIp, "OIDC");
+        LOG.info("OIDC HTTP auth OK for user={} roles={}", result.principal.getName(), result.roles.size());
+        return new OidcAuthResult(result.identity, result.roles);
+    }
+
+    // ── Shared chain-auth helpers ─────────────────────────────────────────────
+
+    private static final class ChainAuthResult {
+        final Principal principal;
+        final UserIdentity identity;
+        final Set<String> roles;
+
+        ChainAuthResult(Principal principal, UserIdentity identity, Set<String> roles) {
+            this.principal = principal;
+            this.identity = identity;
+            this.roles = roles;
+        }
+    }
+
+    /** Returns true if any integration in the chain supports X509_CERTIFICATE credentials. */
+    protected boolean chainSupportsX509(String chainConfig) {
         try {
-            outcome = Env.getCurrentEnv()
+            List<String> names = AuthenticationIntegrationAuthenticator
+                    .parseAuthenticationChain(chainConfig);
+            for (String name : names) {
+                AuthenticationIntegrationMeta meta = Env.getCurrentEnv()
+                        .getAuthenticationIntegrationMgr()
+                        .getAuthenticationIntegration(name);
+                if (meta != null && CredentialType.X509_CERTIFICATE.equalsIgnoreCase(
+                        meta.getIntegration().getProperty("credential_type", ""))) {
+                    return true;
+                }
+                // Also accept integrations of type "mtls" regardless of explicit credential_type
+                if (meta != null && "mtls".equalsIgnoreCase(meta.getIntegration().getType())) {
+                    return true;
+                }
+            }
+        } catch (Exception e) {
+            LOG.warn("Failed to inspect authentication_chain for X509 support: {}", e.getMessage());
+        }
+        return false;
+    }
+
+    /** Resolves integration names in the chain config to their metadata objects. */
+    private List<AuthenticationIntegrationMeta> resolveChain(String chainConfig)
+            throws UnauthorizedException {
+        try {
+            List<String> names = AuthenticationIntegrationAuthenticator
+                    .parseAuthenticationChain(chainConfig);
+            List<AuthenticationIntegrationMeta> chain = Lists.newArrayList();
+            for (String name : names) {
+                AuthenticationIntegrationMeta meta = Env.getCurrentEnv()
+                        .getAuthenticationIntegrationMgr()
+                        .getAuthenticationIntegration(name);
+                if (meta == null) {
+                    throw new UnauthorizedException("Authentication integration not found: " + name);
+                }
+                chain.add(meta);
+            }
+            return chain;
+        } catch (UnauthorizedException e) {
+            throw e;
+        } catch (Exception e) {
+            throw new UnauthorizedException("Failed to resolve authentication_chain: " + e.getMessage());
+        }
+    }
+
+    /** Invokes the chain and returns the outcome, wrapping exceptions. */
+    private AuthenticationOutcome invokeChain(List<AuthenticationIntegrationMeta> chain,
+            AuthenticationRequest authRequest, String label) throws UnauthorizedException {
+        try {
+            AuthenticationOutcome outcome = Env.getCurrentEnv()
                     .getAuthenticationIntegrationRuntime()
                     .authenticate(chain, authRequest);
+            if (!outcome.isSuccess()) {
+                String msg = outcome.getAuthResult().getException() != null
+                        ? outcome.getAuthResult().getException().getMessage()
+                        : label + " authentication failed";
+                throw new UnauthorizedException(msg);
+            }
+            return outcome;
+        } catch (UnauthorizedException e) {
+            throw e;
         } catch (org.apache.doris.authentication.AuthenticationException e) {
-            throw new UnauthorizedException("OIDC authentication failed: " + e.getMessage());
+            throw new UnauthorizedException(label + " authentication failed: " + e.getMessage());
         }
+    }
 
-        if (!outcome.isSuccess()) {
-            String msg = outcome.getAuthResult().getException() != null
-                    ? outcome.getAuthResult().getException().getMessage()
-                    : "OIDC authentication failed";
-            throw new UnauthorizedException(msg);
-        }
-
+    /**
+     * Resolves the principal from the chain outcome to a pre-created Doris UserIdentity.
+     * Logs detail server-side; the UnauthorizedException message sent to the client
+     * does not include the derived username to avoid information leakage.
+     */
+    private ChainAuthResult finishChainAuth(AuthenticationOutcome outcome, String remoteIp,
+            String label) throws UnauthorizedException {
         Principal principal = outcome.getPrincipal().orElseThrow(() ->
-                        new UnauthorizedException("OIDC outcome missing principal"));
-
+                new UnauthorizedException(label + " outcome missing principal"));
         Set<String> roles = outcome.getGrantedRoles();
 
-        // User must be pre-created via CREATE USER — no JIT in the HTTP path.
         List<UserIdentity> identities = Env.getCurrentEnv().getAuth()
-                .getUserIdentityForExternalAuth(principal.getName(), authInfo.remoteIp);
+                .getUserIdentityForExternalAuth(principal.getName(), remoteIp);
         if (identities.isEmpty()) {
-            throw new UnauthorizedException("User '" + principal.getName()
-                    + "' authenticated via OIDC but is not pre-created in Doris."
-                    + " Run: CREATE USER '" + principal.getName() + "'@'%'");
+            LOG.warn("{} auth: user '{}' is not pre-created in Doris. "
+                    + "Run: CREATE USER '{}'@'%'", label, principal.getName(), principal.getName());
+            throw new UnauthorizedException(label
+                    + " authentication succeeded but the user account is not provisioned in Doris."
+                    + " Contact your administrator.");
         }
-
-        LOG.info("OIDC HTTP auth OK for user={} roles={}", principal.getName(), roles.size());
-        return new OidcAuthResult(identities.get(0), roles);
+        return new ChainAuthResult(principal, identities.get(0), roles);
     }
 
     // return currentUserIdentity from Doris auth (no certificate path — for OIDC callers)

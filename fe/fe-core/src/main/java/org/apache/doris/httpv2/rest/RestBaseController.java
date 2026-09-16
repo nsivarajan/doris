@@ -55,7 +55,9 @@ import java.io.IOException;
 import java.io.OutputStream;
 import java.net.URI;
 import java.net.URISyntaxException;
+import java.security.cert.X509Certificate;
 import java.util.Collections;
+import java.util.Set;
 import java.util.stream.Collectors;
 
 public class RestBaseController extends BaseController {
@@ -74,17 +76,37 @@ public class RestBaseController extends BaseController {
     public ActionAuthorizationInfo executeCheckPassword(HttpServletRequest request,
                                                         HttpServletResponse response) throws UnauthorizedException {
         ActionAuthorizationInfo authInfo = getAuthorizationInfo(request);
-        // check password
-        UserIdentity currentUser = checkPassword(authInfo, request);
 
-        // Store UserIdentity in authInfo for convenient parameter passing
+        UserIdentity currentUser;
+        Set<String> authenticatedRoles = Collections.emptySet();
+
+        X509Certificate clientCert = getClientCertificate(request);
+        if (clientCert != null && !Strings.isNullOrEmpty(Config.authentication_chain)
+                && chainSupportsX509(Config.authentication_chain)) {
+            // mTLS: cert present and chain has an mTLS plugin
+            MtlsAuthResult mtlsResult = checkMtlsCert(clientCert, authInfo.remoteIp);
+            currentUser = mtlsResult.userIdentity;
+            authenticatedRoles = mtlsResult.authenticatedRoles;
+        } else if (clientCert != null) {
+            // Cert present but no mTLS plugin in chain — cert-aware password fallback
+            currentUser = checkPassword(authInfo, request);
+        } else if (looksLikeJwt(authInfo.password)) {
+            // OIDC: JWT token in Basic Auth password field
+            OidcAuthResult oidcResult = checkOidcToken(authInfo);
+            currentUser = oidcResult.userIdentity;
+            authenticatedRoles = oidcResult.authenticatedRoles;
+        } else {
+            // Plain password
+            currentUser = checkPassword(authInfo, request);
+        }
+
         authInfo.userIdentity = currentUser;
 
-        // Set ConnectContext for backward compatibility
         ConnectContext ctx = new ConnectContext();
         ctx.setEnv(Env.getCurrentEnv());
         ctx.setRemoteIP(authInfo.remoteIp);
         ctx.setCurrentUserIdentity(currentUser);
+        ctx.setAuthenticatedRoles(authenticatedRoles);
         ctx.setThreadLocalInfo();
         return authInfo;
     }
