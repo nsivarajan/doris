@@ -66,6 +66,7 @@ import org.apache.doris.common.AuthenticationException;
 import org.apache.doris.common.CaseSensibility;
 import org.apache.doris.common.ClientPool;
 import org.apache.doris.common.Config;
+import org.apache.doris.httpv2.HttpAuthManager;
 import org.apache.doris.common.DdlException;
 import org.apache.doris.common.DuplicatedRequestException;
 import org.apache.doris.common.FeConstants;
@@ -1302,6 +1303,18 @@ public class FrontendServiceImpl implements FrontendService.Iface {
 
     private UserIdentity resolveForwardedAuthUserIdentity(String fullUserName, String passwd, String clientIp,
             ForwardedCertificateInfo certInfo) throws AuthenticationException {
+        // Fast path: OIDC/mTLS load session token — FE already authenticated this
+        // request at the HTTP layer. Resolve the pre-authenticated identity directly,
+        // bypassing MySQL-protocol password verification.
+        if (HttpAuthManager.isLoadSessionToken(passwd)) {
+            HttpAuthManager.SessionValue sv = HttpAuthManager.getInstance().resolveLoadSession(passwd);
+            if (sv == null) {
+                throw new AuthenticationException(
+                        "Load session token expired or already used — retry the stream load request");
+            }
+            return sv.currentUser;
+        }
+
         CertificateAuthDecision certDecision = StreamLoadCertificateAuthHelper.authenticateForwarded(
                 CERT_RUNTIME_AUTH_SERVICE, fullUserName, clientIp, certInfo);
         if (certDecision.isReject()) {

@@ -28,6 +28,7 @@ import org.apache.logging.log4j.Logger;
 import java.util.Collections;
 import java.util.List;
 import java.util.Set;
+import java.util.UUID;
 import java.util.concurrent.TimeUnit;
 
 // We simulate a simplified session here: only store user-name of clients who already logged in,
@@ -91,4 +92,42 @@ public final class HttpAuthManager {
     public Cache<String, SessionValue> getAuthSessions() {
         return authSessions;
     }
-}
+
+    // ── Short-lived load auth sessions ───────────────────────────────────────
+    // Used by stream load redirect: FE resolves OIDC/mTLS identity at the HTTP
+    // layer, stores it here under a UUID, and puts the UUID in the redirect URL
+    // instead of the raw credential. BE forwards the UUID to FE's StreamLoadHandler
+    // which resolves it here — no MySQL-protocol re-authentication needed.
+
+    public static final String LOAD_SESSION_PREFIX = "DORIS_LOAD_SESSION:";
+    private static final long LOAD_SESSION_TTL_SECONDS = 120; // covers redirect + load start
+
+    private final Cache<String, SessionValue> loadAuthSessions = CacheBuilder.newBuilder()
+            .maximumSize(10000)
+            .expireAfterWrite(LOAD_SESSION_TTL_SECONDS, TimeUnit.SECONDS)
+            .build();
+
+    public String createLoadSession(UserIdentity userIdentity, Set<String> authenticatedRoles) {
+        String token = UUID.randomUUID().toString();
+        SessionValue sv = new SessionValue();
+        sv.currentUser = userIdentity;
+        sv.authenticatedRoles = authenticatedRoles != null ? authenticatedRoles : Collections.emptySet();
+        loadAuthSessions.put(token, sv);
+        return LOAD_SESSION_PREFIX + token;
+    }
+
+    public SessionValue resolveLoadSession(String tokenWithPrefix) {
+        if (tokenWithPrefix == null || !tokenWithPrefix.startsWith(LOAD_SESSION_PREFIX)) {
+            return null;
+        }
+        String token = tokenWithPrefix.substring(LOAD_SESSION_PREFIX.length());
+        SessionValue sv = loadAuthSessions.getIfPresent(token);
+        if (sv != null) {
+            loadAuthSessions.invalidate(token); // single-use
+        }
+        return sv;
+    }
+
+    public static boolean isLoadSessionToken(String password) {
+        return password != null && password.startsWith(LOAD_SESSION_PREFIX);
+    }

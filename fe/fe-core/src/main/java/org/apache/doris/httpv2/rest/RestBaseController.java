@@ -26,6 +26,7 @@ import org.apache.doris.common.UserException;
 import org.apache.doris.common.util.HttpURLUtil;
 import org.apache.doris.common.util.InternalHttpsUtils;
 import org.apache.doris.common.util.NetUtils;
+import org.apache.doris.httpv2.HttpAuthManager;
 import org.apache.doris.httpv2.controller.BaseController;
 import org.apache.doris.httpv2.entity.ResponseEntityBuilder;
 import org.apache.doris.httpv2.exception.UnauthorizedException;
@@ -137,11 +138,24 @@ public class RestBaseController extends BaseController {
         String userInfo = null;
         if (!Strings.isNullOrEmpty(request.getHeader("Authorization"))) {
             ActionAuthorizationInfo authInfo = getAuthorizationInfo(request);
-            userInfo = ClusterNamespace.getNameFromFullName(authInfo.fullUserName)
-                    + ":" + authInfo.password;
+            String username = ClusterNamespace.getNameFromFullName(authInfo.fullUserName);
+            String password = authInfo.password;
+
+            // For OIDC/mTLS: the raw credential (JWT token or absent for cert) cannot be
+            // forwarded through the redirect URL and re-used for MySQL-protocol auth at BE.
+            // Instead, generate a short-lived load session token that the BE passes back to
+            // FE's StreamLoadHandler, which resolves it to the already-authenticated identity.
+            if (authInfo.userIdentity != null
+                    && (looksLikeJwt(password) || getClientCertificate(request) != null)) {
+                ConnectContext ctx = ConnectContext.get();
+                Set<String> roles = ctx != null ? ctx.getAuthenticatedRoles() : Collections.emptySet();
+                password = HttpAuthManager.getInstance()
+                        .createLoadSession(authInfo.userIdentity, roles);
+            }
+
+            userInfo = username + ":" + password;
         }
         try {
-            // Preserve the original request path to avoid re-encoding an already encoded URI path.
             URI authorityUri = new URI(scheme, userInfo, addr.getHostname(),
                     addr.getPort(), null, null, null);
             String redirectUrl = authorityUri.toASCIIString() + requestPath;

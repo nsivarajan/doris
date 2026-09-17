@@ -17,6 +17,7 @@
 
 package org.apache.doris.httpv2.util;
 
+import org.apache.doris.analysis.UserIdentity;
 import org.apache.doris.common.Config;
 import org.apache.doris.common.ThreadPoolManager;
 import org.apache.doris.httpv2.util.streamresponse.JsonStreamResponse;
@@ -66,7 +67,14 @@ public class StatementSubmitter {
     private static final String TYPE_EXEC_STATUS = "exec_status";
 
     private static final String JDBC_DRIVER = "org.mariadb.jdbc.Driver";
-    private static final String DB_URL_PATTERN = "jdbc:mariadb://127.0.0.1:%d/%s";
+    // Plain URL for password auth (no SSL required by MySQL protocol).
+    private static final String DB_URL_PATTERN =
+            "jdbc:mariadb://127.0.0.1:%d/%s";
+    // SSL-trust URL for OIDC/mTLS/LDAP: the MySQL protocol requires isClientUseSsl()=true
+    // before accepting non-password credentials. TRUST mode is safe on loopback — no MITM
+    // is possible on 127.0.0.1, so certificate verification is not needed.
+    private static final String DB_URL_PATTERN_SSL =
+            "jdbc:mariadb://127.0.0.1:%d/%s?sslMode=TRUST";
 
     private static final String[] copyResult = {"id", "state", "type", "msg", "loadedRows", "filterRows",
             "unselectRows", "url"};
@@ -99,9 +107,17 @@ public class StatementSubmitter {
 
         @Override
         public ExecutionResultSet call() throws Exception {
+            return executeViaJdbc();
+        }
+
+        private ExecutionResultSet executeViaJdbc() throws Exception {
             Connection conn = null;
             Statement stmt = null;
-            String dbUrl = String.format(DB_URL_PATTERN, Config.query_port, ctx.getDatabase());
+            // Use SSL for non-password auth (OIDC, mTLS, LDAP) — MySQL protocol requires
+            // isClientUseSsl()=true before accepting OIDC tokens. TRUST mode is safe on
+            // loopback (127.0.0.1) since no MITM is possible on the local machine.
+            String urlPattern = queryCtx.userIdentity != null ? DB_URL_PATTERN_SSL : DB_URL_PATTERN;
+            String dbUrl = String.format(urlPattern, Config.query_port, ctx.getDatabase());
             try {
                 Class.forName(JDBC_DRIVER);
                 conn = DriverManager.getConnection(dbUrl, queryCtx.user, queryCtx.passwd);
@@ -268,11 +284,13 @@ public class StatementSubmitter {
         public String stmt;
         public String user;
         public String passwd;
-        public long limit; // limit the number of rows returned by the stmt
-        // used for stream Work
+        public long limit;
         public boolean isStream;
         public HttpServletResponse response;
         public String clusterName;
+        // Non-null when the HTTP layer already authenticated the user (OIDC, mTLS, LDAP).
+        // When set, Worker skips JDBC re-authentication and executes directly via StmtExecutor.
+        public UserIdentity userIdentity;
 
         public StmtContext(String stmt, String user, String passwd, long limit,
                             boolean isStream, HttpServletResponse response, String clusterName) {
@@ -283,6 +301,11 @@ public class StatementSubmitter {
             this.isStream = isStream;
             this.response = response;
             this.clusterName = clusterName;
+        }
+
+        public StmtContext withUserIdentity(UserIdentity identity) {
+            this.userIdentity = identity;
+            return this;
         }
     }
 }
