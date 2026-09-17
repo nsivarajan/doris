@@ -717,6 +717,7 @@ if [[ "${BUILD_FE}" -eq 1 ]]; then
     modules+=("fe-core")
     modules+=("fe-authentication")
     modules+=("fe-authentication/fe-authentication-plugins/fe-authentication-plugin-oidc")
+    modules+=("fe-tls")
     if [[ "${WITH_TDE_DIR}" != "" ]]; then
         modules+=("fe-${WITH_TDE_DIR}")
     fi
@@ -1031,6 +1032,12 @@ if [[ "${BUILD_FE}" -eq 1 ]]; then
     mkdir -p "${DORIS_OUTPUT}/fe/plugins/authentication/oidc/"
     cp -p "${DORIS_HOME}/fe/fe-authentication/fe-authentication-plugins/fe-authentication-plugin-oidc/target/fe-authentication-plugin-oidc-"*".jar" \
         "${DORIS_OUTPUT}/fe/plugins/authentication/oidc/"
+
+    # TLS module — deployed to fe/lib/ so ServiceLoader finds it at startup
+    if [ -f "${DORIS_HOME}/fe/fe-tls/target/fe-tls-"*".jar" ]; then
+        cp -p "${DORIS_HOME}/fe/fe-tls/target/fe-tls-"*".jar" \
+            "${DORIS_OUTPUT}/fe/lib/"
+    fi
 
     if [ "${TARGET_SYSTEM}" = "Darwin" ] || [ "${TARGET_SYSTEM}" = "Linux" ]; then
       mkdir -p "${DORIS_OUTPUT}/fe/arthas"
