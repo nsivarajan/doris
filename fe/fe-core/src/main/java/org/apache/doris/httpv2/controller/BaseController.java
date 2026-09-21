@@ -291,9 +291,9 @@ public class BaseController {
     /**
      * Holds both the UserIdentity and the OIDC-mapped roles from a successful chain authentication.
      */
-    private static class OidcAuthResult {
-        final UserIdentity userIdentity;
-        final Set<String> authenticatedRoles;
+    protected static class OidcAuthResult {
+        public final UserIdentity userIdentity;
+        public final Set<String> authenticatedRoles;
 
         OidcAuthResult(UserIdentity userIdentity, Set<String> authenticatedRoles) {
             this.userIdentity = userIdentity;
@@ -301,6 +301,45 @@ public class BaseController {
         }
     }
 
+    protected static class MtlsAuthResult {
+        public final UserIdentity userIdentity;
+        public final Set<String> authenticatedRoles;
+
+        MtlsAuthResult(UserIdentity userIdentity, Set<String> authenticatedRoles) {
+            this.userIdentity = userIdentity;
+            this.authenticatedRoles = authenticatedRoles;
+        }
+    }
+
+    /**
+     * Authenticates a client certificate through the {@code authentication_chain}.
+     * Passes the DER-encoded cert as X509_CERTIFICATE credential so any mTLS plugin
+     * in the chain can extract identity (username + group-based roles).
+     */
+    protected MtlsAuthResult checkMtlsCert(X509Certificate clientCert, String remoteIp)
+            throws UnauthorizedException {
+        List<AuthenticationIntegrationMeta> chain = resolveChain(Config.authentication_chain);
+
+        byte[] certDer;
+        try {
+            certDer = clientCert.getEncoded();
+        } catch (Exception e) {
+            throw new UnauthorizedException("Failed to encode client certificate: " + e.getMessage());
+        }
+
+        AuthenticationRequest authRequest = AuthenticationRequest.builder()
+                .username("(cert)")  // placeholder — mTLS plugin derives username from the cert itself
+                .credentialType(CredentialType.X509_CERTIFICATE)
+                .credential(certDer)
+                .remoteHost(remoteIp)
+                .clientType("http")
+                .build();
+
+        AuthenticationOutcome outcome = invokeChain(chain, authRequest, "mTLS");
+        ChainAuthResult result = finishChainAuth(outcome, remoteIp, "mTLS");
+        LOG.info("mTLS HTTP auth OK for user={} roles={}", result.principal.getName(), result.roles.size());
+        return new MtlsAuthResult(result.identity, result.roles);
+    }
     /**
      * Detects a compact JWT by the standard "eyJ" prefix and exactly two dot separators.
      * Used to distinguish OIDC access tokens from plain passwords in HTTP Basic Auth.
@@ -331,9 +370,38 @@ public class BaseController {
 
         List<AuthenticationIntegrationMeta> chain;
         try {
-            List<String> names = AuthenticationIntegrationAuthenticator.parseAuthenticationChain(
-                    Config.authentication_chain);
-            chain = Lists.newArrayList();
+            List<String> names = AuthenticationIntegrationAuthenticator
+                    .parseAuthenticationChain(chainConfig);
+            for (String name : names) {
+                AuthenticationIntegrationMeta meta = Env.getCurrentEnv()
+                        .getAuthenticationIntegrationMgr()
+                        .getAuthenticationIntegration(name);
+                if (meta == null) {
+                    continue;
+                }
+                // Accept integrations of type "mtls"
+                if ("mtls".equalsIgnoreCase(meta.getType())) {
+                    return true;
+                }
+                // Accept integrations that explicitly declare X509_CERTIFICATE credential_type
+                String credType = meta.getProperties().getOrDefault("credential_type", "");
+                if (CredentialType.X509_CERTIFICATE.equalsIgnoreCase(credType)) {
+                    return true;
+                }
+            }
+        } catch (Exception e) {
+            LOG.warn("Failed to inspect authentication_chain for X509 support: {}", e.getMessage());
+        }
+        return false;
+    }
+
+    /** Resolves integration names in the chain config to their metadata objects. */
+    private List<AuthenticationIntegrationMeta> resolveChain(String chainConfig)
+            throws UnauthorizedException {
+        try {
+            List<String> names = AuthenticationIntegrationAuthenticator
+                    .parseAuthenticationChain(chainConfig);
+            List<AuthenticationIntegrationMeta> chain = Lists.newArrayList();
             for (String name : names) {
                 AuthenticationIntegrationMeta meta = Env.getCurrentEnv()
                         .getAuthenticationIntegrationMgr()

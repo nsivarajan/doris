@@ -37,6 +37,7 @@ import org.apache.doris.common.LoadException;
 import org.apache.doris.common.MetaNotFoundException;
 import org.apache.doris.common.UserException;
 import org.apache.doris.common.util.ThriftLogHelper;
+import org.apache.doris.httpv2.HttpAuthManager;
 import org.apache.doris.load.routineload.RoutineLoadJob;
 import org.apache.doris.nereids.load.NereidsCloudStreamLoadPlanner;
 import org.apache.doris.nereids.load.NereidsStreamLoadPlanner;
@@ -166,6 +167,20 @@ public class StreamLoadHandler {
     }
 
     private UserIdentity resolveCloudLoadUserIdentity(String userName) throws UserException {
+        // Fast path: OIDC/mTLS load session token — FE already authenticated this request
+        // at the HTTP layer and stored the resolved identity under a short-lived UUID.
+        // Resolving here skips MySQL-protocol re-authentication entirely.
+        if (HttpAuthManager.isLoadSessionToken(request.getPasswd())) {
+            HttpAuthManager.SessionValue sv =
+                    HttpAuthManager.getInstance().resolveLoadSession(request.getPasswd());
+            if (sv == null) {
+                throw new UserException("Load session token expired or already used — retry the request");
+            }
+            LOG.info("stream load: resolved pre-authenticated identity '{}' from load session token",
+                    sv.currentUser);
+            return sv.currentUser;
+        }
+
         CertificateAuthDecision certDecision = StreamLoadCertificateAuthHelper.authenticateForwarded(
                 CERT_RUNTIME_AUTH_SERVICE,
                 userName,

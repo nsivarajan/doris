@@ -267,7 +267,8 @@ public class CopyIntoAction extends RestBaseController {
     private ResponseEntity executeQuery(ActionAuthorizationInfo authInfo, String copyIntoStmt,
                                         HttpServletResponse response, String clusterName, long startTime) {
         StatementSubmitter.StmtContext stmtCtx = new StatementSubmitter.StmtContext(copyIntoStmt,
-                authInfo.fullUserName, authInfo.password, 1000, false, response, clusterName);
+                authInfo.fullUserName, authInfo.password, 1000, false, response, clusterName)
+                .withUserIdentity(authInfo.userIdentity);  // skip JDBC re-auth for OIDC/mTLS/LDAP
         Future<ExecutionResultSet> future = stmtSubmitter.submitBlock(stmtCtx);
 
         try {

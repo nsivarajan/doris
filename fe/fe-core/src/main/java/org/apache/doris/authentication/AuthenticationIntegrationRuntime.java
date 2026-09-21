@@ -246,14 +246,17 @@ public class AuthenticationIntegrationRuntime {
         Principal principal = Objects.requireNonNull(result.getPrincipal(), "principal is required for success");
         Set<String> mappedRoles = roleMappingEvaluator.evaluate(integration, principal);
         if (mappedRoles.isEmpty()) {
-            // If require_role_match=true, deny at login when no group rules matched.
-            // Without this, a pre-created user with no matching groups connects with only
-            // their default_role_rbac_* (information_schema read) — silent, no data access.
+            // require_role_match=true: deny login when no CREATE ROLE MAPPING rule matched this
+            // principal's externalGroups. Note: static GRANT statements are NOT consulted here —
+            // this flag enforces that group-to-role mapping is the only authorization path.
+            // If the user has direct GRANTs and you want them to take effect, omit this property
+            // or set it to false, and grant roles via CREATE ROLE MAPPING rules instead.
             if (Boolean.parseBoolean(integration.getProperty("require_role_match", "false"))) {
                 return AuthenticationOutcome.of(integration, AuthenticationResult.failure(
                         new AuthenticationException(
-                                "Access denied: no authorized groups found for this user. "
-                                        + "Contact your administrator.",
+                                "Access denied: no role mapping matched the groups in your certificate. "
+                                        + "Ensure a CREATE ROLE MAPPING rule exists for integration '"
+                                        + integration.getName() + "' that matches your group.",
                                 AuthenticationFailureType.ACCESS_DENIED)));
             }
             return AuthenticationOutcome.of(integration, result);
