@@ -310,8 +310,8 @@ public class BaseController {
      * Holds both the UserIdentity and the OIDC-mapped roles from a successful chain authentication.
      */
     protected static class OidcAuthResult {
-        final UserIdentity userIdentity;
-        final Set<String> authenticatedRoles;
+        public final UserIdentity userIdentity;
+        public final Set<String> authenticatedRoles;
 
         OidcAuthResult(UserIdentity userIdentity, Set<String> authenticatedRoles) {
             this.userIdentity = userIdentity;
@@ -320,8 +320,8 @@ public class BaseController {
     }
 
     protected static class MtlsAuthResult {
-        final UserIdentity userIdentity;
-        final Set<String> authenticatedRoles;
+        public final UserIdentity userIdentity;
+        public final Set<String> authenticatedRoles;
 
         MtlsAuthResult(UserIdentity userIdentity, Set<String> authenticatedRoles) {
             this.userIdentity = userIdentity;
@@ -426,12 +426,16 @@ public class BaseController {
                 AuthenticationIntegrationMeta meta = Env.getCurrentEnv()
                         .getAuthenticationIntegrationMgr()
                         .getAuthenticationIntegration(name);
-                if (meta != null && CredentialType.X509_CERTIFICATE.equalsIgnoreCase(
-                        meta.getIntegration().getProperty("credential_type", ""))) {
+                if (meta == null) {
+                    continue;
+                }
+                // Accept integrations of type "mtls"
+                if ("mtls".equalsIgnoreCase(meta.getType())) {
                     return true;
                 }
-                // Also accept integrations of type "mtls" regardless of explicit credential_type
-                if (meta != null && "mtls".equalsIgnoreCase(meta.getIntegration().getType())) {
+                // Accept integrations that explicitly declare X509_CERTIFICATE credential_type
+                String credType = meta.getProperties().getOrDefault("credential_type", "");
+                if (CredentialType.X509_CERTIFICATE.equalsIgnoreCase(credType)) {
                     return true;
                 }
             }

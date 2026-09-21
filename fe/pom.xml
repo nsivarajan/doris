@@ -224,6 +224,7 @@ under the License.
         <module>fe-extension-loader</module>
         <module>fe-extension-spi</module>
         <module>fe-authentication</module>
+        <module>fe-tls</module>
     </modules>
     <properties>
         <doris.hive.catalog.shade.version>3.1.2</doris.hive.catalog.shade.version>

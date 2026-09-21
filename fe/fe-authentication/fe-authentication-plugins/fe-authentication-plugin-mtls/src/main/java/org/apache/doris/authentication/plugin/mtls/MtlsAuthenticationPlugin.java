@@ -41,7 +41,6 @@ import java.util.Collections;
 import java.util.Date;
 import java.util.HashSet;
 import java.util.List;
-import java.util.Map;
 import java.util.Set;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
@@ -279,16 +278,20 @@ public class MtlsAuthenticationPlugin implements AuthenticationPlugin {
      * <ul>
      *   <li>SAN URI: {@code aprn:apple:certmgr:::group-v2:/ig/13226496/uv/}</li>
      *   <li>OU: {@code management:idms.group.13226496}</li>
-     *   <li>Username derived: {@code svc-group-13226496}</li>
-     *   <li>Groups: extracted group IDs → used for auto_match_groups_to_roles</li>
+     *   <li>Username derived: {@code g_13226496}</li>
+     *   <li>Groups: {@code {"13226496"}} — bare numeric ID, available as
+     *       {@code principal.externalGroups} for CEL {@code has_group("13226496")} rules.
+     *       Requires a {@code CREATE ROLE MAPPING} definition to take effect.</li>
      * </ul>
      *
      * <p><b>Person cert</b> (individual user):
      * <ul>
      *   <li>SAN URI: {@code aprn:apple:certmgr:::person-v2:/pid/2304357084/uv/}</li>
      *   <li>UID: {@code identity:idms.person.2304357084}</li>
-     *   <li>Username: DSID string (aligns with OIDC {@code sub} claim)</li>
-     *   <li>Groups: empty — use static role grants in Doris</li>
+     *   <li>Username: {@code p_2304357084} (DSID with person prefix)</li>
+     *   <li>Groups: {@code {"2304357084"}} — bare DSID, available for CEL rules via
+     *       {@code has_group("2304357084")}. Requires a {@code CREATE ROLE MAPPING}
+     *       definition to take effect. Use static role {@code GRANT} for simpler setups.</li>
      * </ul>
      */
     static CertIdentity extractIdentity(X509Certificate cert,
@@ -368,18 +371,23 @@ public class MtlsAuthenticationPlugin implements AuthenticationPlugin {
             username = emailUsername;
         } else if (isPersonCert && personDsid != null) {
             // Person cert: p_<dsid> — valid SQL identifier, no backticks needed.
-            // Add DSID as an external group so auto_match_groups_to_roles can fire:
-            //   CREATE ROLE `2304357084`; GRANT ... TO ROLE `2304357084`;
+            // Add DSID as an external group so CEL has_group("2304357084") rules can match:
+            //   CREATE ROLE MAPPING ... rule has_group("2304357084") -> ["analyst"];
             username = personPrefix + personDsid;
             groups.add(personDsid);
         } else if (!groups.isEmpty()) {
             // Group cert: g_<groupid>. Use numeric sort for numeric IDs (most Apple group IDs);
             // fall back to natural string order for non-numeric IDs. Smallest ID wins for determinism.
-            String groupId = groups.stream()
-                    .min(java.util.Comparator.comparingLong(s -> {
-                        try { return Long.parseLong(s); } catch (NumberFormatException e) { return Long.MAX_VALUE; }
-                    }).thenComparing(java.util.Comparator.naturalOrder()))
-                    .get();
+            java.util.Comparator<String> numericFirst = java.util.Comparator
+                    .<String, Long>comparing(s -> {
+                        try {
+                            return Long.parseLong(s);
+                        } catch (NumberFormatException e) {
+                            return Long.MAX_VALUE;
+                        }
+                    })
+                    .thenComparing(java.util.Comparator.naturalOrder());
+            String groupId = groups.stream().min(numericFirst).get();
             username = groupPrefix + groupId;
         } else {
             // Last resort: short CN (< 48 chars means it's not an opaque hash)
@@ -404,7 +412,6 @@ public class MtlsAuthenticationPlugin implements AuthenticationPlugin {
             for (java.security.cert.Certificate c :
                     cf.generateCertificates(new ByteArrayInputStream(pemBytes))) {
                 certs.add((X509Certificate) c);
-            }
             }
         } catch (Exception e) {
             LOG.warn("Failed to parse trusted CA PEM: {}", e.getMessage());
