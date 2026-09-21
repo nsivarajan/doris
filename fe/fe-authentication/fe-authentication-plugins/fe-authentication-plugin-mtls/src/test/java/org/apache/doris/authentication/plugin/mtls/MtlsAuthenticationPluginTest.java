@@ -31,7 +31,6 @@ import java.io.ByteArrayInputStream;
 import java.security.cert.CertificateFactory;
 import java.security.cert.X509Certificate;
 import java.util.Base64;
-import java.util.Map;
 
 class MtlsAuthenticationPluginTest {
 
@@ -254,10 +253,11 @@ class MtlsAuthenticationPluginTest {
 
         AuthenticationResult result = plugin.authenticate(req, integration);
         Assertions.assertTrue(result.isSuccess(), "Should succeed with valid cert and trusted CA");
+        org.apache.doris.authentication.Principal principal = result.getPrincipal();
         Assertions.assertEquals("g_13226496",
-                result.getPrincipal().map(p -> p.getName()).orElse(null));
-        Assertions.assertTrue(result.getPrincipal().map(p -> p.getExternalGroups()).orElse(java.util.Collections.emptySet())
-                .contains("13226496"));
+                principal != null ? principal.getName() : null);
+        Assertions.assertTrue(
+                principal != null && principal.getExternalGroups().contains("13226496"));
     }
 
     @Test
@@ -352,12 +352,12 @@ class MtlsAuthenticationPluginTest {
 
         AuthenticationResult result = plugin.authenticate(req, integration);
         Assertions.assertTrue(result.isSuccess(), "Person cert should authenticate successfully");
+        org.apache.doris.authentication.Principal personPrincipal = result.getPrincipal();
         Assertions.assertEquals("p_2304357084",
-                result.getPrincipal().map(p -> p.getName()).orElse(null),
+                personPrincipal != null ? personPrincipal.getName() : null,
                 "Username should be p_<dsid>");
         Assertions.assertTrue(
-                result.getPrincipal().map(p -> p.getExternalGroups()).orElse(java.util.Collections.emptySet())
-                        .contains("2304357084"),
+                personPrincipal != null && personPrincipal.getExternalGroups().contains("2304357084"),
                 "Person cert DSID should be in external groups for auto_match_groups_to_roles");
     }
 

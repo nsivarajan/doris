@@ -169,6 +169,19 @@ public class MysqlProto {
                 if (LOG.isDebugEnabled()) {
                     LOG.debug("switch to ssl mode.");
                 }
+
+                // If ssl_force_client_auth=true, verify the client actually presented a certificate.
+                // setNeedClientAuth(true) on the SSLEngine requests it at the TLS layer, but Java NIO
+                // SSL does not always close the connection before the handshake completes — so we
+                // enforce it explicitly here after the exchange succeeds.
+                if (Config.ssl_force_client_auth && channel.getClientCertificate() == null) {
+                    context.getState().setError(ErrorCode.ERR_ACCESS_DENIED_ERROR,
+                            "Client certificate required. "
+                            + "Reconnect with --ssl-cert and --ssl-key.");
+                    sendResponsePacket(context);
+                    return false;
+                }
+
                 handshakeResponse = channel.fetchOnePacket();
             } else {
                 context.getState().setError(ErrorCode.ERR_UNKNOWN_ERROR,
@@ -177,6 +190,16 @@ public class MysqlProto {
                 return false;
             }
         } else {
+            // Client did not request SSL. If the server requires SSL (enable_ssl=true),
+            // reject the connection before processing any auth data. This enforces
+            // transport security server-side regardless of client --ssl-mode flag.
+            if (Config.enable_ssl) {
+                context.getState().setError(ErrorCode.ERR_SECURE_TRANSPORT_REQUIRED,
+                        "SSL/TLS connection required. Reconnect with --ssl-mode=REQUIRED "
+                        + "and a valid client certificate.");
+                sendResponsePacket(context);
+                return false;
+            }
             handshakeResponse = clientRequestPacket;
         }
 

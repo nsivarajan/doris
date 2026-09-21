@@ -23,6 +23,7 @@ import org.apache.doris.auth.certificate.CertificateRuntimeAuthFactory;
 import org.apache.doris.auth.certificate.CertificateRuntimeAuthService;
 import org.apache.doris.authentication.AuthenticationFailureType;
 import org.apache.doris.authentication.CredentialType;
+import org.apache.doris.authentication.Principal;
 import org.apache.doris.common.Config;
 import org.apache.doris.common.ErrorCode;
 import org.apache.doris.common.util.ClassLoaderUtils;
@@ -45,6 +46,7 @@ import org.apache.logging.log4j.Logger;
 
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
+import java.security.cert.X509Certificate;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
@@ -186,6 +188,21 @@ public class AuthenticatorManager {
         }
         UserIdentity preferredUserIdentity = certDecision.isVerified() ? certDecision.getUserIdentity() : null;
 
+        // mTLS path: if authentication_chain is configured and the client presented a TLS cert,
+        // try to mine identity from the cert (SAN URI / OU group extraction).
+        // Flow: mTLS → OIDC → LDAP → password (in chain order).
+        // If mTLS cert mining fails or no mTLS plugin in chain, fall through to password/OIDC.
+        // The cert is only used for identity here — transport enforcement already happened at
+        // the TLS handshake level (ssl_force_client_auth=true rejects connections without cert).
+        X509Certificate clientCert = channel.getClientCertificate();
+        if (clientCert != null && hasAuthenticationChain()) {
+            AuthenticateResponse mtlsResponse = tryMtlsChainAuth(context, remoteIp, clientCert);
+            if (mtlsResponse != null && mtlsResponse.isSuccess()) {
+                return finishSuccessfulAuthentication(context, remoteIp, mtlsResponse, true);
+            }
+            // cert present but mTLS auth failed or no mTLS plugin — fall through to password/OIDC
+        }
+
         Authenticator primaryAuthenticator = chooseAuthenticator(userName, remoteIp);
         boolean debugEnabled = LOG.isDebugEnabled();
         long resolveStart = 0L;
@@ -324,6 +341,44 @@ public class AuthenticatorManager {
 
     private boolean hasAuthenticationChain() {
         return !AuthenticationIntegrationAuthenticator.parseAuthenticationChain(Config.authentication_chain).isEmpty();
+    }
+
+    private AuthenticateResponse tryMtlsChainAuth(ConnectContext context,
+            String remoteIp, X509Certificate clientCert) {
+        try {
+            byte[] certDer = clientCert.getEncoded();
+            // Use placeholder username — the mTLS plugin derives the real username from cert fields.
+            // The chain's supports() method detects X509_CERTIFICATE credential type and routes
+            // to the mTLS plugin; other plugins (OIDC, LDAP, password) return false for this type.
+            AuthenticateRequest mtlsRequest = AuthenticateRequest.builder()
+                    .userName("(cert)")
+                    .credentialType(CredentialType.X509_CERTIFICATE)
+                    .credential(certDer)
+                    .remoteHost(remoteIp)
+                    .clientType("mysql")
+                    .build();
+
+            AuthenticateResponse response = authenticateWith(getAuthenticationChainAuthenticator(), mtlsRequest);
+            if (response != null && response.isSuccess()) {
+                Principal principal = response.getPrincipal();
+                LOG.info("mTLS MySQL auth OK for user={} groups={}",
+                        principal != null ? principal.getName() : "?",
+                        response.getAuthenticatedRoles().size());
+            }
+            return response;
+        } catch (RuntimeException e) {
+            // RuntimeException means the mTLS plugin EXISTS but is misconfigured (e.g. wrong cert path).
+            // Return a hard failure — do NOT fall through to password auth, which would silently
+            // downgrade security when mTLS was explicitly configured but broken.
+            LOG.error("mTLS chain auth threw unexpected exception — denying connection. "
+                    + "Check mTLS integration configuration: {}", e.getMessage(), e);
+            return AuthenticateResponse.failedResponse;
+        } catch (Exception e) {
+            // IOException / checked exceptions from cert encoding — transient or protocol errors.
+            // Fall through to password/OIDC since mTLS was not positively configured for this cert.
+            LOG.warn("mTLS chain auth failed with checked exception, falling through: {}", e.getMessage());
+            return null;
+        }
     }
 
     private boolean isOidcAuthenticationWithoutSsl(MysqlAuthPacket authPacket, AuthenticateRequest request) {

@@ -41,7 +41,6 @@ import java.util.Collections;
 import java.util.Date;
 import java.util.HashSet;
 import java.util.List;
-import java.util.Map;
 import java.util.Set;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
@@ -375,11 +374,16 @@ public class MtlsAuthenticationPlugin implements AuthenticationPlugin {
         } else if (!groups.isEmpty()) {
             // Group cert: g_<groupid>. Use numeric sort for numeric IDs (most Apple group IDs);
             // fall back to natural string order for non-numeric IDs. Smallest ID wins for determinism.
-            String groupId = groups.stream()
-                    .min(java.util.Comparator.comparingLong(s -> {
-                        try { return Long.parseLong(s); } catch (NumberFormatException e) { return Long.MAX_VALUE; }
-                    }).thenComparing(java.util.Comparator.naturalOrder()))
-                    .get();
+            java.util.Comparator<String> numericFirst = java.util.Comparator
+                    .<String, Long>comparing(s -> {
+                        try {
+                            return Long.parseLong(s);
+                        } catch (NumberFormatException e) {
+                            return Long.MAX_VALUE;
+                        }
+                    })
+                    .thenComparing(java.util.Comparator.naturalOrder());
+            String groupId = groups.stream().min(numericFirst).get();
             username = groupPrefix + groupId;
         } else {
             // Last resort: short CN (< 48 chars means it's not an opaque hash)
@@ -404,7 +408,6 @@ public class MtlsAuthenticationPlugin implements AuthenticationPlugin {
             for (java.security.cert.Certificate c :
                     cf.generateCertificates(new ByteArrayInputStream(pemBytes))) {
                 certs.add((X509Certificate) c);
-            }
             }
         } catch (Exception e) {
             LOG.warn("Failed to parse trusted CA PEM: {}", e.getMessage());
