@@ -351,6 +351,13 @@ struct RaceState {
     std::string peer_winner_host;  // host of the winning peer candidate
     int64_t peer_elapsed_ns = 0;   // wall-clock time of the entire peer path (including retries)
     int64_t peer_winner_io_ns = 0; // I/O time of the winning candidate only
+    // Per-task local stats accumulated by each background task independently.
+    // Merged sequentially into io_ctx->file_cache_stats in collect_race_result() after
+    // cv.wait() returns — both background tasks have finished by then, no concurrent writes.
+    // This eliminates the data race where background bthreads and the main scan thread both
+    // call _update_stats() on the same plain int64_t fields through the shared stats pointer.
+    FileCacheStatistics peer_task_stats;
+    FileCacheStatistics s3_task_stats;
 };
 
 // Peer race logic: try candidates sequentially until one succeeds or all fail.
@@ -515,6 +522,8 @@ Status collect_race_result(std::shared_ptr<RaceState> race, size_t span_size,
             race->cv.wait(lk);
         }
     }
+    // cv.wait() returned — both background tasks have completed.
+    // From here on we are on the main scan thread with exclusive access to race->*_task_stats.
     g_active_peer_races.fetch_sub(1, std::memory_order_relaxed);
 
     const std::string self_cg_id =
@@ -536,32 +545,37 @@ Status collect_race_result(std::shared_ptr<RaceState> race, size_t span_size,
         } else {
             g_peer_same_compute_group_read << 1;
         }
-        if (io_ctx != nullptr && io_ctx->file_cache_stats != nullptr) {
-            io_ctx->file_cache_stats->num_peer_race_peer_win++;
-            io_ctx->file_cache_stats->peer_hosts.insert(race->peer_winner_host);
-            if (is_cross_cg) {
-                io_ctx->file_cache_stats->num_cross_cg_peer_io_total++;
-                io_ctx->file_cache_stats->bytes_read_from_cross_cg_peer += span_size;
-                io_ctx->file_cache_stats->cross_cg_peer_io_timer += race->peer_winner_io_ns;
-            } else {
-                io_ctx->file_cache_stats->num_same_cg_peer_io_total++;
-                io_ctx->file_cache_stats->bytes_read_from_same_cg_peer += span_size;
-                io_ctx->file_cache_stats->same_cg_peer_io_timer += race->peer_winner_io_ns;
-            }
+        // Accumulate into the per-task local stats — NOT directly into io_ctx->file_cache_stats.
+        // The merge into io_ctx happens once below, after the winner branch, on the main thread.
+        race->peer_task_stats.num_peer_race_peer_win++;
+        race->peer_task_stats.peer_hosts.insert(race->peer_winner_host);
+        if (is_cross_cg) {
+            race->peer_task_stats.num_cross_cg_peer_io_total++;
+            race->peer_task_stats.bytes_read_from_cross_cg_peer += span_size;
+            race->peer_task_stats.cross_cg_peer_io_timer += race->peer_winner_io_ns;
+        } else {
+            race->peer_task_stats.num_same_cg_peer_io_total++;
+            race->peer_task_stats.bytes_read_from_same_cg_peer += span_size;
+            race->peer_task_stats.same_cg_peer_io_timer += race->peer_winner_io_ns;
         }
-        return Status::OK();
     } else if (race->winner == 1) {
         // S3 won.
         buffer = std::move(race->s3_buf);
         stats.from_peer_cache = false;
         g_peer_race_s3_win << 1;
-        if (io_ctx != nullptr && io_ctx->file_cache_stats != nullptr) {
-            io_ctx->file_cache_stats->num_peer_race_s3_win++;
-        }
-        return Status::OK();
+        race->s3_task_stats.num_peer_race_s3_win++;
+    } else {
+        g_peer_race_both_fail << 1;
+        return Status::InternalError<false>("peer race: both peer and s3 failed");
     }
-    g_peer_race_both_fail << 1;
-    return Status::InternalError<false>("peer race: both peer and s3 failed");
+
+    // Single sequential merge into the shared stats — main thread only, both background
+    // tasks have already exited. merge_from() handles all fields including peer_hosts (set).
+    if (io_ctx != nullptr && io_ctx->file_cache_stats != nullptr) {
+        io_ctx->file_cache_stats->merge_from(race->peer_task_stats);
+        io_ctx->file_cache_stats->merge_from(race->s3_task_stats);
+    }
+    return Status::OK();
 }
 
 } // anonymous namespace
