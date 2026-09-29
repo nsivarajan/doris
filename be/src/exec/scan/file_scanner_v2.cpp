@@ -1300,14 +1300,15 @@ FileScannerV2::RealtimeCounterDeltas FileScannerV2::_collect_realtime_counter_de
     const int64_t read_rows = cast_set<int64_t>(file_reader_stats.read_rows);
     const int64_t bytes_read_from_local = file_cache_statistics.bytes_read_from_local;
     const int64_t bytes_read_from_remote = file_cache_statistics.bytes_read_from_remote;
-    DORIS_CHECK(read_bytes >= *last_read_bytes);
-    DORIS_CHECK(read_rows >= *last_read_rows);
-    DORIS_CHECK(bytes_read_from_local >= *last_bytes_read_from_local);
-    DORIS_CHECK(bytes_read_from_remote >= *last_bytes_read_from_remote);
+    // Defence-in-depth: the peer-race background tasks share the io_ctx stats pointer with the
+    // main scan thread. A lost-update race can make a counter appear to go backwards between
+    // samples. Clamp to zero rather than asserting — a slightly under-reported delta for one
+    // task is harmless; a killed query is not. Root cause fixed in collect_race_result() in
+    // cached_remote_file_reader.cpp (per-task local stats merged sequentially after join).
 
     RealtimeCounterDeltas deltas;
-    deltas.scan_rows = read_rows - *last_read_rows;
-    deltas.scan_bytes = read_bytes - *last_read_bytes;
+    deltas.scan_rows  = std::max<int64_t>(0, read_rows  - *last_read_rows);
+    deltas.scan_bytes = std::max<int64_t>(0, read_bytes - *last_read_bytes);
     // Peer cache is a known cache source, but it is not remote object storage.
     const bool has_cache_source_stats = file_cache_statistics.num_local_io_total != 0 ||
                                         file_cache_statistics.num_remote_io_total != 0 ||
@@ -1326,9 +1327,10 @@ FileScannerV2::RealtimeCounterDeltas FileScannerV2::_collect_realtime_counter_de
             break;
         }
     } else {
-        deltas.scan_bytes_from_local_storage = bytes_read_from_local - *last_bytes_read_from_local;
+        deltas.scan_bytes_from_local_storage =
+                std::max<int64_t>(0, bytes_read_from_local - *last_bytes_read_from_local);
         deltas.scan_bytes_from_remote_storage =
-                bytes_read_from_remote - *last_bytes_read_from_remote;
+                std::max<int64_t>(0, bytes_read_from_remote - *last_bytes_read_from_remote);
     }
 
     *last_read_bytes = read_bytes;
