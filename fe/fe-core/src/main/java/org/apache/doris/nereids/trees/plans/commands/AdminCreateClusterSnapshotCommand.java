@@ -19,7 +19,9 @@ package org.apache.doris.nereids.trees.plans.commands;
 
 import org.apache.doris.analysis.StmtType;
 import org.apache.doris.analysis.UserIdentity;
+import org.apache.doris.catalog.Column;
 import org.apache.doris.catalog.Env;
+import org.apache.doris.catalog.ScalarType;
 import org.apache.doris.cloud.catalog.CloudEnv;
 import org.apache.doris.cloud.snapshot.CloudSnapshotHandler;
 import org.apache.doris.common.AnalysisException;
@@ -30,16 +32,27 @@ import org.apache.doris.mysql.privilege.PrivPredicate;
 import org.apache.doris.nereids.trees.plans.PlanType;
 import org.apache.doris.nereids.trees.plans.visitor.PlanVisitor;
 import org.apache.doris.qe.ConnectContext;
+import org.apache.doris.qe.ShowResultSet;
+import org.apache.doris.qe.ShowResultSetMetaData;
 import org.apache.doris.qe.StmtExecutor;
 
+import com.google.common.collect.ImmutableList;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 
+import java.util.Collections;
 import java.util.Map;
 import java.util.Objects;
 
 /**
- * ADMIN CREATE CLUSTER SNAPSHOT PROPERTIES('ttl' = '3600', 'label' = 'test_snapshot');
+ * ADMIN CREATE CLUSTER SNAPSHOT PROPERTIES(
+ *   'ttl'        = '604800',
+ *   'label'      = 'my_snap',
+ *   'vault_name' = 'default_vault'
+ * );
+ *
+ * The FDB read version (for fdbrestore consistency) is captured automatically
+ * via create_meta_sync_point at checkpoint time — no operator input needed.
  */
 public class AdminCreateClusterSnapshotCommand extends Command implements ForwardWithSync {
 
@@ -65,8 +78,16 @@ public class AdminCreateClusterSnapshotCommand extends Command implements Forwar
     @Override
     public void run(ConnectContext ctx, StmtExecutor executor) throws Exception {
         validate(ctx);
-        CloudSnapshotHandler cloudSnapshotHandler = ((CloudEnv) ctx.getEnv()).getCloudSnapshotHandler();
-        cloudSnapshotHandler.submitJob(ttl, label, vaultName);
+        CloudSnapshotHandler handler = ((CloudEnv) ctx.getEnv()).getCloudSnapshotHandler();
+        handler.enqueueJob(ttl, label, vaultName);
+        // Return immediately — snapshot runs asynchronously on the snapshot handler daemon thread.
+        // User checks progress via SHOW CLUSTER SNAPSHOTS.
+        ShowResultSetMetaData meta = ShowResultSetMetaData.builder()
+                .addColumn(new Column("Status", ScalarType.createVarchar(256)))
+                .build();
+        executor.sendResultSet(new ShowResultSet(meta,
+                Collections.singletonList(ImmutableList.of(
+                        "Snapshot job submitted. Check SHOW CLUSTER SNAPSHOTS for status."))));
     }
 
     /**
@@ -76,15 +97,12 @@ public class AdminCreateClusterSnapshotCommand extends Command implements Forwar
         if (!Config.isCloudMode()) {
             throw new AnalysisException("The sql is illegal in disk mode ");
         }
-        // Check privilege based on configuration
         if ("admin".equalsIgnoreCase(Config.cluster_snapshot_min_privilege)) {
-            // When configured as admin, check ADMIN privilege
             if (!Env.getCurrentEnv().getAccessManager().checkGlobalPriv(ctx, PrivPredicate.ADMIN)) {
                 ErrorReport.reportAnalysisException(ErrorCode.ERR_SPECIFIC_ACCESS_DENIED_ERROR,
                         PrivPredicate.ADMIN.getPrivs().toString());
             }
         } else {
-            // Default or configured as root, check if user is root
             UserIdentity currentUser = ctx.getCurrentUserIdentity();
             if (currentUser == null || !currentUser.isRootUser()) {
                 ErrorReport.reportAnalysisException(ErrorCode.ERR_SPECIFIC_ACCESS_DENIED_ERROR,

@@ -17,6 +17,7 @@
 
 package org.apache.doris.cloud.storage;
 
+import org.apache.doris.cloud.proto.Cloud;
 import org.apache.doris.common.Config;
 import org.apache.doris.common.DdlException;
 
@@ -26,6 +27,9 @@ import com.aliyun.oss.OSS;
 import com.aliyun.oss.OSSClientBuilder;
 import com.aliyun.oss.OSSErrorCode;
 import com.aliyun.oss.OSSException;
+import com.aliyun.oss.common.auth.CredentialsProvider;
+import com.aliyun.oss.common.auth.DefaultCredentialProvider;
+import com.aliyun.oss.common.auth.EcsRamRoleCredentialsProvider;
 import com.aliyun.oss.model.GeneratePresignedUrlRequest;
 import com.aliyun.oss.model.HeadObjectRequest;
 import com.aliyun.oss.model.ListObjectsV2Request;
@@ -162,17 +166,133 @@ public class OssRemote extends DefaultRemote {
     }
 
     private void initClient() {
-        if (ossClient == null) {
-            /*
-             * There are several timeout configuration, see {@link com.aliyun.oss.ClientConfiguration},
-             * please config if needed.
-             */
-            if (obj.getToken() != null) {
-                ossClient = new OSSClientBuilder().build(obj.getEndpoint(), obj.getAk(), obj.getSk(), obj.getToken());
-            } else {
-                ossClient = new OSSClientBuilder().build(obj.getEndpoint(), obj.getAk(), obj.getSk());
-            }
+        if (ossClient != null) {
+            return;
         }
+        String endpoint = obj.getEndpoint();
+        if (!endpoint.startsWith("http://") && !endpoint.startsWith("https://")) {
+            endpoint = "https://" + endpoint;
+        }
+
+        Cloud.CredProviderTypePB credType = obj.getCredProviderType() != null
+                ? obj.getCredProviderType()
+                : Cloud.CredProviderTypePB.INSTANCE_PROFILE;
+
+        CredentialsProvider provider;
+
+        if (StringUtils.isNotBlank(obj.getArn())) {
+            // role_arn configured: fetch ECS RAM role credentials then call STS AssumeRole.
+            // Mirrors OSSObjStorage.resolveEcsRoleThenAssumeRole() and BE OSSSTSCredentialProvider.
+            Triple<String, String, String> stsCreds = assumeRoleViaEcs(obj.getArn(), obj.getRegion());
+            provider = new DefaultCredentialProvider(
+                    stsCreds.getLeft(), stsCreds.getMiddle(), stsCreds.getRight());
+        } else if (credType == Cloud.CredProviderTypePB.INSTANCE_PROFILE
+                || (StringUtils.isBlank(obj.getAk()) && StringUtils.isBlank(obj.getSk()))) {
+            // No AK/SK and no role_arn: use ECS instance metadata directly.
+            // Role name from roleName field, or fall back to ALIBABA_CLOUD_ECS_METADATA env var.
+            String roleName = StringUtils.isNotBlank(obj.getRoleName())
+                    ? obj.getRoleName()
+                    : System.getenv("ALIBABA_CLOUD_ECS_METADATA");
+            if (StringUtils.isBlank(roleName)) {
+                throw new IllegalStateException(
+                        "OssRemote: cred_provider_type=INSTANCE_PROFILE but no role_name set and "
+                        + "ALIBABA_CLOUD_ECS_METADATA env var is not configured");
+            }
+            provider = new EcsRamRoleCredentialsProvider(roleName);
+        } else if (StringUtils.isNotBlank(obj.getToken())) {
+            // STS temporary credentials (ak + sk + session_token)
+            provider = new DefaultCredentialProvider(obj.getAk(), obj.getSk(), obj.getToken());
+        } else {
+            // Static AK/SK
+            provider = new DefaultCredentialProvider(obj.getAk(), obj.getSk());
+        }
+
+        ossClient = new OSSClientBuilder().build(endpoint, provider);
+        LOG.info("OssRemote: client initialised, credType={}, hasRoleArn={}, hasAk={}",
+                credType, StringUtils.isNotBlank(obj.getArn()), StringUtils.isNotBlank(obj.getAk()));
+    }
+
+    // Fetch ECS RAM role credentials from instance metadata (100.100.100.200),
+    // then call STS AssumeRole to get short-lived credentials for the target role_arn.
+    private Triple<String, String, String> assumeRoleViaEcs(String roleArn, String region) {
+        try {
+            // Step 1: discover the attached RAM role name from ECS metadata
+            String roleName;
+            try {
+                URL metaUrl = new URL("http://100.100.100.200/latest/meta-data/ram/security-credentials/");
+                try (java.io.BufferedReader reader = new java.io.BufferedReader(
+                        new java.io.InputStreamReader(metaUrl.openStream()))) {
+                    String line = reader.readLine();
+                    if (line == null || line.trim().isEmpty()) {
+                        throw new RuntimeException(
+                                "ECS metadata returned empty role name — no RAM role attached to this instance");
+                    }
+                    roleName = line.trim();
+                }
+            } catch (RuntimeException e) {
+                throw e;
+            } catch (Exception e) {
+                throw new RuntimeException("Failed to fetch ECS RAM role name from metadata: " + e.getMessage(), e);
+            }
+
+            // Step 2: fetch temporary credentials for that role from ECS metadata
+            URL credUrl = new URL(
+                    "http://100.100.100.200/latest/meta-data/ram/security-credentials/" + roleName);
+            String credJson;
+            try (java.io.BufferedReader reader = new java.io.BufferedReader(
+                    new java.io.InputStreamReader(credUrl.openStream()))) {
+                StringBuilder sb = new StringBuilder();
+                String line;
+                while ((line = reader.readLine()) != null) {
+                    sb.append(line);
+                }
+                credJson = sb.toString();
+            }
+            String ecsAk = extractJson(credJson, "AccessKeyId");
+            String ecsSk = extractJson(credJson, "AccessKeySecret");
+            String ecsSt = extractJson(credJson, "SecurityToken");
+
+            // Step 3: call STS AssumeRole with the ECS credentials
+            return callStsAssumeRole(ecsAk, ecsSk, ecsSt, roleArn, region);
+        } catch (RuntimeException e) {
+            throw e;
+        } catch (Exception e) {
+            throw new RuntimeException("assumeRoleViaEcs failed: " + e.getMessage(), e);
+        }
+    }
+
+    private Triple<String, String, String> callStsAssumeRole(
+            String ak, String sk, String stsToken, String roleArn, String region) throws Exception {
+        AssumeRoleRequest req = new AssumeRoleRequest();
+        req.setRoleArn(roleArn);
+        req.setRoleSessionName(getNewRoleSessionName());
+        req.setDurationSeconds((long) getDurationSeconds());
+
+        DefaultProfile profile = DefaultProfile.getProfile(
+                StringUtils.isNotBlank(region) ? region : "cn-hangzhou");
+        if (Config.enable_sts_vpc) {
+            profile.enableUsingVpcEndpoint();
+        }
+        com.aliyuncs.auth.BasicSessionCredentials sessionCreds =
+                new com.aliyuncs.auth.BasicSessionCredentials(ak, sk, stsToken);
+        DefaultAcsClient stsClient = new DefaultAcsClient(profile,
+                new StaticCredentialsProvider(sessionCreds));
+        AssumeRoleResponse resp = stsClient.getAcsResponse(req);
+        AssumeRoleResponse.Credentials creds = resp.getCredentials();
+        return Triple.of(creds.getAccessKeyId(), creds.getAccessKeySecret(), creds.getSecurityToken());
+    }
+
+    // Minimal JSON field extractor — avoids pulling in a JSON dependency.
+    private static String extractJson(String json, String field) {
+        String key = "\"" + field + "\"";
+        int idx = json.indexOf(key);
+        if (idx < 0) {
+            throw new IllegalArgumentException("Field '" + field + "' not found in JSON");
+        }
+        int colon = json.indexOf(':', idx + key.length());
+        int start = json.indexOf('"', colon + 1) + 1;
+        int end = json.indexOf('"', start);
+        return json.substring(start, end);
     }
 
     @Override

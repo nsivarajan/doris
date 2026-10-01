@@ -24,6 +24,7 @@
 #include <gen_cpp/olap_file.pb.h>
 
 #include <cstdlib>
+#include <limits>
 #include <string>
 
 #include "common/util.h"
@@ -107,4 +108,38 @@ bool InstanceRecycler::should_recycle_versioned_keys() const {
     return true;
 }
 
+int InstanceRecycler::get_oldest_live_snapshot_time(int64_t* oldest_create_at) const {
+    *oldest_create_at = std::numeric_limits<int64_t>::max();
+
+    std::unique_ptr<Transaction> txn;
+    TxnErrorCode err = txn_kv_->create_txn(&txn);
+    if (err != TxnErrorCode::TXN_OK) {
+        LOG(WARNING) << "get_oldest_live_snapshot_time: failed to create txn"
+                     << ", instance_id=" << instance_id_ << ", err=" << err;
+        return -1;
+    }
+
+    std::vector<std::pair<SnapshotPB, Versionstamp>> snapshots;
+    auto [code, msg] = SnapshotManager::get_all_snapshots(txn.get(), instance_id_, "", &snapshots);
+    if (code != MetaServiceCode::OK) {
+        LOG(WARNING) << "get_oldest_live_snapshot_time: failed to list snapshots"
+                     << ", instance_id=" << instance_id_ << ", msg=" << msg;
+        // On error, return -1 but leave *oldest_create_at = INT64_MAX so callers skip protection.
+        // This is the safe-fail direction: we'd rather skip protection than block all recycling.
+        return -1;
+    }
+
+    for (auto& [pb, vs] : snapshots) {
+        if (pb.status() != SnapshotStatus::SNAPSHOT_READY) {
+            continue;
+        }
+        if (pb.create_at() > 0 && pb.create_at() < *oldest_create_at) {
+            *oldest_create_at = pb.create_at();
+        }
+    }
+
+    return 0;
+}
+
 } // namespace doris::cloud
+

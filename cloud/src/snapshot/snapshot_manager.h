@@ -115,6 +115,13 @@ protected:
     SnapshotManager& operator=(const SnapshotManager&) = delete;
 
     std::shared_ptr<TxnKv> txn_kv_;
+
+private:
+    // Write an updated SnapshotPB back to FDB at the given versionstamp key.
+    bool _update_snapshot_status(std::string_view instance_id, Versionstamp vs,
+                                 const SnapshotPB& pb);
+    // Remove a snapshot FDB key by versionstamp.
+    bool _delete_snapshot_key(std::string_view instance_id, Versionstamp vs);
 };
 
 } // namespace doris::cloud
