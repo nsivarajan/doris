@@ -4096,9 +4096,18 @@ public class Config extends ConfigBase {
     @ConfField(mutable = true)
     public static long cloud_snapshot_timeout_seconds = 600;
     @ConfField(mutable = true)
-    public static long cloud_auto_snapshot_max_reversed_num = 35;
+    public static long cloud_auto_snapshot_max_reversed_num = 168; // 7 days × 24 hourly snapshots
     @ConfField(mutable = true)
     public static long cloud_auto_snapshot_min_interval_seconds = 3600;
+    @ConfField(mutable = true, description = {
+            "自动快照的 TTL（秒）。默认 604800（7天）。",
+            "TTL in seconds for auto-created cluster snapshots. Default 604800 (7 days)."})
+    public static long cloud_auto_snapshot_ttl_seconds = 604800; // 7 days
+    @ConfField(mutable = true, description = {
+            "是否启用自动集群快照。设为 true 后，FE 每隔 cloud_snapshot_handler_interval_second 秒自动触发一次快照。",
+            "Enable automatic cluster snapshots. When true the MasterDaemon fires "
+                    + "refreshAutoSnapshotJob() every cloud_snapshot_handler_interval_second seconds."})
+    public static boolean cloud_auto_snapshot_enabled = false;
 
     @ConfField(mutable = true, description = {
             "cluster snapshot 相关操作的最低权限要求。可选值：'root'（仅 root 用户可执行）或 'admin'（ADMIN 权限用户可执行）。默认值为 'root'。",

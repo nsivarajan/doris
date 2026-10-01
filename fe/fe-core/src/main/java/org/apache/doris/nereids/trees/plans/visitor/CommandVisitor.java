@@ -188,6 +188,7 @@ import org.apache.doris.nereids.trees.plans.commands.ShowBuiltinFunctionsCommand
 import org.apache.doris.nereids.trees.plans.commands.ShowCatalogCommand;
 import org.apache.doris.nereids.trees.plans.commands.ShowCatalogRecycleBinCommand;
 import org.apache.doris.nereids.trees.plans.commands.ShowCharsetCommand;
+import org.apache.doris.nereids.trees.plans.commands.ShowClusterSnapshotsCommand;
 import org.apache.doris.nereids.trees.plans.commands.ShowClustersCommand;
 import org.apache.doris.nereids.trees.plans.commands.ShowCollationCommand;
 import org.apache.doris.nereids.trees.plans.commands.ShowColumnHistogramStatsCommand;
@@ -1293,6 +1294,11 @@ public interface CommandVisitor<R, C> {
     default R visitAdminDropClusterSnapshotCommand(
             AdminDropClusterSnapshotCommand adminDropClusterSnapshotCommand, C context) {
         return visitCommand(adminDropClusterSnapshotCommand, context);
+    }
+
+    default R visitShowClusterSnapshotsCommand(
+            ShowClusterSnapshotsCommand showClusterSnapshotsCommand, C context) {
+        return visitCommand(showClusterSnapshotsCommand, context);
     }
 
     default R visitAdminRepairTableCommand(AdminRepairTableCommand adminRepairTableCommand, C context) {

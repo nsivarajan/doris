@@ -2765,6 +2765,14 @@ int InstanceRecycler::recycle_indexes() {
 
     int64_t start_time = duration_cast<seconds>(steady_clock::now().time_since_epoch()).count();
     register_recycle_task(task_name, start_time);
+    int64_t oldest_snapshot_create_at_idx = std::numeric_limits<int64_t>::max();
+    if (get_oldest_live_snapshot_time(&oldest_snapshot_create_at_idx) != 0) {
+        LOG_WARNING("recycle_indexes: failed to get oldest live snapshot time; "
+                    "skipping snapshot-aware deletion this cycle to avoid data loss")
+                .tag("instance_id", instance_id_);
+        return -1;
+    }
+    int64_t num_protected_by_snapshot_idx = 0;
 
     DORIS_CLOUD_DEFER {
         unregister_recycle_task(task_name);
@@ -2775,7 +2783,8 @@ int InstanceRecycler::recycle_indexes() {
                 .tag("instance_id", instance_id_)
                 .tag("num_scanned", num_scanned)
                 .tag("num_expired", num_expired)
-                .tag("num_recycled", num_recycled);
+                .tag("num_recycled", num_recycled)
+                .tag("num_protected_by_snapshot", num_protected_by_snapshot_idx);
     };
 
     int64_t earlest_ts = std::numeric_limits<int64_t>::max();
@@ -2792,6 +2801,12 @@ int InstanceRecycler::recycle_indexes() {
         int64_t current_time = ::time(nullptr);
         if (current_time <
             calculate_index_expired_time(instance_id_, index_pb, &earlest_ts)) { // not expired
+            return 0;
+        }
+        // Snapshot protection
+        if (oldest_snapshot_create_at_idx < std::numeric_limits<int64_t>::max() &&
+            (index_pb.creation_time() == 0 || index_pb.creation_time() >= oldest_snapshot_create_at_idx)) {
+            ++num_protected_by_snapshot_idx;
             return 0;
         }
         ++num_expired;
@@ -2998,6 +3013,14 @@ int InstanceRecycler::recycle_partitions() {
 
     int64_t start_time = duration_cast<seconds>(steady_clock::now().time_since_epoch()).count();
     register_recycle_task(task_name, start_time);
+    int64_t oldest_snapshot_create_at_part = std::numeric_limits<int64_t>::max();
+    if (get_oldest_live_snapshot_time(&oldest_snapshot_create_at_part) != 0) {
+        LOG_WARNING("recycle_partitions: failed to get oldest live snapshot time; "
+                    "skipping snapshot-aware deletion this cycle to avoid data loss")
+                .tag("instance_id", instance_id_);
+        return -1;
+    }
+    int64_t num_protected_by_snapshot_part = 0;
 
     DORIS_CLOUD_DEFER {
         unregister_recycle_task(task_name);
@@ -3008,7 +3031,8 @@ int InstanceRecycler::recycle_partitions() {
                 .tag("instance_id", instance_id_)
                 .tag("num_scanned", num_scanned)
                 .tag("num_expired", num_expired)
-                .tag("num_recycled", num_recycled);
+                .tag("num_recycled", num_recycled)
+                .tag("num_protected_by_snapshot", num_protected_by_snapshot_part);
     };
 
     int64_t earlest_ts = std::numeric_limits<int64_t>::max();
@@ -3026,6 +3050,12 @@ int InstanceRecycler::recycle_partitions() {
         int64_t current_time = ::time(nullptr);
         if (current_time < calculate_partition_expired_time(instance_id_, part_pb,
                                                             &earlest_ts)) { // not expired
+            return 0;
+        }
+        // Snapshot protection
+        if (oldest_snapshot_create_at_part < std::numeric_limits<int64_t>::max() &&
+            (part_pb.creation_time() == 0 || part_pb.creation_time() >= oldest_snapshot_create_at_part)) {
+            ++num_protected_by_snapshot_part;
             return 0;
         }
         ++num_expired;
@@ -5536,6 +5566,16 @@ int InstanceRecycler::recycle_rowsets() {
     int64_t start_time = duration_cast<seconds>(steady_clock::now().time_since_epoch()).count();
     register_recycle_task(task_name, start_time);
 
+    // Declare before DEFER so the lambda captures them by reference correctly.
+    int64_t oldest_snapshot_create_at = std::numeric_limits<int64_t>::max();
+    if (get_oldest_live_snapshot_time(&oldest_snapshot_create_at) != 0) {
+        LOG_WARNING("recycle_rowsets: failed to get oldest live snapshot time; "
+                    "skipping snapshot-aware deletion this cycle to avoid data loss")
+                .tag("instance_id", instance_id_);
+        return -1;
+    }
+    int64_t num_protected_by_snapshot = 0;
+
     DORIS_CLOUD_DEFER {
         unregister_recycle_task(task_name);
         int64_t cost =
@@ -5549,6 +5589,7 @@ int InstanceRecycler::recycle_rowsets() {
                 .tag("num_recycled.prepare", num_prepare)
                 .tag("num_recycled.compacted", num_compacted)
                 .tag("num_recycled.empty_rowset", num_empty_rowset)
+                .tag("num_protected_by_snapshot", num_protected_by_snapshot)
                 .tag("total_rowset_meta_key_size_scanned", total_rowset_key_size)
                 .tag("total_rowset_meta_value_size_scanned", total_rowset_value_size)
                 .tag("expired_rowset_meta_size", expired_rowset_size);
@@ -5633,6 +5674,21 @@ int InstanceRecycler::recycle_rowsets() {
         if (current_time < expiration) { // not expired
             return 0;
         }
+
+        // Snapshot protection: rowset entered recycle space AFTER oldest live snapshot was taken
+        // → it was alive at snapshot time → defer deletion until snapshot expires or is dropped.
+        // Use rowset.creation_time() — the RecycleRowsetPB outer field recording when the rowset
+        // entered the recycle queue (set at DROP/COMPACT time). Do NOT use
+        // rowset_meta().creation_time() which is when the rowset data was originally written
+        // (always older, causing the guard to incorrectly allow deletion).
+        int64_t rowset_creation_time = rowset.creation_time();
+        // creation_time=0: old-format entry; protect conservatively if snapshot exists.
+        if (oldest_snapshot_create_at < std::numeric_limits<int64_t>::max() &&
+            (rowset_creation_time == 0 || rowset_creation_time >= oldest_snapshot_create_at)) {
+            ++num_protected_by_snapshot;
+            return 0;
+        }
+
         ++num_expired;
         expired_rowset_size += v.size();
 

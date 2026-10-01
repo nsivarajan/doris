@@ -1188,6 +1188,7 @@ HttpResponse process_decouple_instance(MetaServiceImpl* service, brpc::Controlle
     return http_json_reply(code, msg);
 }
 
+
 HttpResponse process_set_snapshot_property(MetaServiceImpl* service, brpc::Controller* ctrl) {
     AlterInstanceRequest req;
     PARSE_MESSAGE_OR_RETURN(ctrl, req);

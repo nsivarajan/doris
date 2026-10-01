@@ -853,9 +853,9 @@ enum SnapshotType {
 
 enum SnapshotStatus {
     // This snapshot is being prepared.
-    SNAPSHOT_PREPARE = 0;
+    SNAPSHOT_PREPARING = 0;
     // This snapshot is ready for serving.
-    SNAPSHOT_NORMAL = 1;
+    SNAPSHOT_READY = 1;
     // This snapshot was aborted due to an error.
     SNAPSHOT_ABORTED = 2;
     // This snapshot was recycled.
@@ -901,6 +901,10 @@ message SnapshotPB {
     optional int64 snapshot_logical_data_size = 18;
     optional int64 snapshot_retained_data_size = 19;
     optional int64 snapshot_billable_data_size = 20;
+
+    // FDB committed_version captured at checkpoint time via create_meta_sync_point.
+    // Pass to `fdbrestore --version` to get FDB state consistent with this image.
+    optional int64 fdb_read_version = 21;
 
     // TODO: add the referenced resources
 }
@@ -2165,6 +2169,10 @@ message CommitSnapshotRequest {
     optional string request_ip = 5;
     optional int64 snapshot_meta_image_size = 6;
     optional int64 snapshot_logical_data_size = 7;
+    // FDB committed_version at checkpoint time (from create_meta_sync_point).
+    // Pass to `fdbrestore --version` to restore FDB to exactly the same logical
+    // moment as the BDBJE image, giving a consistent point-in-time snapshot.
+    optional int64 fdb_read_version = 8;
 }
 
 message CommitSnapshotResponse {
@@ -2204,6 +2212,8 @@ message SnapshotInfoPB {
     optional int64 snapshot_retained_data_size = 18;
     optional int64 snapshot_billable_data_size = 19;
     optional string resource_id = 20;
+    // FDB committed_version at snapshot time — pass to fdbrestore --version
+    optional int64 fdb_read_version = 21;
 }
 
 message ListSnapshotRequest {

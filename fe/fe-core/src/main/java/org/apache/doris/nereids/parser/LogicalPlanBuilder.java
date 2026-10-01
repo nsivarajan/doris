@@ -812,6 +812,7 @@ import org.apache.doris.nereids.trees.plans.commands.ShowBuiltinFunctionsCommand
 import org.apache.doris.nereids.trees.plans.commands.ShowCatalogCommand;
 import org.apache.doris.nereids.trees.plans.commands.ShowCatalogRecycleBinCommand;
 import org.apache.doris.nereids.trees.plans.commands.ShowCharsetCommand;
+import org.apache.doris.nereids.trees.plans.commands.ShowClusterSnapshotsCommand;
 import org.apache.doris.nereids.trees.plans.commands.ShowClustersCommand;
 import org.apache.doris.nereids.trees.plans.commands.ShowCollationCommand;
 import org.apache.doris.nereids.trees.plans.commands.ShowColumnHistogramStatsCommand;
@@ -8992,6 +8993,11 @@ public class LogicalPlanBuilder extends DorisParserBaseVisitor<Object> {
         String key = ctx.key == null ? null : stripQuotes(ctx.key.getText());
         String value = ctx.value == null ? null : stripQuotes(ctx.value.getText());
         return new AdminDropClusterSnapshotCommand(key, value);
+    }
+
+    @Override
+    public LogicalPlan visitShowClusterSnapshots(DorisParser.ShowClusterSnapshotsContext ctx) {
+        return new ShowClusterSnapshotsCommand();
     }
 
     @Override

@@ -684,6 +684,7 @@ supportedAdminStatement
     | ADMIN SET AUTO CLUSTER SNAPSHOT propertyClause?                               #adminSetAutoClusterSnapshot
     | ADMIN DROP CLUSTER SNAPSHOT WHERE (key=identifier) EQ (value=STRING_LITERAL)  #adminDropClusterSnapshot
     | ADMIN SET CLUSTER SNAPSHOT FEATURE (ON | OFF)                                 #adminSetClusterSnapshotFeatureSwitch
+    | SHOW CLUSTER SNAPSHOTS                                                         #showClusterSnapshots
     | ADMIN ROTATE TDE ROOT KEY properties=propertyClause?                          #adminRotateTdeRootKey
     ;
 

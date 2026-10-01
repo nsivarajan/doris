@@ -39,7 +39,14 @@ import java.util.Map;
 import java.util.Objects;
 
 /**
- * ADMIN CREATE CLUSTER SNAPSHOT PROPERTIES('ttl' = '3600', 'label' = 'test_snapshot');
+ * ADMIN CREATE CLUSTER SNAPSHOT PROPERTIES(
+ *   'ttl'        = '604800',
+ *   'label'      = 'my_snap',
+ *   'vault_name' = 'default_vault'
+ * );
+ *
+ * The FDB read version (for fdbrestore consistency) is captured automatically
+ * via create_meta_sync_point at checkpoint time — no operator input needed.
  */
 public class AdminCreateClusterSnapshotCommand extends Command implements ForwardWithSync {
 
@@ -76,15 +83,12 @@ public class AdminCreateClusterSnapshotCommand extends Command implements Forwar
         if (!Config.isCloudMode()) {
             throw new AnalysisException("The sql is illegal in disk mode ");
         }
-        // Check privilege based on configuration
         if ("admin".equalsIgnoreCase(Config.cluster_snapshot_min_privilege)) {
-            // When configured as admin, check ADMIN privilege
             if (!Env.getCurrentEnv().getAccessManager().checkGlobalPriv(ctx, PrivPredicate.ADMIN)) {
                 ErrorReport.reportAnalysisException(ErrorCode.ERR_SPECIFIC_ACCESS_DENIED_ERROR,
                         PrivPredicate.ADMIN.getPrivs().toString());
             }
         } else {
-            // Default or configured as root, check if user is root
             UserIdentity currentUser = ctx.getCurrentUserIdentity();
             if (currentUser == null || !currentUser.isRootUser()) {
                 ErrorReport.reportAnalysisException(ErrorCode.ERR_SPECIFIC_ACCESS_DENIED_ERROR,

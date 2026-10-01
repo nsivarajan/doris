@@ -567,6 +567,12 @@ private:
 
     // Whether need to recycle versioned keys
     bool should_recycle_versioned_keys() const;
+
+    // Get the earliest create_at timestamp among all READY snapshots.
+    // Sets *oldest_create_at to that timestamp, or INT64_MAX if no live snapshots exist.
+    // Returns 0 on success, -1 on error (in which case *oldest_create_at is set to INT64_MAX
+    // so callers can safely proceed with normal recycling).
+    int get_oldest_live_snapshot_time(int64_t* oldest_create_at) const;
     /**
      * Parse the path of a packed-file fragment and output the owning tablet and rowset identifiers.
      *
