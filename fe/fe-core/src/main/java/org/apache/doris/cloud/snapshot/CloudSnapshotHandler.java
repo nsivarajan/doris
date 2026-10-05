@@ -105,12 +105,29 @@ public class CloudSnapshotHandler extends MasterDaemon {
     public void submitJob(long ttl, String label, String vaultName) throws Exception {
         Env env = Env.getCurrentEnv();
 
-        // Step 1: Force a fresh BDBJE checkpoint.
-        // Record journal_id before and after to detect silent no-ops.
+        // Step 1: Force a fresh BDBJE checkpoint that includes ALL pending journal entries.
+        //
+        // Root cause of silent no-op: Checkpoint.doCheckpoint() only replays up to
+        // getFinalizedJournalId(), which returns the last BDBJE database name - 1.
+        // A BDBJE "database" is created on each rollEditLog() call. Until a roll happens
+        // (every edit_log_roll_num=50,000 edits, or on master change), dbNames.size() < 2
+        // and getFinalizedJournalId() returns 0 → checkpoint writes nothing new.
+        //
+        // Fix: force a rollEditLog() immediately before doCheckpoint(). This creates a new
+        // BDBJE database boundary, making all currently-written journal entries "finalized"
+        // so the checkpoint captures the complete current FE catalog state including:
+        //   - new tables created since last roll
+        //   - schema changes (ALTER TABLE)
+        //   - user/privilege changes
+        //   - partition additions
+        // Data inserted into existing tables is safe regardless (row visibility is FDB-driven).
         Checkpoint checkpointer = env.getCheckpointer();
         if (checkpointer == null) {
             throw new DdlException("Checkpointer not available — FE may not be master");
         }
+        LOG.info("submitJob: rolling edit log to finalize all pending journal entries, label={}", label);
+        env.getEditLog().rollEditLog();
+
         String imageDir = env.getImageDir();
         Storage storageBefore = new Storage(imageDir);
         long journalIdBefore = storageBefore.getLatestImageSeq();
