@@ -233,8 +233,13 @@ public class DorisFE {
 
             if (cmdLineOpts.getClusterSnapshotPath() != null) {
                 String clusterSnapshotPath = cmdLineOpts.getClusterSnapshotPath();
-                if (!clusterSnapshotPath.startsWith("/")) {
-                    // relative path
+                // A snapshot_id is a 20-character hex versionstamp (e.g. "a1b2c3d4e5f6a7b8c9d0").
+                // Do NOT treat it as a file path — pass it through unchanged so cloneSnapshot
+                // receives the raw snapshot_id for the list_snapshot lookup.
+                // Only apply path prefixing for actual file paths (legacy --cluster_snapshot usage).
+                boolean isSnapshotId = clusterSnapshotPath.matches("[0-9a-fA-F]{20}");
+                if (!isSnapshotId && !clusterSnapshotPath.startsWith("/")) {
+                    // relative file path — prefix with dorisHomeDir
                     clusterSnapshotPath = dorisHomeDir + "/" + clusterSnapshotPath;
                 }
                 Env.getCurrentEnv().setClusterSnapshotFile(clusterSnapshotPath);

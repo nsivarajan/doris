@@ -523,6 +523,49 @@ void SnapshotManager::commit_snapshot(std::string_view instance_id,
             .tag("snapshot_id", request.snapshot_id())
             .tag("image_url", snapshot_pb.image_url())
             .tag("last_journal_id", snapshot_pb.last_journal_id());
+
+    // Bug 1 fix: capture fdb_read_version AFTER the snapshot record is committed.
+    // The FE's pre-commit version would miss the snapshot record itself — restoring
+    // FDB to that version gives an empty snapshot list. We take a post-commit sync
+    // point and overwrite fdb_read_version in a second write to the snapshot key.
+    // This guarantees: fdbrestore --version <fdb_read_version> includes this record.
+    {
+        std::unique_ptr<Transaction> post_txn;
+        TxnErrorCode post_err = txn_kv_->create_txn(&post_txn);
+        if (post_err == TxnErrorCode::TXN_OK) {
+            post_txn->enable_get_versionstamp();
+            post_txn->atomic_add(system_meta_service_instance_update_key(), 1);
+            post_err = post_txn->commit();
+            if (post_err == TxnErrorCode::TXN_OK) {
+                Versionstamp post_vs;
+                post_err = post_txn->get_versionstamp(&post_vs);
+                if (post_err == TxnErrorCode::TXN_OK) {
+                    int64_t post_fdb_version = static_cast<int64_t>(post_vs.version());
+                    snapshot_pb.set_fdb_read_version(post_fdb_version);
+                    std::string updated_val;
+                    if (snapshot_pb.SerializeToString(&updated_val)) {
+                        std::unique_ptr<Transaction> upd_txn;
+                        if (txn_kv_->create_txn(&upd_txn) == TxnErrorCode::TXN_OK) {
+                            std::string base_key = versioned::snapshot_full_key({std::string(instance_id)});
+                            std::string snap_key = encode_versioned_key(base_key, vs);
+                            upd_txn->put(snap_key, updated_val);
+                            upd_txn->commit();
+                        }
+                    }
+                    LOG_INFO("commit_snapshot: updated fdb_read_version to post-commit value")
+                            .tag("snapshot_id", request.snapshot_id())
+                            .tag("fdb_read_version", post_fdb_version);
+                }
+            }
+        }
+        if (post_err != TxnErrorCode::TXN_OK) {
+            LOG_WARNING("commit_snapshot: failed to capture post-commit fdb_read_version; "
+                        "using FE-provided pre-commit value (may need +N offset at restore time)")
+                    .tag("snapshot_id", request.snapshot_id())
+                    .tag("err", post_err);
+        }
+    }
+
     response->mutable_status()->set_code(MetaServiceCode::OK);
 }
 

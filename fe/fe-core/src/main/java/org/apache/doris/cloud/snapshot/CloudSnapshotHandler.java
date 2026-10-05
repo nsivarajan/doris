@@ -215,7 +215,10 @@ public class CloudSnapshotHandler extends MasterDaemon {
             throw new DdlException("snapshot upload failed: " + e.getMessage());
         }
 
-        // Step 5: commitSnapshot with journal_id and fdb_read_version
+        // Step 5: commitSnapshot — fdb_read_version is updated by meta-service AFTER commit
+        // so that the stored version is guaranteed to come after the snapshot record write.
+        // The FE passes its pre-commit fdb_read_version as a hint; the MS overwrites it with
+        // the post-commit version it captures internally via its own sync_point.
         Cloud.CommitSnapshotRequest.Builder commitReq = Cloud.CommitSnapshotRequest.newBuilder()
                 .setCloudUniqueId(Config.cloud_unique_id)
                 .setSnapshotId(snapshotId)
@@ -408,31 +411,36 @@ public class CloudSnapshotHandler extends MasterDaemon {
         }
 
         // Download the image file from OSS using vault credentials from the snapshot record.
-        // The restored FDB's InstanceInfoPB has the same vault configs as production.
-        // We use the instance's default vault credentials; the MS resolves them via RAM role.
         Env env = Env.getCurrentEnv();
         String imageDir = env.getImageDir();
 
-        // Try to extract image filename from URL (format: .../snapshots/<id>/image.<journalId>)
-        String localImageName = Storage.IMAGE + ".snapshot";
-        if (imageUrl.contains("/")) {
+        // Determine the correct local filename. FE's loadImage() only loads files named
+        // "image.<journal_id>" — it ignores "image.snapshot" or any other name.
+        // Priority order:
+        //   1. Use journal_id from SnapshotInfoPB (most reliable — set at commit time)
+        //   2. Parse from image_url suffix (format: .../snapshots/<id>/image.<journalId>)
+        //   3. Fall back to image.snapshot (will not be auto-loaded — manual rename needed)
+        String localImageName;
+        if (info.getJournalId() > 0) {
+            localImageName = Storage.IMAGE + "." + info.getJournalId();
+        } else if (imageUrl.contains("/")) {
             String urlFilename = imageUrl.substring(imageUrl.lastIndexOf('/') + 1);
-            if (urlFilename.startsWith(Storage.IMAGE + ".")) {
+            if (urlFilename.startsWith(Storage.IMAGE + ".") && urlFilename.length() > Storage.IMAGE.length() + 1) {
                 localImageName = urlFilename;
+            } else {
+                localImageName = Storage.IMAGE + ".snapshot";
+                LOG.warn("cloneSnapshot: cannot determine journal_id from image_url={}; "
+                        + "saved as {} — rename to image.<journal_id> before FE loads", imageUrl, localImageName);
             }
+        } else {
+            localImageName = Storage.IMAGE + ".snapshot";
+            LOG.warn("cloneSnapshot: no journal_id available; saved as {} — rename before FE loads",
+                    localImageName);
         }
         String localImagePath = imageDir + File.separator + localImageName;
+        LOG.info("cloneSnapshot: will save image as {} (journal_id={})", localImageName, info.getJournalId());
 
-        // Get obj_info from the instance's default vault via MS.
-        // We cannot rely on CloneInstanceResponse.obj_info since we no longer call clone_instance.
-        // Instead use beginSnapshot/abortSnapshot in read-only fashion — or simply use the
-        // instance's vault credentials directly.
-        // For now: use list_snapshot which already returns image_url; obj_info must be fetched
-        // from the instance record via getInstanceInfo. Use the same approach as uploadImageFile:
-        // the snapshot's resource_id identifies the vault; MS has its credentials.
-        // Simplified: call get_obj_store_info to get the vault ObjectStoreInfoPB.
         Cloud.ObjectStoreInfoPB objInfo = getVaultObjInfo(info.getResourceId());
-
         RemoteBase remote = RemoteBase.newInstance(new ObjectInfo(objInfo));
         LOG.info("cloneSnapshot: downloading image from {} to {}", imageUrl, localImagePath);
         remote.getObject(imageUrl, localImagePath);
