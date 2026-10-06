@@ -19,6 +19,7 @@ package org.apache.doris.master;
 
 import org.apache.doris.catalog.Database;
 import org.apache.doris.catalog.Env;
+import org.apache.doris.catalog.EnvFactory;
 import org.apache.doris.catalog.MaterializedIndex;
 import org.apache.doris.catalog.MaterializedIndex.IndexExtState;
 import org.apache.doris.catalog.OlapTable;
@@ -27,6 +28,7 @@ import org.apache.doris.catalog.Replica;
 import org.apache.doris.catalog.Table;
 import org.apache.doris.catalog.Tablet;
 import org.apache.doris.cloud.catalog.CloudReplica;
+import org.apache.doris.cloud.snapshot.CloudSnapshotHandler;
 import org.apache.doris.common.CheckpointException;
 import org.apache.doris.common.Config;
 import org.apache.doris.common.FeConstants;
@@ -34,6 +36,7 @@ import org.apache.doris.common.util.HttpURLUtil;
 import org.apache.doris.common.util.MasterDaemon;
 import org.apache.doris.httpv2.entity.ResponseBody;
 import org.apache.doris.httpv2.rest.RestApiStatusCode;
+import org.apache.doris.meta.MetaContext;
 import org.apache.doris.metric.MetricRepo;
 import org.apache.doris.monitor.jvm.JvmService;
 import org.apache.doris.monitor.jvm.JvmStats;
@@ -126,6 +129,13 @@ public class Checkpoint extends MasterDaemon {
                 // No new finalized journals beyond the latest image.
                 // But in cloud mode, we may still want to force a checkpoint if the latest image file is expired.
                 // This helps that image can keep the newer table version, partition version, tablet stats.
+                //
+                // IMPORTANT: use imageVersion (the seq of the image file on disk) as the checkpoint target,
+                // NOT checkPointVersion (getFinalizedJournalId). The snapshot path (doSnapshotCheckpoint)
+                // may have written image.M where M > getFinalizedJournalId() by replaying unsealed journals.
+                // If checkPointVersion < imageVersion, loadImage loads image.M, replayedJournalId starts at M,
+                // then replayJournal(checkPointVersion) is a no-op, and the M != checkPointVersion check throws.
+                checkPointVersion = imageVersion;
                 LOG.info("Trigger checkpoint in cloud mode because latest image is expired. "
                         + "latestImageSeq: {}, latestImageCreateTime: {}", imageVersion, latestImageCreateTime);
             } else {
@@ -442,6 +452,28 @@ public class Checkpoint extends MasterDaemon {
      * @return the path to the merged image file
      */
     public synchronized String doSnapshotCheckpoint() throws CheckpointException {
+        // doSnapshotCheckpoint() runs on the MySQL connection thread, not the Checkpoint daemon
+        // thread. Env.getCurrentEnv() uses isCheckpointThread() (checks by thread ID) to decide
+        // whether to return the isolated CHECKPOINT Env or the live serving INSTANCE. On the MySQL
+        // thread, isCheckpointThread() is false, so without intervention getCurrentEnv() returns
+        // the live serving INSTANCE — and loadImage/replayJournal into it would corrupt cluster state.
+        //
+        // The intended escape hatch is CloudSnapshotHandler.setSnapshotEnv(): when non-null,
+        // getCurrentEnv() returns it instead of INSTANCE. We create a fresh checkpoint Env,
+        // register it as the snapshotEnv, and clear it in finally. The new Env's constructor
+        // also calls metaContext.setThreadLocalInfo() on this thread, satisfying the MetaContext
+        // ThreadLocal requirement for loadImage().
+        Env snapshotCheckpointEnv = EnvFactory.getInstance().createEnv(true);
+        CloudSnapshotHandler.setSnapshotEnv(snapshotCheckpointEnv);
+        try {
+            return doSnapshotCheckpointInternal();
+        } finally {
+            CloudSnapshotHandler.setSnapshotEnv(null);
+            MetaContext.remove();
+        }
+    }
+
+    private String doSnapshotCheckpointInternal() throws CheckpointException {
         // Phase 1: run normal checkpoint — captures journals up to last sealed DB
         doCheckpoint();
 
@@ -451,15 +483,47 @@ public class Checkpoint extends MasterDaemon {
         // We use this rather than getFinalizedJournalId() because:
         //   - getFinalizedJournalId() returns 0 on young clusters (no roll yet)
         //   - imageJournalId is the actual base we need to load for Phase 2
-        Storage storageAfterCkpt = new Storage(imageDir);
+        Storage storageAfterCkpt;
+        try {
+            storageAfterCkpt = new Storage(imageDir);
+        } catch (IOException e) {
+            throw new CheckpointException("doSnapshotCheckpoint: failed to read image dir: " + e.getMessage(), e);
+        }
         long imageJournalId = storageAfterCkpt.getLatestImageSeq();
 
         if (imageJournalId <= 0) {
-            // No usable image on disk — cannot do Phase 2 without a base to load.
-            // Happens on a brand-new cluster that has never produced an image.
-            LOG.warn("doSnapshotCheckpoint: no image available after checkpoint "
-                    + "(imageJournalId={}), snapshot will have incomplete catalog state", imageJournalId);
-            return "";
+            if (maxJournalId <= 0) {
+                // Truly empty cluster — no journals at all, nothing to snapshot.
+                LOG.warn("doSnapshotCheckpoint: no journals exist (maxJournalId={}), nothing to checkpoint",
+                        maxJournalId);
+                return "";
+            }
+            // New cluster: journals exist but only in a single unsealed BDBJE database.
+            // getFinalizedJournalId() returns 0 when there is only 1 DB (never rolled), so
+            // doCheckpoint() exited early without producing an image. Force a roll to seal
+            // the current DB, which gives doCheckpoint() a sealed boundary to work from.
+            // loadImage() with no prior image file is safe — Env.loadImage() returns
+            // immediately when image.0 does not exist, then replayJournal replays from id=1.
+            LOG.info("doSnapshotCheckpoint: no sealed DB yet (maxJournalId={}), forcing journal roll "
+                    + "to bootstrap first image", maxJournalId);
+            editLog.rollEditLog();
+            doCheckpoint();
+            try {
+                storageAfterCkpt = new Storage(imageDir);
+            } catch (IOException e) {
+                throw new CheckpointException(
+                        "doSnapshotCheckpoint: failed to read image dir after bootstrap roll: " + e.getMessage(), e);
+            }
+            imageJournalId = storageAfterCkpt.getLatestImageSeq();
+            if (imageJournalId <= 0) {
+                throw new CheckpointException(
+                        "doSnapshotCheckpoint: still no image after forced journal roll — "
+                        + "checkpoint may be disabled or cluster not ready");
+            }
+            // Refresh maxJournalId — new writes may have landed during the roll
+            maxJournalId = editLog.getMaxJournalId();
+            LOG.info("doSnapshotCheckpoint: bootstrap image produced: image.{}, maxJournalId={}",
+                    imageJournalId, maxJournalId);
         }
 
         if (maxJournalId <= imageJournalId) {
