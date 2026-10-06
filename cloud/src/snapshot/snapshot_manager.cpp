@@ -549,7 +549,13 @@ void SnapshotManager::commit_snapshot(std::string_view instance_id,
                             std::string base_key = versioned::snapshot_full_key({std::string(instance_id)});
                             std::string snap_key = encode_versioned_key(base_key, vs);
                             upd_txn->put(snap_key, updated_val);
-                            upd_txn->commit();
+                            TxnErrorCode upd_err = upd_txn->commit();
+                            if (upd_err != TxnErrorCode::TXN_OK) {
+                                LOG_WARNING("commit_snapshot: failed to persist post-commit fdb_read_version; "
+                                            "snapshot is READY but fdb_read_version may need manual correction")
+                                        .tag("snapshot_id", request.snapshot_id())
+                                        .tag("err", upd_err);
+                            }
                         }
                     }
                     LOG_INFO("commit_snapshot: updated fdb_read_version to post-commit value")
