@@ -417,6 +417,104 @@ public class Checkpoint extends MasterDaemon {
         return lock;
     }
 
+    /**
+     * Produces a single merged BDBJE image that captures the complete FE catalog
+     * state — including journals in the current unsealed BDBJE database that
+     * doCheckpoint() cannot reach via getFinalizedJournalId().
+     *
+     * doCheckpoint() captures journals up to getFinalizedJournalId() (the last
+     * sealed DB boundary). Journals in the current unsealed DB are missed,
+     * causing CREATE TABLE, ALTER TABLE, GRANT and other DDL since the last roll
+     * to be absent from the snapshot image.
+     *
+     * This method:
+     *   1. Runs doCheckpoint() normally → image.N (sealed journals only)
+     *   2. If there are unsealed journals (getMaxJournalId() > N):
+     *      a. Loads image.N into a fresh Env instance
+     *      b. Replays journals N+1 → getMaxJournalId()
+     *      c. Saves a new merged image.M (M = getMaxJournalId())
+     *      d. Cleans up the intermediate image.N
+     *
+     * The result is one image file containing the complete catalog state.
+     * Used exclusively by the snapshot path; the normal periodic checkpoint
+     * continues to use doCheckpoint().
+     *
+     * @return the path to the merged image file
+     */
+    public synchronized String doSnapshotCheckpoint() throws CheckpointException {
+        // Phase 1: run normal checkpoint — captures journals up to last sealed DB
+        doCheckpoint();
+
+        long maxJournalId = editLog.getMaxJournalId();
+
+        // Read the image journal_id from disk — this is what doCheckpoint() actually produced.
+        // We use this rather than getFinalizedJournalId() because:
+        //   - getFinalizedJournalId() returns 0 on young clusters (no roll yet)
+        //   - imageJournalId is the actual base we need to load for Phase 2
+        Storage storageAfterCkpt = new Storage(imageDir);
+        long imageJournalId = storageAfterCkpt.getLatestImageSeq();
+
+        if (imageJournalId <= 0) {
+            // No usable image on disk — cannot do Phase 2 without a base to load.
+            // Happens on a brand-new cluster that has never produced an image.
+            LOG.warn("doSnapshotCheckpoint: no image available after checkpoint "
+                    + "(imageJournalId={}), snapshot will have incomplete catalog state", imageJournalId);
+            return "";
+        }
+
+        if (maxJournalId <= imageJournalId) {
+            // No gap — the image already covers everything (e.g. just after a roll)
+            String path = storageAfterCkpt.getCurrentImageFile().getAbsolutePath();
+            LOG.info("doSnapshotCheckpoint: no gap (image={}, max={}), using image as-is: {}",
+                    imageJournalId, maxJournalId, path);
+            return path;
+        }
+
+        // Gap exists: journals imageJournalId+1 → maxJournalId are in the current unsealed
+        // BDBJE database. replayJournal(maxJournalId) starts from imageJournalId+1 — it never
+        // touches journal id=1 (OP_META_VERSION) so System.exit(-1) cannot be triggered.
+        LOG.info("doSnapshotCheckpoint: gap detected — image={}, max={}, replaying {} unsealed journals",
+                imageJournalId, maxJournalId, maxJournalId - imageJournalId);
+
+        // Phase 2: load image.imageJournalId, replay unsealed journals, save merged image
+        String mergedImagePath = null;
+        boolean exceptionCaught = false;
+        env = Env.getCurrentEnv();
+        env.setEditLog(editLog);
+        createStaticFieldForCkpt();
+        try {
+            env.loadImage(imageDir);                    // loads image.imageJournalId
+            env.replayJournal(maxJournalId);            // replays imageJournalId+1 → maxJournalId
+            if (env.getReplayedJournalId() != maxJournalId) {
+                throw new CheckpointException(String.format(
+                        "doSnapshotCheckpoint: expected to replay to %d but reached %d",
+                        maxJournalId, env.getReplayedJournalId()));
+            }
+            env.postProcessAfterMetadataReplayed(false);
+            postProcessCloudMetadata();
+            mergedImagePath = env.saveImage();          // writes image.maxJournalId
+            LOG.info("doSnapshotCheckpoint: merged image saved: {}", mergedImagePath);
+        } catch (Throwable e) {
+            exceptionCaught = true;
+            LOG.warn("doSnapshotCheckpoint: failed to produce merged image: {}", e.getMessage(), e);
+            throw new CheckpointException("doSnapshotCheckpoint failed: " + e.getMessage(), e);
+        } finally {
+            env = null;
+            Env.destroyCheckpoint();
+            destroyStaticFieldForCkpt();
+            if (exceptionCaught && mergedImagePath != null) {
+                MetaCleaner cleaner = new MetaCleaner(Config.meta_dir + "/image");
+                try {
+                    cleaner.cleanTheLatestInvalidImageFile(mergedImagePath);
+                } catch (Throwable t) {
+                    LOG.warn("doSnapshotCheckpoint: failed to clean invalid merged image", t);
+                }
+            }
+        }
+
+        return mergedImagePath;
+    }
+
     private void postProcessCloudMetadata() {
         if (Config.isNotCloudMode()) {
             return;

@@ -105,36 +105,29 @@ public class CloudSnapshotHandler extends MasterDaemon {
     public void submitJob(long ttl, String label, String vaultName) throws Exception {
         Env env = Env.getCurrentEnv();
 
-        // Step 1: Force a fresh BDBJE checkpoint that includes ALL pending journal entries.
+        // Step 1: Produce a merged BDBJE image that captures ALL journal entries —
+        // including those in the current unsealed BDBJE database that doCheckpoint()
+        // alone cannot reach via getFinalizedJournalId().
         //
-        // Root cause of silent no-op: Checkpoint.doCheckpoint() only replays up to
-        // getFinalizedJournalId(), which returns the last BDBJE database name - 1.
-        // A BDBJE "database" is created on each rollEditLog() call. Until a roll happens
-        // (every edit_log_roll_num=50,000 edits, or on master change), dbNames.size() < 2
-        // and getFinalizedJournalId() returns 0 → checkpoint writes nothing new.
+        // doSnapshotCheckpoint() runs doCheckpoint() first (captures sealed journals),
+        // then loads that image and replays any unsealed journals on top, producing
+        // a single merged image.maxJournalId that contains the complete FE catalog state.
         //
-        // Fix: force a rollEditLog() immediately before doCheckpoint(). This creates a new
-        // BDBJE database boundary, making all currently-written journal entries "finalized"
-        // so the checkpoint captures the complete current FE catalog state including:
-        //   - new tables created since last roll
-        //   - schema changes (ALTER TABLE)
-        //   - user/privilege changes
-        //   - partition additions
-        // Data inserted into existing tables is safe regardless (row visibility is FDB-driven).
+        // NOTE: rollEditLog() was previously called here but caused System.exit(-1) because
+        // the checkpoint's replayJournal() hit the OP_META_VERSION sentinel written at the
+        // start of every new BDBJE database. doSnapshotCheckpoint() avoids that entirely.
         Checkpoint checkpointer = env.getCheckpointer();
         if (checkpointer == null) {
             throw new DdlException("Checkpointer not available — FE may not be master");
         }
-        LOG.info("submitJob: rolling edit log to finalize all pending journal entries, label={}", label);
-        env.getEditLog().rollEditLog();
 
         String imageDir = env.getImageDir();
         Storage storageBefore = new Storage(imageDir);
         long journalIdBefore = storageBefore.getLatestImageSeq();
 
-        LOG.info("submitJob: forcing checkpoint for snapshot label={}, current_journal_id={}",
+        LOG.info("submitJob: starting snapshot checkpoint for label={}, current_image_journal_id={}",
                 label, journalIdBefore);
-        checkpointer.doCheckpoint();
+        checkpointer.doSnapshotCheckpoint();
 
         Storage storage = new Storage(imageDir);
         long journalId = storage.getLatestImageSeq();
@@ -142,9 +135,8 @@ public class CloudSnapshotHandler extends MasterDaemon {
             throw new DdlException("No image file found after checkpoint in " + imageDir);
         }
         if (journalId == journalIdBefore) {
-            LOG.warn("submitJob: checkpoint did not advance journal_id (still {}). "
-                    + "Snapshot will use existing image — check enable_checkpoint config.",
-                    journalId);
+            LOG.warn("submitJob: snapshot checkpoint did not advance journal_id (still {}). "
+                    + "Snapshot will use existing image.", journalId);
         }
         File imageFile = storage.getCurrentImageFile();
         if (!imageFile.exists()) {
