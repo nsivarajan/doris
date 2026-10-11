@@ -28,7 +28,6 @@ import org.apache.doris.catalog.Replica;
 import org.apache.doris.catalog.Table;
 import org.apache.doris.catalog.Tablet;
 import org.apache.doris.cloud.catalog.CloudReplica;
-import org.apache.doris.cloud.snapshot.CloudSnapshotHandler;
 import org.apache.doris.common.CheckpointException;
 import org.apache.doris.common.Config;
 import org.apache.doris.common.FeConstants;
@@ -452,23 +451,26 @@ public class Checkpoint extends MasterDaemon {
      * @return the path to the merged image file
      */
     public synchronized String doSnapshotCheckpoint() throws CheckpointException {
-        // doSnapshotCheckpoint() runs on the MySQL connection thread, not the Checkpoint daemon
-        // thread. Env.getCurrentEnv() uses isCheckpointThread() (checks by thread ID) to decide
-        // whether to return the isolated CHECKPOINT Env or the live serving INSTANCE. On the MySQL
-        // thread, isCheckpointThread() is false, so without intervention getCurrentEnv() returns
-        // the live serving INSTANCE — and loadImage/replayJournal into it would corrupt cluster state.
+        // doSnapshotCheckpoint() runs on the snapshot handler daemon thread (not the Checkpoint
+        // daemon thread). Env.getCurrentEnv() uses isCheckpointThread() (checked by thread ID)
+        // to decide whether to return the isolated CHECKPOINT Env or the live serving INSTANCE.
+        // On any other thread, without intervention, getCurrentEnv() returns INSTANCE —
+        // and loadImage/replayJournal into it would corrupt live cluster state.
         //
-        // The intended escape hatch is CloudSnapshotHandler.setSnapshotEnv(): when non-null,
-        // getCurrentEnv() returns it instead of INSTANCE. We create a fresh checkpoint Env,
-        // register it as the snapshotEnv, and clear it in finally. The new Env's constructor
-        // also calls metaContext.setThreadLocalInfo() on this thread, satisfying the MetaContext
-        // ThreadLocal requirement for loadImage().
-        Env snapshotCheckpointEnv = EnvFactory.getInstance().createEnv(true);
-        CloudSnapshotHandler.setSnapshotEnv(snapshotCheckpointEnv);
+        // We use a per-thread ThreadLocal (Env.setCurrentEnvForThread) so getCurrentEnv() on
+        // THIS thread returns an isolated scratch Env while all other threads are unaffected.
+        // The new Env constructor also calls metaContext.setThreadLocalInfo() on this thread,
+        // satisfying the MetaContext ThreadLocal requirement for loadImage().
+        //
+        // createEnv(true) is called INSIDE the try block so that if the constructor throws
+        // after calling metaContext.setThreadLocalInfo() (which registers MetaContext on this
+        // thread), the finally still runs and cleans up both ThreadLocals.
         try {
+            Env snapshotCheckpointEnv = EnvFactory.getInstance().createEnv(true);
+            Env.setCurrentEnvForThread(snapshotCheckpointEnv);
             return doSnapshotCheckpointInternal();
         } finally {
-            CloudSnapshotHandler.setSnapshotEnv(null);
+            Env.removeCurrentEnvForThread();
             MetaContext.remove();
         }
     }

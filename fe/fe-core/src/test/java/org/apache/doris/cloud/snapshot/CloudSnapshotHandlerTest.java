@@ -45,14 +45,14 @@ public class CloudSnapshotHandlerTest {
         originalHandlerClass = Config.cloud_snapshot_handler_class;
         originalContextClassLoader = Thread.currentThread().getContextClassLoader();
         Config.cloud_snapshot_handler_class = CloudSnapshotHandler.class.getName();
-        CloudSnapshotHandler.setSnapshotEnv(null);
+        Env.removeCurrentEnvForThread();
     }
 
     @After
     public void tearDown() {
         Config.cloud_snapshot_handler_class = originalHandlerClass;
         Thread.currentThread().setContextClassLoader(originalContextClassLoader);
-        CloudSnapshotHandler.setSnapshotEnv(null);
+        Env.removeCurrentEnvForThread();
     }
 
     @Test
@@ -84,13 +84,17 @@ public class CloudSnapshotHandlerTest {
     }
 
     @Test
-    public void testSnapshotEnvOverridesCurrentEnv() {
-        Env snapshotEnv = Mockito.mock(Env.class);
+    public void testPerThreadEnvOverridesCurrentEnv() {
+        Env mockEnv = Mockito.mock(Env.class);
 
-        CloudSnapshotHandler.setSnapshotEnv(snapshotEnv);
-
-        Assert.assertSame(snapshotEnv, CloudSnapshotHandler.getSnapshotEnv());
-        Assert.assertSame(snapshotEnv, Env.getCurrentEnv());
+        Env.setCurrentEnvForThread(mockEnv);
+        try {
+            Assert.assertSame(mockEnv, Env.getCurrentEnv());
+        } finally {
+            Env.removeCurrentEnvForThread();
+        }
+        // After removal, getCurrentEnv() no longer returns the mock
+        Assert.assertNotSame(mockEnv, Env.getCurrentEnv());
     }
 
     public static class ServiceLoadedSnapshotHandler extends CloudSnapshotHandler {

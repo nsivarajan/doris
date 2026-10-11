@@ -38,12 +38,30 @@ import java.io.File;
 import java.lang.reflect.Constructor;
 import java.util.ServiceConfigurationError;
 import java.util.ServiceLoader;
+import java.util.concurrent.atomic.AtomicReference;
 
 public class CloudSnapshotHandler extends MasterDaemon {
 
     private static final Logger LOG = LogManager.getLogger(CloudSnapshotHandler.class);
     private static final String DEFAULT_HANDLER_CLASS = CloudSnapshotHandler.class.getName();
-    private static volatile Env snapshotEnv;
+
+    // Pending manually-submitted snapshot job. Single-slot: at most one queued at a time.
+    private final AtomicReference<SnapshotJobRequest> pendingJobRef = new AtomicReference<>();
+    // True while submitJob() is executing — blocks new enqueues for the duration.
+    private volatile boolean jobRunning = false;
+
+    // Carrier for a manually submitted snapshot request.
+    private static class SnapshotJobRequest {
+        final long ttl;
+        final String label;
+        final String vaultName;
+
+        SnapshotJobRequest(long ttl, String label, String vaultName) {
+            this.ttl = ttl;
+            this.label = label;
+            this.vaultName = vaultName;
+        }
+    }
 
     public CloudSnapshotHandler() {
         super("cloud snapshot handler", Config.cloud_snapshot_handler_interval_second * 1000);
@@ -65,14 +83,6 @@ public class CloudSnapshotHandler extends MasterDaemon {
         return new CloudSnapshotHandler();
     }
 
-    public static Env getSnapshotEnv() {
-        return snapshotEnv;
-    }
-
-    public static void setSnapshotEnv(Env env) {
-        snapshotEnv = env;
-    }
-
     @SuppressWarnings("unchecked")
     private static CloudSnapshotHandler createByClassName(String className) {
         try {
@@ -90,8 +100,48 @@ public class CloudSnapshotHandler extends MasterDaemon {
         // do nothing
     }
 
+    /**
+     * Enqueue a manually submitted snapshot job and return immediately.
+     * The job runs on this daemon's thread in the next runAfterCatalogReady() tick,
+     * which is woken immediately via interrupt(). Only one job can be queued or running
+     * at a time — a second call while a job is in flight throws DdlException.
+     */
+    public void enqueueJob(long ttl, String label, String vaultName) throws DdlException {
+        if (jobRunning) {
+            throw new DdlException("A snapshot job is already running. "
+                    + "Check SHOW CLUSTER SNAPSHOTS for status.");
+        }
+        SnapshotJobRequest job = new SnapshotJobRequest(ttl, label, vaultName);
+        if (!pendingJobRef.compareAndSet(null, job)) {
+            throw new DdlException("A snapshot job is already queued. "
+                    + "Check SHOW CLUSTER SNAPSHOTS for status.");
+        }
+        // Wake daemon immediately instead of waiting up to cloud_snapshot_handler_interval_second.
+        // Note: if the daemon is still in the catalog-readiness spin-loop (FE init), the interrupt
+        // is consumed there and the job is picked up on the next natural tick instead. This only
+        // affects the brief window between FE start and catalog ready — acceptable.
+        this.interrupt();
+        LOG.info("enqueueJob: snapshot job enqueued label={}, ttl={}s, vault={}",
+                label, ttl, vaultName);
+    }
+
     @Override
     protected void runAfterCatalogReady() {
+        // Drain any manually submitted job first — takes priority over the auto-snapshot tick.
+        SnapshotJobRequest pending = pendingJobRef.getAndSet(null);
+        if (pending != null) {
+            LOG.info("runAfterCatalogReady: running manual snapshot job label={}", pending.label);
+            jobRunning = true;
+            try {
+                submitJob(pending.ttl, pending.label, pending.vaultName);
+            } catch (Exception e) {
+                LOG.warn("runAfterCatalogReady: manual snapshot job failed label={}", pending.label, e);
+            } finally {
+                jobRunning = false;
+            }
+            return; // don't also run auto-snapshot on the same tick
+        }
+
         if (!Config.cloud_auto_snapshot_enabled) {
             return;
         }

@@ -19,7 +19,9 @@ package org.apache.doris.nereids.trees.plans.commands;
 
 import org.apache.doris.analysis.StmtType;
 import org.apache.doris.analysis.UserIdentity;
+import org.apache.doris.catalog.Column;
 import org.apache.doris.catalog.Env;
+import org.apache.doris.catalog.ScalarType;
 import org.apache.doris.cloud.catalog.CloudEnv;
 import org.apache.doris.cloud.snapshot.CloudSnapshotHandler;
 import org.apache.doris.common.AnalysisException;
@@ -30,11 +32,15 @@ import org.apache.doris.mysql.privilege.PrivPredicate;
 import org.apache.doris.nereids.trees.plans.PlanType;
 import org.apache.doris.nereids.trees.plans.visitor.PlanVisitor;
 import org.apache.doris.qe.ConnectContext;
+import org.apache.doris.qe.ShowResultSet;
+import org.apache.doris.qe.ShowResultSetMetaData;
 import org.apache.doris.qe.StmtExecutor;
 
+import com.google.common.collect.ImmutableList;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 
+import java.util.Collections;
 import java.util.Map;
 import java.util.Objects;
 
@@ -48,7 +54,7 @@ import java.util.Objects;
  * The FDB read version (for fdbrestore consistency) is captured automatically
  * via create_meta_sync_point at checkpoint time — no operator input needed.
  */
-public class AdminCreateClusterSnapshotCommand extends Command implements ForwardWithSync {
+public class AdminCreateClusterSnapshotCommand extends Command implements NoForward {
 
     public static final String PROP_TTL = "ttl";
     public static final String PROP_LABEL = "label";
@@ -72,8 +78,16 @@ public class AdminCreateClusterSnapshotCommand extends Command implements Forwar
     @Override
     public void run(ConnectContext ctx, StmtExecutor executor) throws Exception {
         validate(ctx);
-        CloudSnapshotHandler cloudSnapshotHandler = ((CloudEnv) ctx.getEnv()).getCloudSnapshotHandler();
-        cloudSnapshotHandler.submitJob(ttl, label, vaultName);
+        CloudSnapshotHandler handler = ((CloudEnv) ctx.getEnv()).getCloudSnapshotHandler();
+        handler.enqueueJob(ttl, label, vaultName);
+        // Return immediately — snapshot runs asynchronously on the snapshot handler daemon thread.
+        // User checks progress via SHOW CLUSTER SNAPSHOTS.
+        ShowResultSetMetaData meta = ShowResultSetMetaData.builder()
+                .addColumn(new Column("Status", ScalarType.createVarchar(256)))
+                .build();
+        executor.sendResultSet(new ShowResultSet(meta,
+                Collections.singletonList(ImmutableList.of(
+                        "Snapshot job submitted. Check SHOW CLUSTER SNAPSHOTS for status."))));
     }
 
     /**

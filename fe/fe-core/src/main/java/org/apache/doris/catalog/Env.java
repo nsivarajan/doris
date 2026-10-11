@@ -57,7 +57,6 @@ import org.apache.doris.clone.DynamicPartitionScheduler;
 import org.apache.doris.clone.TabletChecker;
 import org.apache.doris.clone.TabletScheduler;
 import org.apache.doris.clone.TabletSchedulerStat;
-import org.apache.doris.cloud.snapshot.CloudSnapshotHandler;
 import org.apache.doris.cloud.system.CloudSystemInfoService;
 import org.apache.doris.common.AnalysisException;
 import org.apache.doris.common.Config;
@@ -445,6 +444,8 @@ public class Env {
 
     private static Env CHECKPOINT = null;
     private static long checkpointThreadId = -1;
+    // Per-thread isolated Env for snapshot checkpoint — avoids polluting the live INSTANCE.
+    private static final ThreadLocal<Env> perThreadEnv = new ThreadLocal<>();
     private Checkpoint checkpointer;
     protected List<HostInfo> helperNodes = Lists.newArrayList();
     protected HostInfo selfNode = null;
@@ -918,11 +919,23 @@ public class Env {
             }
             return CHECKPOINT;
         }
-        Env snapshotEnv = CloudSnapshotHandler.getSnapshotEnv();
-        if (snapshotEnv != null) {
-            return snapshotEnv;
+        // Per-thread isolated env used by doSnapshotCheckpoint() so that image load/replay
+        // runs against a scratch copy and never touches the live serving INSTANCE.
+        Env threadEnv = perThreadEnv.get();
+        if (threadEnv != null) {
+            return threadEnv;
         }
         return SingletonHolder.INSTANCE;
+    }
+
+    // Register a per-thread isolated Env so getCurrentEnv() returns it on this thread only.
+    // Must be paired with removeCurrentEnvForThread() in a finally block.
+    public static void setCurrentEnvForThread(Env env) {
+        perThreadEnv.set(env);
+    }
+
+    public static void removeCurrentEnvForThread() {
+        perThreadEnv.remove();
     }
 
     // NOTICE: in most case, we should use getCurrentEnv() to get the right catalog.
