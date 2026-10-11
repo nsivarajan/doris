@@ -73,7 +73,13 @@ public class TlsHttpServerProvider implements HttpServerTlsProvider {
                 HttpConfiguration httpsConfig = new HttpConfiguration();
                 httpsConfig.setSecurePort(Config.https_port);
                 httpsConfig.setSecureScheme("https");
-                httpsConfig.addCustomizer(new SecureRequestCustomizer());
+                // Disable server-side SNI host check so FE-to-FE calls via IP are accepted.
+                // Trust is CA-based: InternalHttpsUtils validates the peer cert against the
+                // shared CA. mTLS client cert extraction is unaffected — SslSessionData is
+                // still attached to every connection that completes the TLS handshake.
+                SecureRequestCustomizer src = new SecureRequestCustomizer();
+                src.setSniHostCheck(false);
+                httpsConfig.addCustomizer(src);
 
                 ServerConnector httpsConnector = new ServerConnector(server,
                         new SslConnectionFactory(sslContextFactory, "http/1.1"),
