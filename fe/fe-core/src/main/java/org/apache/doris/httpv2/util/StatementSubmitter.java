@@ -20,9 +20,11 @@ package org.apache.doris.httpv2.util;
 import org.apache.doris.analysis.UserIdentity;
 import org.apache.doris.common.Config;
 import org.apache.doris.common.ThreadPoolManager;
+import org.apache.doris.httpv2.HttpAuthManager;
 import org.apache.doris.httpv2.util.streamresponse.JsonStreamResponse;
 import org.apache.doris.httpv2.util.streamresponse.StreamResponseInf;
 import org.apache.doris.qe.ConnectContext;
+import org.apache.doris.tls.server.TlsProtocolSet;
 
 import com.google.common.collect.Lists;
 import com.google.common.collect.Maps;
@@ -36,6 +38,7 @@ import java.sql.ResultSet;
 import java.sql.ResultSetMetaData;
 import java.sql.SQLException;
 import java.sql.Statement;
+import java.util.Collections;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.Callable;
@@ -67,14 +70,46 @@ public class StatementSubmitter {
     private static final String TYPE_EXEC_STATUS = "exec_status";
 
     private static final String JDBC_DRIVER = "org.mariadb.jdbc.Driver";
-    // Plain URL for password auth (no SSL required by MySQL protocol).
-    private static final String DB_URL_PATTERN =
+
+    // Plain — server SSL is off, client sends no SSL request.
+    private static final String DB_URL_PLAIN =
             "jdbc:mariadb://127.0.0.1:%d/%s";
-    // SSL-trust URL for OIDC/mTLS/LDAP: the MySQL protocol requires isClientUseSsl()=true
-    // before accepting non-password credentials. TRUST mode is safe on loopback — no MITM
-    // is possible on 127.0.0.1, so certificate verification is not needed.
-    private static final String DB_URL_PATTERN_SSL =
+
+    // SSL, no client cert — server requires SSL but not a client certificate.
+    // TRUST mode is safe on loopback (no MITM possible on 127.0.0.1).
+    private static final String DB_URL_SSL_TRUST =
             "jdbc:mariadb://127.0.0.1:%d/%s?sslMode=TRUST";
+
+    // SSL + client cert — server requires both SSL and a client certificate
+    // (ssl_force_client_auth=true). The FE presents its own server cert
+    // (mysql_ssl_default_server_certificate) as the client cert; the server's
+    // CA trusts it because both are signed by the same CA.
+    // MariaDB JDBC 3.x params: keyStore (path), keyStorePassword, keyStoreType.
+    private static final String DB_URL_SSL_CLIENT_CERT =
+            "jdbc:mariadb://127.0.0.1:%d/%s"
+            + "?sslMode=TRUST"
+            + "&keyStore=%s"
+            + "&keyStorePassword=%s"
+            + "&keyStoreType=%s";
+
+    // Same as DB_URL_SSL_CLIENT_CERT but forces mysql_clear_password plugin so the
+    // HTTP-layer pre-authenticated session token arrives at the server in cleartext
+    // rather than scrambled by mysql_native_password. The server's AuthenticatorManager
+    // detects the DORIS_LOAD_SESSION: prefix and resolves the pre-authenticated identity
+    // without re-verifying the password.
+    private static final String DB_URL_SSL_CLIENT_CERT_CLEAR =
+            "jdbc:mariadb://127.0.0.1:%d/%s"
+            + "?sslMode=TRUST"
+            + "&keyStore=%s"
+            + "&keyStorePassword=%s"
+            + "&keyStoreType=%s"
+            + "&restrictedAuth=mysql_clear_password";
+
+    // SSL without client cert + forced cleartext password (for ssl_force_client_auth=false clusters).
+    private static final String DB_URL_SSL_TRUST_CLEAR =
+            "jdbc:mariadb://127.0.0.1:%d/%s"
+            + "?sslMode=TRUST"
+            + "&restrictedAuth=mysql_clear_password";
 
     private static final String[] copyResult = {"id", "state", "type", "msg", "loadedRows", "filterRows",
             "unselectRows", "url"};
@@ -113,15 +148,48 @@ public class StatementSubmitter {
         private ExecutionResultSet executeViaJdbc() throws Exception {
             Connection conn = null;
             Statement stmt = null;
-            // Use SSL when enable_ssl=true (MysqlProto rejects non-SSL connections in that case)
-            // OR when the credential is pre-resolved (OIDC/mTLS/LDAP) — MySQL protocol requires
-            // isClientUseSsl()=true to accept non-password credential types.
-            String urlPattern = (Config.enable_ssl || queryCtx.userIdentity != null)
-                    ? DB_URL_PATTERN_SSL : DB_URL_PATTERN;
-            String dbUrl = String.format(urlPattern, Config.query_port, ctx.getDatabase());
+            // Mirror MysqlProto.SERVER_USE_SSL exactly:
+            //   SERVER_USE_SSL = (enable_tls && MYSQL not excluded) || enable_ssl
+            // When the server requires SSL we must connect with sslMode=TRUST.
+            // When ssl_force_client_auth=true the server also demands a client cert —
+            // we present the FE's own server cert (same CA as the server trusts).
+            boolean serverRequiresSsl =
+                    (Config.enable_tls && TlsProtocolSet.isProtocolIncluded(
+                            TlsProtocolSet.Protocol.MYSQL))
+                    || Config.enable_ssl;
+
+            // When the HTTP layer already authenticated the user (mTLS/OIDC), userIdentity
+            // is set and the raw password is a JWT or empty — neither is a valid MySQL password.
+            // Create a short-lived load session token and use restrictedAuth=mysql_clear_password
+            // so the token arrives at AuthenticatorManager in cleartext (not scrambled by native
+            // password exchange) where it is resolved to the pre-authenticated identity.
+            String jdbcPassword = queryCtx.passwd;
+            boolean usePreAuthToken = queryCtx.userIdentity != null
+                    && !HttpAuthManager.isLoadSessionToken(queryCtx.passwd);
+            if (usePreAuthToken) {
+                jdbcPassword = HttpAuthManager.getInstance()
+                        .createLoadSession(queryCtx.userIdentity, Collections.emptySet());
+            }
+
+            String dbUrl;
+            if (!serverRequiresSsl) {
+                dbUrl = String.format(DB_URL_PLAIN, Config.query_port, ctx.getDatabase());
+            } else if (Config.ssl_force_client_auth) {
+                dbUrl = String.format(
+                        usePreAuthToken ? DB_URL_SSL_CLIENT_CERT_CLEAR : DB_URL_SSL_CLIENT_CERT,
+                        Config.query_port,
+                        ctx.getDatabase(),
+                        Config.mysql_ssl_default_server_certificate,
+                        Config.mysql_ssl_default_server_certificate_password,
+                        Config.ssl_trust_store_type);
+            } else {
+                dbUrl = usePreAuthToken
+                        ? String.format(DB_URL_SSL_TRUST_CLEAR, Config.query_port, ctx.getDatabase())
+                        : String.format(DB_URL_SSL_TRUST, Config.query_port, ctx.getDatabase());
+            }
             try {
                 Class.forName(JDBC_DRIVER);
-                conn = DriverManager.getConnection(dbUrl, queryCtx.user, queryCtx.passwd);
+                conn = DriverManager.getConnection(dbUrl, queryCtx.user, jdbcPassword);
                 long startTime = System.currentTimeMillis();
 
                 if (!queryCtx.clusterName.isEmpty()) {
