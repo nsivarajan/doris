@@ -28,6 +28,7 @@ import org.apache.doris.cluster.ClusterNamespace;
 import org.apache.doris.common.Config;
 import org.apache.doris.common.ErrorCode;
 import org.apache.doris.common.util.ClassLoaderUtils;
+import org.apache.doris.httpv2.HttpAuthManager;
 import org.apache.doris.mysql.MysqlAuthPacket;
 import org.apache.doris.mysql.MysqlChannel;
 import org.apache.doris.mysql.MysqlHandshakePacket;
@@ -234,6 +235,32 @@ public class AuthenticatorManager {
         if (preferredUserIdentity != null) {
             request = request.withUserIdentity(preferredUserIdentity);
         }
+
+        // Fast path: HTTP-layer pre-authenticated session token from StatementSubmitter.
+        // The token is delivered via mysql_clear_password plugin (restrictedAuth=mysql_clear_password
+        // in the JDBC URL), so it arrives here as a ClearPassword with the full DORIS_LOAD_SESSION:
+        // prefix intact. Resolve the pre-authenticated identity directly — no password verification.
+        if (request.getPassword() instanceof ClearPassword) {
+            String clearPwd = ((ClearPassword) request.getPassword()).getPassword();
+            if (HttpAuthManager.isLoadSessionToken(clearPwd)) {
+                HttpAuthManager.SessionValue sv =
+                        HttpAuthManager.getInstance().resolveLoadSession(clearPwd);
+                if (sv != null) {
+                    context.setCurrentUserIdentity(sv.currentUser);
+                    context.setRemoteIP(remoteIp);
+                    context.setAuthenticatedRoles(sv.authenticatedRoles);
+                    context.setIsTempUser(false);
+                    return true;
+                }
+                // Token expired (120s TTL) — reject cleanly rather than falling through
+                // to password/OIDC auth which would give a confusing "wrong password" error.
+                context.getState().setError(ErrorCode.ERR_ACCESS_DENIED_ERROR,
+                        "Session token expired — retry the request.");
+                MysqlProto.sendResponsePacket(context);
+                return false;
+            }
+        }
+
         if (debugEnabled) {
             long resolveElapsed = System.currentTimeMillis() - resolveStart;
             LOG.debug("resolvePassword: user={}, elapsed={}ms", userName, resolveElapsed);
