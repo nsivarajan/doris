@@ -394,55 +394,7 @@ public class BaseController {
             throw new UnauthorizedException("OIDC token received but authentication_chain is not configured");
         }
 
-
-        List<AuthenticationIntegrationMeta> chain;
-        try {
-            List<String> names = AuthenticationIntegrationAuthenticator
-                    .parseAuthenticationChain(chainConfig);
-            for (String name : names) {
-                AuthenticationIntegrationMeta meta = Env.getCurrentEnv()
-                        .getAuthenticationIntegrationMgr()
-                        .getAuthenticationIntegration(name);
-                if (meta == null) {
-                    continue;
-                }
-                // Accept integrations of type "mtls"
-                if ("mtls".equalsIgnoreCase(meta.getType())) {
-                    return true;
-                }
-                // Accept integrations that explicitly declare X509_CERTIFICATE credential_type
-                String credType = meta.getProperties().getOrDefault("credential_type", "");
-                if (CredentialType.X509_CERTIFICATE.equalsIgnoreCase(credType)) {
-                    return true;
-                }
-            }
-        } catch (Exception e) {
-            LOG.warn("Failed to inspect authentication_chain for X509 support: {}", e.getMessage());
-        }
-        return false;
-    }
-
-    /** Resolves integration names in the chain config to their metadata objects. */
-    private List<AuthenticationIntegrationMeta> resolveChain(String chainConfig)
-            throws UnauthorizedException {
-        try {
-            List<String> names = AuthenticationIntegrationAuthenticator
-                    .parseAuthenticationChain(chainConfig);
-            List<AuthenticationIntegrationMeta> chain = Lists.newArrayList();
-            for (String name : names) {
-                AuthenticationIntegrationMeta meta = Env.getCurrentEnv()
-                        .getAuthenticationIntegrationMgr()
-                        .getAuthenticationIntegration(name);
-                if (meta == null) {
-                    throw new UnauthorizedException("Authentication integration not found: " + name);
-                }
-                chain.add(meta);
-            }
-        } catch (UnauthorizedException e) {
-            throw e;
-        } catch (Exception e) {
-            throw new UnauthorizedException("Failed to resolve authentication_chain: " + e.getMessage());
-        }
+        List<AuthenticationIntegrationMeta> chain = resolveChain(Config.authentication_chain);
 
         AuthenticationRequest authRequest = AuthenticationRequest.builder()
                         .username(authInfo.fullUserName)
