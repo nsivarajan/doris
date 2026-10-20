@@ -54,7 +54,7 @@ import java.util.Objects;
  * The FDB read version (for fdbrestore consistency) is captured automatically
  * via create_meta_sync_point at checkpoint time — no operator input needed.
  */
-public class AdminCreateClusterSnapshotCommand extends Command implements NoForward {
+public class AdminCreateClusterSnapshotCommand extends Command implements ForwardWithSync {
 
     public static final String PROP_TTL = "ttl";
     public static final String PROP_LABEL = "label";
