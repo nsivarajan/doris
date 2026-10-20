@@ -29,6 +29,9 @@ public class ByteBufferNetworkInputStream extends InputStream {
     private ByteArrayInputStream currentInputStream;
     private volatile boolean finished = false;
     private volatile boolean closed = false;
+    // Non-null when the producer encountered an error — causes read() to throw IOException
+    // instead of returning -1, so callers (stream-load) abort rather than commit partial data.
+    private volatile IOException failureCause = null;
 
     public ByteBufferNetworkInputStream() {
         this(32);
@@ -56,6 +59,16 @@ public class ByteBufferNetworkInputStream extends InputStream {
         this.finished = true;
     }
 
+    /**
+     * Signal that the producer encountered an error before the normal end-of-data marker.
+     * Subsequent read() calls will throw an IOException rather than returning -1, so the
+     * consumer (stream-load HTTP request) aborts the load instead of committing partial data.
+     */
+    public void markFailed(String reason) {
+        this.failureCause = new IOException("Load data source failed: " + reason);
+        this.finished = true;
+    }
+
     private ByteArrayInputStream getNextByteArrayStream() throws IOException {
         if (currentInputStream == null || currentInputStream.available() == 0) {
             // No any byte array stream will come
@@ -68,6 +81,10 @@ public class ByteBufferNetworkInputStream extends InputStream {
                 } catch (InterruptedException e) {
                     throw new IOException("Failed to get next stream");
                 }
+            }
+            // finished=true — check if it was a clean finish or a failure
+            if (failureCause != null) {
+                throw failureCause;
             }
             return null;
         }
@@ -98,12 +115,9 @@ public class ByteBufferNetworkInputStream extends InputStream {
 
     public void close() throws IOException {
         closed = true;
-        ByteArrayInputStream stream = getNextByteArrayStream();
-        if (stream == null) {
-            return;
+        if (currentInputStream != null) {
+            currentInputStream.close();
         }
-        stream.close();
-
         while (!queue.isEmpty()) {
             queue.poll().close();
         }

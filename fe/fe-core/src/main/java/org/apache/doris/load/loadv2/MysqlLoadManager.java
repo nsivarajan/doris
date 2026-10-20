@@ -208,8 +208,12 @@ public class MysqlLoadManager {
             }
         } catch (Throwable t) {
             LOG.warn("Execute mysql load {} failed, msg: {}", loadId, t);
-            // drain the data from client conn util empty packet received, otherwise the connection will be reset
-            if (clientLocal && loadContextMap.containsKey(loadId) && !loadContextMap.get(loadId).isFinished()) {
+            // drain the data from client conn util empty packet received, otherwise the connection will be reset.
+            // Skip the drain on TLS errors — the TLS session is broken and fetchOnePacket() would hang.
+            if (isTlsError(t)) {
+                LOG.warn("TLS error on load {}, closing channel to avoid drain hang.", loadId);
+                context.getMysqlChannel().close();
+            } else if (clientLocal && loadContextMap.containsKey(loadId) && !loadContextMap.get(loadId).isFinished()) {
                 LOG.warn("Not drained yet, try reading left data from client connection for load {}.", loadId);
                 ByteBuffer buffer = context.getMysqlChannel().fetchOnePacket();
                 // MySql client will send an empty packet when eof
@@ -275,8 +279,12 @@ public class MysqlLoadManager {
             }
         } catch (Throwable t) {
             LOG.warn("Execute mysql load {} failed, msg: {}", loadId, t);
-            // drain the data from client conn util empty packet received, otherwise the connection will be reset
-            if (clientLocal && loadContextMap.containsKey(loadId) && !loadContextMap.get(loadId).isFinished()) {
+            // drain the data from client conn util empty packet received, otherwise the connection will be reset.
+            // Skip the drain on TLS errors — the TLS session is broken and fetchOnePacket() would hang.
+            if (isTlsError(t)) {
+                LOG.warn("TLS error on load {}, closing channel to avoid drain hang.", loadId);
+                context.getMysqlChannel().close();
+            } else if (clientLocal && loadContextMap.containsKey(loadId) && !loadContextMap.get(loadId).isFinished()) {
                 LOG.warn("Not drained yet, try reading left data from client connection for load {}.", loadId);
                 ByteBuffer buffer = context.getMysqlChannel().fetchOnePacket();
                 // MySql client will send an empty packet when eof
@@ -440,16 +448,49 @@ public class MysqlLoadManager {
                     inputStream.fillByteBuffer(buffer);
                     buffer = context.getMysqlChannel().fetchOnePacket();
                 }
+                if (buffer == null) {
+                    // fetchOnePacket returns null when the connection closed before the
+                    // end-of-file empty packet — partial data must not be committed (Bug C).
+                    inputStream.markFailed("connection closed before end of data");
+                    LOG.warn("Load {} aborted: client closed connection before sending end-of-data marker", loadId);
+                    return;
+                }
+                // Clean end: empty packet received — mark finished so stream-load commits.
                 if (loadContextMap.containsKey(loadId)) {
                     loadContextMap.get(loadId).setFinished(true);
                 }
+                inputStream.markFinished();
             } catch (IOException | InterruptedException e) {
                 LOG.warn("Failed fetch packet from mysql client for load: " + loadId, e);
+                inputStream.markFailed(e.getMessage());
                 throw new RuntimeException(e);
-            } finally {
-                inputStream.markFinished();
+            } catch (Throwable t) {
+                LOG.warn("Unexpected error reading mysql client data for load: " + loadId, t);
+                inputStream.markFailed(t.toString());
+                throw t;
             }
         });
+    }
+
+    // Returns true when the Throwable is a TLS-level error that leaves the SSLEngine in a broken
+    // state. In that case the drain loop must not be attempted — fetchOnePacket() would block
+    // forever waiting for data on a dead TLS session. When SSL is enabled, any read error from
+    // the MySQL channel is treated as fatal because the TLS session cannot be trusted after any
+    // framing or authentication failure.
+    private static boolean isTlsError(Throwable t) {
+        if (t instanceof javax.net.ssl.SSLException) {
+            return true;
+        }
+        if (t instanceof IOException) {
+            // Any IOException from the TLS read path (Bad packet sequence, BUFFER_UNDERFLOW,
+            // Tag mismatch, incomplete record, Bad packet sequence) leaves the TLS session in
+            // an undefined state — never try to drain more data from a broken session.
+            return Config.enable_ssl
+                    || (Config.enable_tls
+                        && org.apache.doris.tls.server.TlsProtocolSet.isProtocolIncluded(
+                            org.apache.doris.tls.server.TlsProtocolSet.Protocol.MYSQL));
+        }
+        return false;
     }
 
     private HttpPut generateRequestForMySqlLoad(

@@ -223,10 +223,20 @@ public class MysqlChannel implements BytesChannel {
         }
         if (remainingBuffer != null && remainingBuffer.hasRemaining()) {
             int oldLen = dstBuf.position();
-            while (dstBuf.hasRemaining()) {
+            int toCopy = Math.min(remainingBuffer.remaining(), dstBuf.remaining());
+            for (int i = 0; i < toCopy; i++) {
                 dstBuf.put(remainingBuffer.get());
             }
-            return dstBuf.position() - oldLen;
+            readLen = dstBuf.position() - oldLen;
+            if (!dstBuf.hasRemaining()) {
+                return readLen;
+            }
+            // SSL body mode: remaining bytes are in the next TLS record (ciphertext).
+            // Signal caller to read that record — never mix decrypted + raw bytes in dstBuf.
+            if (isSslMode && !isHeader) {
+                throw new IOException("SSL remainingBuffer exhausted mid-packet;"
+                        + " caller must read next TLS record");
+            }
         }
         try {
             while (dstBuf.remaining() != 0) {
@@ -244,9 +254,97 @@ public class MysqlChannel implements BytesChannel {
             if (LOG.isDebugEnabled()) {
                 LOG.debug("Read channel exception, ignore.", e);
             }
-            return 0;
+            return readLen;
         }
         return readLen;
+    }
+
+    /**
+     * Reads exactly {@code n} decrypted application bytes into {@code dst} in SSL mode.
+     * Serves bytes from {@code remainingBuffer} first; when exhausted, fetches and decrypts
+     * the next TLS record from the wire and refills {@code remainingBuffer}. Repeats until
+     * {@code n} bytes have been copied or the channel closes.
+     * Handles MySQL packets whose body straddles a TLS record boundary transparently.
+     *
+     * @return number of bytes actually read (< n only on clean channel close or error)
+     */
+    protected int readPlain(ByteBuffer dst, int n) throws IOException {
+        int remaining = n;
+        while (remaining > 0) {
+            if (remainingBuffer != null && remainingBuffer.hasRemaining()) {
+                int toCopy = Math.min(remainingBuffer.remaining(), remaining);
+                int savedLimit = dst.limit();
+                dst.limit(dst.position() + toCopy);
+                dst.put(remainingBuffer.array(),
+                        remainingBuffer.arrayOffset() + remainingBuffer.position(),
+                        toCopy);
+                remainingBuffer.position(remainingBuffer.position() + toCopy);
+                dst.limit(savedLimit);
+                remaining -= toCopy;
+                if (remaining == 0) {
+                    return n;
+                }
+            }
+            // remainingBuffer empty — fetch and decrypt the next TLS record.
+            sslHeaderByteBuffer.clear();
+            int headerRead = 0;
+            while (headerRead < SSL_PACKET_HEADER_LEN) {
+                int ret = Channels.readBlocking(conn.getSourceChannel(), sslHeaderByteBuffer,
+                        context.getNetReadTimeout(), TimeUnit.SECONDS);
+                if (ret == -1) {
+                    return n - remaining;
+                }
+                headerRead += ret;
+            }
+            int tlsBodyLen = packetLen(true);
+            // Size the buffer to hold the full TLS record: 5-byte header + body.
+            // sslEngine.unwrap() requires the complete record (header + body) to
+            // verify the MAC — passing body-only causes BUFFER_UNDERFLOW or Tag mismatch.
+            int tlsRecordLen = SSL_PACKET_HEADER_LEN + tlsBodyLen;
+            ByteBuffer tlsBuf = (tlsRecordLen <= tempBuffer.capacity())
+                    ? tempBuffer : ByteBuffer.allocate(tlsRecordLen);
+            tlsBuf.clear();
+            // Prepend the TLS record header (already in sslHeaderByteBuffer) so
+            // sslEngine.unwrap() receives the full record, matching how the outer
+            // fetchOnePacket() loop feeds result.put(sslHeaderByteBuffer.array()) + body.
+            tlsBuf.put(sslHeaderByteBuffer.array(), 0, SSL_PACKET_HEADER_LEN);
+            tlsBuf.limit(tlsRecordLen);
+            int bodyRead = 0;
+            while (bodyRead < tlsBodyLen) {
+                int ret = Channels.readBlocking(conn.getSourceChannel(), tlsBuf,
+                        context.getNetReadTimeout(), TimeUnit.SECONDS);
+                if (ret == -1) {
+                    return n - remaining;
+                }
+                bodyRead += ret;
+            }
+            // Decrypt the TLS record body into decryptAppData, then load remainingBuffer.
+            tlsBuf.flip();
+            decryptAppData.clear();
+            // Retry unwrap on BUFFER_OVERFLOW (handleUnwrapResult grows decryptAppData and
+            // returns false). BUFFER_UNDERFLOW means the record is incomplete — treat as an
+            // error rather than throwing IllegalStateException from handleUnwrapResult.
+            SSLEngineResult unwrapResult = sslEngine.unwrap(tlsBuf, decryptAppData);
+            if (unwrapResult.getStatus() == SSLEngineResult.Status.BUFFER_UNDERFLOW) {
+                throw new IOException("TLS BUFFER_UNDERFLOW in readPlain: incomplete record");
+            }
+            while (!handleUnwrapResult(unwrapResult)) {
+                unwrapResult = sslEngine.unwrap(tlsBuf, decryptAppData);
+                if (unwrapResult.getStatus() == SSLEngineResult.Status.BUFFER_UNDERFLOW) {
+                    throw new IOException("TLS BUFFER_UNDERFLOW in readPlain: incomplete record");
+                }
+            }
+            decryptAppData.flip();
+            // Grow remainingBuffer if the decrypted record is larger than 16 KB.
+            if (decryptAppData.remaining() > remainingBuffer.capacity()) {
+                remainingBuffer = ByteBuffer.allocate(decryptAppData.remaining() * 2);
+            } else {
+                remainingBuffer.clear();
+            }
+            remainingBuffer.put(decryptAppData);
+            remainingBuffer.flip();
+        }
+        return n;
     }
 
     @Override
@@ -322,6 +420,9 @@ public class MysqlChannel implements BytesChannel {
 
         while (true) {
             int packetLen;
+            // Track whether the MySQL header came from remainingBuffer (decrypted bytes left
+            // over from a previous TLS record) so we know whether to use readPlain for the body.
+            boolean fromRemainingBuffer = false;
             // one SSL packet may include multiple Mysql packets, we use remainingBuffer to store them.
             if ((isSslMode || isSslHandshaking) && !remainingBuffer.hasRemaining()) {
                 if (remainingBuffer.position() != 0) {
@@ -341,8 +442,16 @@ public class MysqlChannel implements BytesChannel {
                 result.put(sslHeaderByteBuffer.array());
                 packetLen = packetLen(true);
             } else {
+                fromRemainingBuffer = isSslMode; // SSL data came from remainingBuffer
                 headerByteBuffer.clear();
-                readLen = readAll(headerByteBuffer, true);
+                if (isSslMode) {
+                    // In SSL mode the 4-byte MySQL header may straddle a TLS record boundary.
+                    // readPlain() handles that transparently; readAll() would read raw encrypted
+                    // bytes for the missing header bytes and produce a bogus sequence id error.
+                    readLen = readPlain(headerByteBuffer, PACKET_HEADER_LEN);
+                } else {
+                    readLen = readAll(headerByteBuffer, true);
+                }
                 if (readLen != PACKET_HEADER_LEN) {
                     // remote has close this channel
                     if (LOG.isDebugEnabled()) {
@@ -361,7 +470,15 @@ public class MysqlChannel implements BytesChannel {
             // read one physical packet
             // before read, set limit to make read only one packet
             result.limit(result.position() + packetLen);
-            readLen = readAll(result, false);
+            if (fromRemainingBuffer) {
+                // Header came from remainingBuffer: body may straddle the next TLS record.
+                // readPlain() fetches and decrypts more records as needed without mixing
+                // raw ciphertext into the already-decrypted buffer.
+                readLen = readPlain(result, packetLen);
+            } else {
+                // Fresh TLS record path or non-SSL: body is read and decrypted by readAll.
+                readLen = readAll(result, false);
+            }
             if (isSslMode && remainingBuffer.position() == 0 && result.hasRemaining()) {
                 int available = result.limit();
                 if (available < PACKET_HEADER_LEN) {
@@ -383,6 +500,11 @@ public class MysqlChannel implements BytesChannel {
                 // remove mysql packet header
                 result.position(4);
                 result.compact();
+                // compact() sets limit=capacity; clamp it to the actual data length so the
+                // "mysqlPacketLength > result.limit()" check below compares against real bytes
+                // not buffer capacity. Without this a packet that continues into the next TLS
+                // record passes the check as false and the extra bytes corrupt the stream (Bug A).
+                result.limit(result.position());
                 // when encounter large sql query, one mysql packet will be packed as multiple ssl packets.
                 // we need to read all ssl packets to combine the complete mysql packet.
                 while (mysqlPacketLength > result.limit()) {
@@ -398,22 +520,31 @@ public class MysqlChannel implements BytesChannel {
                     tempBuffer.clear();
                     tempBuffer.put(sslHeaderByteBuffer.array());
                     packetLen = packetLen(true);
-                    LOG.info("one ssl packet length is: " + packetLen);
+                    if (LOG.isDebugEnabled()) {
+                        LOG.debug("one ssl packet length is: " + packetLen);
+                    }
                     tempBuffer = expandPacket(tempBuffer, packetLen);
                     result = expandPacket(result, tempBuffer.capacity());
                     // read one physical packet
                     // before read, set limit to make read only one packet
                     tempBuffer.limit(tempBuffer.position() + packetLen);
                     readLen = readAll(tempBuffer, false);
+                    // Note: readAll() ends in decryptData() which already calls dstBuf.flip(),
+                    // leaving tempBuffer at position=0 limit=decryptedBytes. Do NOT flip again
+                    // here — a second flip() would set limit=0 and result.put() would copy nothing.
                     result.put(tempBuffer);
                     result.limit(result.position());
-                    LOG.info("result is pos: " + result.position() + ", limit: "
-                            + result.limit() + "capacity: " + result.capacity());
+                    if (LOG.isDebugEnabled()) {
+                        LOG.debug("result is pos: " + result.position() + ", limit: "
+                                + result.limit() + " capacity: " + result.capacity());
+                    }
                 }
                 if (mysqlPacketLength < result.position()) {
-                    LOG.info("one SSL packet has multiple mysql packets.");
-                    LOG.info("mysql packet length is " + mysqlPacketLength + ", result is pos: "
-                            + result.position() + ", limit: " + result.limit() + "capacity: " + result.capacity());
+                    if (LOG.isDebugEnabled()) {
+                        LOG.debug("one SSL packet has multiple mysql packets.");
+                        LOG.debug("mysql packet length is " + mysqlPacketLength + ", result is pos: "
+                                + result.position() + ", limit: " + result.limit() + " capacity: " + result.capacity());
+                    }
                     result.flip();
                     result.position(mysqlPacketLength);
                     remainingBuffer.clear();
