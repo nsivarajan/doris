@@ -213,7 +213,10 @@ public class FEOpExecutor {
 
         // Propagate the client's CLIENT_DEPRECATE_EOF capability so the master FE
         // generates packets matching the original client's protocol expectations.
-        params.setClientDeprecatedEOF(ctx.getMysqlChannel().clientDeprecatedEOF());
+        // Arrow Flight SQL contexts have no MySQL channel — skip for non-MySQL connections.
+        if (ctx.getConnectType() == ConnectContext.ConnectType.MYSQL) {
+            params.setClientDeprecatedEOF(ctx.getMysqlChannel().clientDeprecatedEOF());
+        }
 
         return params;
     }
